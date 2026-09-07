@@ -1,0 +1,33 @@
+# Boot values. Changing anything here requires a daemon restart (relaunch `python -m app`).
+# Live settings (start page, refresh, time format, rows per page, module toggles)
+# are seeded from [ui] on first start and edited from the Settings page afterwards.
+
+[server]
+host = "127.0.0.1"
+port = 8765
+
+[scheduler]
+tick_seconds = 5
+max_concurrent = 3
+drain_seconds = 30
+
+[claude]
+binary = "C:/Users/gudo/.local/bin/claude.exe"
+model = "default"            # "default" leaves the CLI's own model choice alone
+sessions_kept_days = 30
+
+[data]
+db = "data/otto.db"
+workspace = "data/workspace"  # cwd for every Claude session; file tools are confined to it
+
+[nightly]
+window = "02:00-05:00"        # local time; scheduled LLM tasks only run inside it
+max_sessions = 3              # headless runs per day, all tasks combined
+max_turns = 20                # per run
+max_minutes = 15              # per run; the process is killed past this
+
+[ui]
+start_page = "home"
+refresh_seconds = 30
+time_format = "24h"
+page_size = 40

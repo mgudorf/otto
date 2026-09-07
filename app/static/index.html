@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Otto</title>
+<style>
+@font-face{font-family:Inter;font-weight:400;font-display:swap;src:url(vendor/fonts/inter_5.3.0_latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:Inter;font-weight:500;font-display:swap;src:url(vendor/fonts/inter_5.3.0_latin-500-normal.woff2) format("woff2")}
+@font-face{font-family:Inter;font-weight:600;font-display:swap;src:url(vendor/fonts/inter_5.3.0_latin-600-normal.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:400;font-display:swap;src:url(vendor/fonts/jetbrains-mono_5.3.0_latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:500;font-display:swap;src:url(vendor/fonts/jetbrains-mono_5.3.0_latin-500-normal.woff2) format("woff2")}
+html,body{margin:0;height:100%;background:#101114;color:#e6e7ea}
+*{box-sizing:border-box;scrollbar-width:none}
+*::-webkit-scrollbar{display:none}
+textarea,input,select,button{outline:none;font:inherit;color:inherit}
+a{color:#e6e7ea}
+.row:hover{background:#202329 !important}
+.trow:hover{background:#16181c}
+.ring:hover{box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)}
+.dim-hover:hover{color:#8b8f98 !important}
+.bright-hover:hover{color:#e6e7ea !important}
+input:focus,textarea:focus{box-shadow:0 0 0 1px var(--hue,#8b8f98)}
+select{background:#23262c;border:0;border-radius:6px;padding:4px 8px;font-size:13px}
+@keyframes otto-load{0%{transform:translateX(-100%)}100%{transform:translateX(340%)}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="shell.js"></script>
+</body>
+</html>

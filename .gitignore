@@ -11,3 +11,5 @@ app/.browser-profile/
 .pytest_cache/
 data/sessions/
 data/backups/
+data/*.log
+data/workspace/
