@@ -60,23 +60,27 @@ def ensure_daemon(config: Config) -> dict:
     return h
 
 
-def edge_path() -> str:
+def chrome_path() -> str:
     import winreg
 
     for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
         try:
-            with winreg.OpenKey(hive, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe") as k:
+            with winreg.OpenKey(hive, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe") as k:
                 return winreg.QueryValue(k, None)
         except OSError:
             continue
-    sys.exit("Microsoft Edge not found in App Paths")
+    sys.exit("Google Chrome not found in App Paths")
 
 
 def open_window(config: Config) -> None:
-    profile = config.root / "app" / ".browser-profile"
+    """Google Chrome in app mode on its own profile; no first-run, default-browser or sync prompts."""
+    profile = config.root / "app" / ".chrome-profile"
     profile.mkdir(exist_ok=True)
     subprocess.Popen(
-        [edge_path(), f"--app={config.url}/", f"--user-data-dir={profile}", "--no-first-run", "--no-default-browser-check"],
+        [
+            chrome_path(), f"--app={config.url}/", f"--user-data-dir={profile}",
+            "--no-first-run", "--no-default-browser-check", "--disable-sync",
+        ],
         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True,
     )

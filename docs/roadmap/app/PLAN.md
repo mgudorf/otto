@@ -23,7 +23,7 @@ Design imported 2026-09-07 from Claude Design project `9459ddf2-3c53-45d8-9252-7
 | # | Decision | Why |
 |---|---|---|
 | 1 | Daemon in Python 3.14: FastAPI + uvicorn, bound to `127.0.0.1` only | One small async process serves the scheduler, JSON routes, static files and event streams; the venv already exists |
-| 2 | Window is Microsoft Edge in app mode (`--app=http://127.0.0.1:<port>`) with its own profile in `app/.browser-profile/` | Already installed; the window is a throwaway client; no tray app, no WebView2 wrapper to maintain |
+| 2 | Window is Google Chrome in app mode (`--app=http://127.0.0.1:<port>`) on its own profile in `app/.chrome-profile/`, with first-run, default-browser and sync prompts disabled | Installed; the window is a throwaway client; no tray app, no WebView2 wrapper to maintain. The app never touches Microsoft Edge |
 | 3 | Frontend has no build step: static ES modules, Preact + htm vendored as two files, inline style objects | No Node on this machine; the artboard is React-shaped with inline styles and ports 1:1; a module page is one file that can be deleted |
 | 4 | One SQLite file `data/otto.db` in WAL mode holds jobs, tasks, settings, sessions and module data | Durable job records are a hard requirement; the path is already gitignored |
 | 5 | Scheduler and job runner are hand-rolled on asyncio | The spec is exactly one table, one queue, per-resource locks, one cap; a scheduling library would be a second source of truth for schedules |
@@ -33,7 +33,7 @@ Design imported 2026-09-07 from Claude Design project `9459ddf2-3c53-45d8-9252-7
 | 9 | Module tools reach Claude through two MCP servers inside the daemon: `/mcp/read` (read tools only, handed to scheduled runs) and `/mcp/full` (read and write tools, sessions only) | The read-only client for scheduled work is a separate endpoint, not a convention; a leaked config still cannot write |
 | 10 | One session per module, with slash commands: `/clear` is handled by the daemon (close, tag, start fresh), any other `/name` text is passed through to the CLI as a Claude Code command | Tabs were deferred by decision; slash commands keep the CLI's own commands reachable from the pane |
 
-Rejected: Vite / React / TypeScript (needs Node and a build), APScheduler, pywebview, an Anthropic API key, paid search APIs, a graph database, the `claude-agent-sdk` package (the CLI alone covers every call).
+Rejected: Vite / React / TypeScript (needs Node and a build), APScheduler, pywebview, Microsoft Edge, an Anthropic API key, paid search APIs, a graph database, the `claude-agent-sdk` package (the CLI alone covers every call).
 
 ## Layout
 
@@ -256,7 +256,7 @@ Present and in use:
 | fastapi 0.141.1, uvicorn 0.52.4, mcp 2.2.0, httpx 0.28.1, pytest 9.1.1 | `requirements.txt` | routes and static files; ASGI server; MCP tool servers; health check and tests; tests |
 | git | 2.55.0 | revision history |
 | Claude Code CLI | 2.1.263, `C:\Users\gudo\.local\bin\claude.exe`; `claude auth status` reports claude.ai login, subscription max | every LLM call |
-| Microsoft Edge | `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`, found through the App Paths registry key | the window |
+| Google Chrome | `C:\Program Files\Google\Chrome\Application\chrome.exe`, found through the App Paths registry key | the window |
 | Task Scheduler | `schtasks.exe` / `Register-ScheduledTask` | logon start |
 | SQLite with FTS5 | 3.50.4 via stdlib `sqlite3` | the store; memory search |
 | Vendored files | `app/static/vendor/`: preact.mjs, htm.mjs, Inter 400 / 500 / 600, JetBrains Mono 400 / 500; all match `SHA256SUMS` | frontend without a build; type |

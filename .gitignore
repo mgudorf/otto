@@ -13,3 +13,4 @@ data/sessions/
 data/backups/
 data/*.log
 data/workspace/
+app/.chrome-profile/
