@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+*.bak
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/secrets/
+app/.browser-profile/
+.claude/settings.local.json
+.pytest_cache/
+data/sessions/
+data/backups/
