@@ -14,9 +14,11 @@ from app.store import Store, iso, parse
 router = APIRouter(prefix="/api/email")
 
 RESOURCE = "gmail"
-CHIPS = ("All", "Unread", "Flagged")
+CHIPS = ("All", "Unread", "Flagged", "Priority")
 CHIP_LABELS = {"All": (), "Unread": ("UNREAD",), "Flagged": ("STARRED",)}
+PRIORITIES = ("high", "normal", "low")
 HAS = "EXISTS (SELECT 1 FROM json_each(m.labels) WHERE value = ?)"
+HIGH = "m.id IN (SELECT message_id FROM email_triage WHERE priority = 'high')"
 # verb -> (labels added, labels removed, event verb)
 VERBS = {
     "archive": ((), ("INBOX",), "archived"),
@@ -38,6 +40,8 @@ def _where(query: str, chip: str) -> tuple[str, list]:
     for label in CHIP_LABELS.get(chip, ()):
         where.append(HAS)
         params.append(label)
+    if chip == "Priority":
+        where.append(HIGH)
     if query.strip():
         where.append("m.n IN (SELECT rowid FROM email_fts WHERE email_fts MATCH ?)")
         params.append(_fts(query))
@@ -106,6 +110,7 @@ def blank(request: Request) -> dict:
         "inbox": _count(store, "INBOX"),
         "unread": _count(store, "INBOX", "UNREAD"),
         "flagged": _count(store, "INBOX", "STARRED"),
+        "priority": store.scalar(f"SELECT COUNT(*) FROM email_messages m WHERE {HAS} AND {HIGH}", ("INBOX",)),
         "last_sync": store.scalar("SELECT last_run FROM tasks WHERE name = 'email.sync'"),
     }
 
@@ -138,11 +143,14 @@ def item(store: Store, message_id: str) -> dict:
     actions.append({"verb": "unstar", "label": "Unstar"} if starred else {"verb": "star", "label": "Star"})
     actions.append({"verb": "open", "label": "Open in Gmail", "href": f"https://mail.google.com/mail/u/0/#all/{message_id}"})
     body = r["body_text"] if r["body_text"] is not None else r["snippet"]
+    tri = store.one("SELECT priority, reason FROM email_triage WHERE message_id = ?", (message_id,))
     return {
         "id": r["id"], "module": "email", "kind": "email",
         "subject": r["subject"], "from_name": r["from_name"], "from_addr": r["from_addr"], "to_addr": r["to_addr"],
         "created_at": r["internal_date"], "text": f"{r['subject']}\n\n{body}",
-        "unread": unread, "starred": starred, "in_inbox": in_inbox, "actions": actions,
+        "unread": unread, "starred": starred, "in_inbox": in_inbox,
+        "priority": tri["priority"] if tri else None, "reason": tri["reason"] if tri else None,
+        "actions": actions,
     }
 
 
@@ -209,7 +217,14 @@ def context(store: Store, registry) -> str:
     b = {"inbox": _count(store, "INBOX"), "unread": _count(store, "INBOX", "UNREAD"), "flagged": _count(store, "INBOX", "STARRED")}
     last = store.scalar("SELECT last_run FROM tasks WHERE name = 'email.sync'")
     newest = store.query(f"SELECT m.id, m.from_name, m.subject FROM email_messages m WHERE {HAS} ORDER BY m.internal_date DESC LIMIT 10", ("INBOX",))
+    high = store.query(
+        f"SELECT m.id, m.subject, t.reason FROM email_messages m JOIN email_triage t ON t.message_id = m.id "
+        f"WHERE {HAS} AND t.priority = 'high' ORDER BY m.internal_date DESC LIMIT 10", ("INBOX",)
+    )
     lines = [f"Inbox: {b['inbox']} messages, {b['unread']} unread, {b['flagged']} starred. Last sync: {last or 'never'}."]
     lines.append("Newest in inbox (id, from, subject):")
     lines += [f"  {r['id']} {r['from_name']}: {r['subject'][:120]}" for r in newest] or ["  none"]
+    if high:
+        lines.append("Flagged high (id, subject, reason):")
+        lines += [f"  {r['id']} {r['subject'][:80]}: {r['reason'][:120]}" for r in high]
     return "\n".join(lines)

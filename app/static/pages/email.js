@@ -44,7 +44,8 @@ export function Middle({ app, data, mod, fmt }) {
       app.refresh();
     };
     const line = item && !item.error
-      ? html`<div style=${{ ...mono13, color: T.muted, wordBreak: 'break-word' }}>${`${item.from_name} <${item.from_addr}> → ${item.to_addr}`}</div>`
+      ? html`<div style=${{ ...mono13, color: T.muted, wordBreak: 'break-word' }}>${`${item.from_name} <${item.from_addr}> → ${item.to_addr}`}
+          ${item.priority && html`<div style=${{ color: item.priority === 'high' ? hue : T.dim, marginTop: 4 }}>${item.priority} · ${item.reason}</div>`}</div>`
       : null;
     return html`<${Inspector} app=${app} item=${item} mod=${mod} fmt=${fmt} onAction=${act}>${line}<//>`;
   }
@@ -58,7 +59,7 @@ export function Middle({ app, data, mod, fmt }) {
   };
   const n = fmtInt(l.total);
   return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 720 }}>
-    <div style=${{ ...mono13, color: T.dim }}>${fmtInt(b.inbox)} in inbox · ${fmtInt(b.unread)} unread · ${fmtInt(b.flagged)} flagged · synced ${b.last_sync ? stamp(b.last_sync, fmt) : 'never'}</div>
+    <div style=${{ ...mono13, color: T.dim }}>${fmtInt(b.inbox)} in inbox · ${fmtInt(b.unread)} unread · ${fmtInt(b.flagged)} flagged · ${fmtInt(b.priority)} priority · synced ${b.last_sync ? stamp(b.last_sync, fmt) : 'never'}</div>
     <div style=${{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
       <span style=${{ flex: 1, minWidth: 0, color: l.total ? T.text : T.dim }}>${n} matching${app.state.query ? ` “${app.state.query}”` : ''} · ${l.chip}</span>
       <${Button} label="Mark read" onClick=${() => bulk('read')} />

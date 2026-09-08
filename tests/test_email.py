@@ -10,16 +10,24 @@ import httpx
 import pytest
 
 import app.modules.email.gmail as gmail
-from app.config import ROOT, Email
+from app.claude import ClaudeRunner
+from app.config import ROOT, Email, Nightly
 from app.daemon import build
+from app.modules import Registry
 from app.modules.email import MANIFEST
 from app.modules.email.gmail import SCOPE, GmailRead, GmailWrite
-from app.modules.email.tasks import sync
+from app.modules.email.tasks import sync, triage
 from app.modules.email.tools import register
 from app.runner import Runner
 from app.store import iso, now
-from tests.conftest import run
+from tests.conftest import fake_spawn, run
 from tests.test_app import client_for
+
+TRIAGE = json.dumps({
+    "type": "result", "subtype": "success", "is_error": False, "session_id": "s9",
+    "result": '[{"id": "m3", "priority": "high", "reason": "Contract needs a signature."}, '
+              '{"id": "m2", "priority": "low", "reason": "Social."}, {"id": "zzz", "priority": "high", "reason": "unknown id"}]',
+})
 
 EMAIL_DIR = ROOT / "app" / "modules" / "email"
 FORBIDDEN = {"GmailWrite", "write_client", "modify", "batchModify", "trash", "delete"}
@@ -195,7 +203,7 @@ def test_email_actions(email_config, fake):
             assert (await c.get("/api/email/item/m3")).json()["unread"] is False
 
             blank = (await c.get("/api/email/blank")).json()
-            assert (blank["inbox"], blank["unread"], blank["flagged"]) == (1, 0, 1)
+            assert (blank["inbox"], blank["unread"], blank["flagged"], blank["priority"]) == (1, 0, 1, 0)
             numbers = (await c.get("/api/home/numbers")).json()
             assert next(n for n in numbers if n["module"] == "email")["value"] == 0
             ev = (await c.get("/api/events?module=email")).json()
@@ -205,3 +213,45 @@ def test_email_actions(email_config, fake):
         app.state.store.close()
 
     run(main())
+
+
+def test_email_triage(store, email_config, fake):
+    store.migrate((EMAIL_DIR / "schema.sql").read_text("utf-8"))
+    cfg = dataclasses.replace(email_config, nightly=Nightly(window="00:00-23:59", max_sessions=3, max_turns=5, max_minutes=1))
+    calls = []
+
+    async def main():
+        reg = Registry()
+        reg.load()
+        claude = ClaudeRunner(cfg, store, reg, "http://test", spawn_fn=fake_spawn([TRIAGE], calls))
+        r = Runner(store, cfg, reg, claude)
+        await r.start()
+        await r.submit("email.sync", "email", "gmail", "scheduled", sync).done
+        assert await r.submit("email.triage", "email", "email", "scheduled", triage).done == "2 triaged, 1 high"
+        rows = store.query("SELECT message_id, priority, source FROM email_triage ORDER BY message_id")
+        assert rows == [{"message_id": "m2", "priority": "low", "source": "scheduled"}, {"message_id": "m3", "priority": "high", "source": "scheduled"}]
+        assert store.cursor("email.triage") and store.scalar("SELECT COUNT(*) FROM llm_runs WHERE status = 'done'") == 1
+        args = calls[0]["args"]
+        allowed = args[args.index("--allowedTools") + 1]
+        assert "mcp__otto-read__email_search" in allowed and "email_flag" not in allowed
+        # m1 is the only untriaged message left; the canned reply names m3 and m2 again, so nothing new lands
+        assert await r.submit("email.triage", "email", "email", "scheduled", triage).done == "0 triaged, 0 high"
+        await r.drain(1)
+
+    run(main())
+    read, full = [], []
+
+    class Srv:
+        def __init__(self, names):
+            self.names = names
+
+        def tool(self):
+            return lambda f: (self.names.append(f), f)[1]
+
+    register(Srv(read), Srv(full), store, email_config)
+    flag = next(f for f in full if f.__name__ == "email_flag")
+    assert flag("m1", "high", "Invoice is due.") == {"id": "m1", "priority": "high"}
+    assert flag("m1", "bogus", "") ["error"].startswith("priority must be")
+    high = next(f for f in read if f.__name__ == "email_triage")()
+    assert [(h["id"], h["source"]) for h in high] == [("m3", "scheduled"), ("m1", "session")]
+    assert store.one("SELECT verb FROM events WHERE module = 'email' ORDER BY id DESC")["verb"] == "flagged"

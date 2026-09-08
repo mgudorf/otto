@@ -1,10 +1,16 @@
-"""Scheduled work: mirror Gmail into email_messages. Only the read client is reachable from here."""
+"""Scheduled work: mirror Gmail into email_messages, and triage the inbox overnight.
+
+Only the read client is reachable from here; triage writes Otto's own table, never Gmail.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import json
 
 from app.modules.email.gmail import GmailError, read_client
+from app.modules.email.routes import HAS, PRIORITIES
+from app.runner import Skipped
 from app.store import now_iso
 
 FETCH_CONCURRENCY = 10   # metadata requests in flight; Gmail allows about 50 gets per second per user
@@ -77,3 +83,49 @@ async def _incremental(ctx, gm, cursor: str) -> str:
     if not rows and not deleted:
         return "no changes"
     return f"{len(rows)} updated, {len(deleted)} removed"
+
+
+# ---- triage ----------------------------------------------------------------------------------
+def _json_array(raw: str) -> list:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        text = text[text.find("["):]
+    start, end = text.find("["), text.rfind("]")
+    if start < 0 or end < 0:
+        raise ValueError(f"no JSON array in reply: {raw[:200]!r}")
+    return json.loads(text[start:end + 1])
+
+
+async def triage(ctx) -> str:
+    batch = ctx.config.email.triage_batch
+    rows = ctx.store.query(
+        f"SELECT m.id, m.from_name, m.from_addr, m.subject, m.snippet FROM email_messages m WHERE {HAS} "
+        "AND m.id NOT IN (SELECT message_id FROM email_triage) ORDER BY m.internal_date DESC LIMIT ?",
+        ("INBOX", batch),
+    )
+    if not rows:
+        return Skipped("nothing untriaged in the inbox")
+    prompt = "\n".join([
+        "Triage these inbox messages for the owner, given as (id, from, subject) snippet:",
+        *[f"- ({r['id']}, {r['from_name']} <{r['from_addr']}>, {r['subject'][:120]}) {r['snippet'][:200]}" for r in rows],
+        "",
+        "Reply with only a JSON array, one element per message: {\"id\": the id, \"priority\": \"high\" | \"normal\" | \"low\", \"reason\": one short sentence}.",
+        "high: needs the owner's action or reply soon. normal: worth reading. low: promotions, notifications, newsletters.",
+    ])
+    raw = await ctx.run_task(prompt, tools=("email_search", "email_get"))
+    ids = {r["id"] for r in rows}
+    ts = now_iso()
+    done = high = 0
+    with ctx.commit(cursor=("email.triage", ts)) as conn:
+        for it in _json_array(raw):
+            mid, priority = str(it.get("id", "")), str(it.get("priority", "")).lower()
+            if mid not in ids or priority not in PRIORITIES:
+                continue
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO email_triage(message_id, priority, reason, ts, source) VALUES (?, ?, ?, ?, 'scheduled')",
+                (mid, priority, str(it.get("reason", "")).strip()[:300], ts),
+            )
+            done += cur.rowcount
+            high += cur.rowcount if priority == "high" else 0
+    return f"{done} triaged, {high} high"
