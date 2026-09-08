@@ -6,8 +6,9 @@ disable-model-invocation: yes
 
 # Sync ARCHITECTURE.md with main
 
-Makes `docs/ARCHITECTURE.md` the one document of Otto's current state, then removes the
-roadmap plans that state now covers. Runs on `main` after a merge, never in a worktree.
+Makes `docs/ARCHITECTURE.md` the one document of Otto's current state, records every defect
+and gap in `docs/defects/`, then removes the roadmap plans that state now covers. Runs on
+`main` after a merge, never in a worktree.
 
 ## Do this
 
@@ -27,12 +28,19 @@ roadmap plans that state now covers. Runs on `main` after a merge, never in a wo
      history or plans: current functionality only, tables and bullets, one code name per
      sentence at most.
    - Keep the UI section's pointer to the design project and `docs/design/`.
-4. For **partial** plans, cut the built phases down to one line each, `built; see
+4. Record every defect and gap in `docs/defects/<slug>.md`, one file each, in this shape:
+   `# <Title>`, then `- Kind: defect | gap`, `- Where: <file or requirement>`,
+   `- Found: <date>, sync-architecture`, `- Status: open | owner action | deferred by the owner`,
+   then one paragraph each for `What happens:`, `Expected:`, `Fix:`. A defect is anything the
+   code does wrong; a gap is a requirement or artboard element `main` does not meet yet.
+   Update the file if it already exists. Read the existing files first: one whose defect is
+   gone from `main` joins the removal list in step 6.
+5. For **partial** plans, cut the built phases down to one line each, `built; see
    ARCHITECTURE.md`, so the plan carries only what remains.
-5. List the **absorbed** plans and ask for an explicit yes. Then `git rm -r docs/roadmap/<slug>`
-   for each; never a bare `rm`. Git history keeps them.
-6. Commit: `Sync ARCHITECTURE.md with main; retire <slugs>`. Reply with what changed in the
-   doc and which plans were retired or trimmed.
+6. List the **absorbed** plans and the closed defect files and ask for an explicit yes. Then
+   `git rm` each; never a bare `rm`. Git history keeps them.
+7. Commit: `Sync ARCHITECTURE.md with main; retire <slugs>`. Reply with what changed in the
+   doc, which defects were added or closed, and which plans were retired or trimmed.
 
 ## Rules
 
@@ -40,7 +48,9 @@ roadmap plans that state now covers. Runs on `main` after a merge, never in a wo
 - Never paste a plan into ARCHITECTURE.md. Compress to what a new agent needs to work on
   the code; a section longer than the module's own agent.md is too long.
 - Do not edit code during a sync. If the doc and the code disagree, the doc changes; a real
-  defect is reported in the reply, not fixed here.
+  defect gets a file in `docs/defects/` and a line in the reply, never a fix here.
+- ARCHITECTURE.md states what the code does; the divergence from a requirement lives only in
+  `docs/defects/`. Do not write "not yet" or "deferred" notes into the doc.
 - Do not touch plans whose work sits in an unmerged worktree, and do not retire a partial
   plan.
 - Do not remove or soften a Daemon requirement because the code does not meet it yet;

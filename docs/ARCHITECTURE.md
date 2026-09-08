@@ -7,7 +7,7 @@ The middle is the main interaction/use of the module, which displays the main ou
 
 ### What runs today
 
-Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps every module's state current on a schedule; the window renders that state and holds none of it. One session per module is open at a time (tabs deferred by decision); `/clear` closes it, tags it, and starts a fresh one.
+Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps every module's state current on a schedule; the window renders that state and holds none of it. One session per module is open at a time; `/clear` closes it, tags it, and starts a fresh one. Known defects and gaps against the requirements live in `docs/defects/`, one file each.
 
 | Piece | What it is |
 |---|---|
@@ -18,7 +18,7 @@ Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps 
 | Frontend | static ES modules, Preact + htm vendored, inline styles ported from the artboard; no build step, no Node |
 | Modules built | Home, Memory, System (tasks only, no page). The rail shows only modules whose package exists |
 
-Run: `python -m app` checks the port and code revision, starts or restarts the daemon, then opens the window. `python -m app setup` registers the Windows Task Scheduler entry `Otto` that starts the daemon at logon (not yet run on this machine). `python -m app status` prints health. Tests: `.venv/Scripts/python.exe -m pytest -q`, offline; the CLI is mocked at `app.claude.spawn` and a real invocation raises.
+Run: `python -m app` checks the port and code revision, starts or restarts the daemon, then opens the window. `python -m app setup` registers the Windows Task Scheduler entry `Otto` that starts the daemon at logon. `python -m app status` prints health. Tests: `.venv/Scripts/python.exe -m pytest -q`, offline; the CLI is mocked at `app.claude.spawn` and a real invocation raises.
 
 ```
 app/__main__.py   launcher: open | setup | status | daemon
@@ -96,7 +96,7 @@ Every run is one CLI process with the prompt on stdin and `--output-format strea
 
 | Path | Who | MCP server | Extra flags |
 |---|---|---|---|
-| `run_task` | scheduled tasks via `ctx.run_task` | `otto-read` at `/mcp/read`: read tools only | `--max-turns <nightly.max_turns> --no-session-persistence`; refused outside the window or past `max_sessions` (see defect note in the Memory section) |
+| `run_task` | scheduled tasks via `ctx.run_task` | `otto-read` at `/mcp/read`: read tools only | `--max-turns <nightly.max_turns> --no-session-persistence`; raises `BudgetExceeded` outside the window or past `max_sessions` |
 | `session_turn` | session routes | `otto` at `/mcp/full`: read and write tools | `--session-id` on the first turn, `--resume` after |
 | `oneshot` | session close | `otto-read` | `--max-turns 2 --no-session-persistence`; not counted against the budget |
 
@@ -162,7 +162,7 @@ Web search to gather data on anything that could potentially help me in my life;
 
 MUST BE CAPPED TO SOME REASONABLE DEGREE; I am using usage associated with CLAUDE MAX account, but do not want to incur any other api charges, nor do I want to use all of my weekly tokens in 2 days. 
 
-Not built. The cap exists: the `[nightly]` budget applies to every scheduled LLM run. Whether WebSearch works in a headless run is unverified.
+Not built. The `[nightly]` budget already applies to every scheduled LLM run.
 
 ### E-mail
 
@@ -203,8 +203,6 @@ Built:
 | Tools | read: `memory_search`, `memory_get`, `memory_tags`, `memory_suggestions`; write: `memory_add`, `memory_tag`, `memory_suggest` (records a suggestion so it is never repeated) |
 | Schedule | `memory.suggest`, every 24h inside the nightly window, resource `memory`: proposes up to three action items from the last seven days as JSON, inserted with `INSERT OR IGNORE`, cursor `memory.suggest` |
 | Page | LEFT: search, kind chips, rows by day with the kind as leading slot; MIDDLE blank: capture box (kind chips, textarea, tags, `Save`, Ctrl+Enter) and open suggestions with `Accept` / `Dismiss`; MIDDLE selected: inspector with tags (add on Enter, click to remove), `Open` for links, `Done` for tasks, `Forget` |
-
-Defect: when `run_task` refuses a run for budget or window reasons it raises, so `memory.suggest` records `skipped` in `llm_runs` but the job row reads `failed`.
 
 ### Science
 
