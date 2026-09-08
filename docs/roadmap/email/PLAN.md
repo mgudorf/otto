@@ -1,6 +1,6 @@
 # Email Plan
 
-Status: planning, 2026-09-07.
+Status: planning, 2026-09-07; decisions closed 2026-09-08.
 
 Email mirrors the Gmail inbox into Otto so the owner can search it, read it, and archive or trash it in bulk from one place, while a nightly agent marks what deserves attention. Without it, inbox cleanup stays in the Chrome Gmail UI that misbehaves on bulk deletes, and nothing flags the mail that matters.
 
@@ -26,12 +26,12 @@ Email mirrors the Gmail inbox into Otto so the owner can search it, read it, and
 |---|---|---|
 | 1 | Talk to Gmail over plain REST with `httpx`; no new packages | `httpx` is already the daemon's client and is async; the module needs seven endpoints. The discovery client is synchronous and would need thread hops |
 | 2 | `gmail.py` has `GmailRead` (profile, list, get, history) and `GmailWrite(GmailRead)` adding `modify`. `tasks.py` and `tools.py` import only `read_client`; `routes.py` alone imports `write_client`. A test enforces it | The "agent never writes or deletes" rule has to be structural: the object a task or tool holds has no method that can change Gmail |
-| 3 | Keep scope `gmail.modify`; "delete" means Trash | The token in hand covers archive, trash, read and star and cannot permanently delete anything (that needs the full mail scope). Trash is reversible for 30 days; a second fence under the constraint |
+| 3 | Keep scope `gmail.modify`; "delete" means Trash; permanent delete is out of scope (owner, 2026-09-08) | The token in hand covers archive, trash, read and star and cannot permanently delete anything (that needs the full mail scope). Trash is reversible for 30 days; a second fence under the constraint |
 | 4 | Local mirror: metadata for all mail newer than `backfill_days`, then `history.list` increments every 5 minutes | LEFT, search and bulk actions run on the local table instantly; history keeps unread and starred honest when mail is read on the phone |
 | 5 | Bulk actions apply to everything matching the current LEFT filter (query and chip) | Solves the bulk-delete problem with no checkbox UI; search plus chip already define the set |
 | 6 | Nightly triage writes priorities to a local table; the session agent gets read tools plus one local write tool `email_flag` | Requirement 3 and 4: triage, prioritize, flag; nothing the agent holds reaches Gmail |
 | 7 | Body text is fetched when a message is opened or when `email_get` asks, then cached | Backfill stays metadata plus snippet; triage works from sender, subject and snippet |
-| 8 | `python -m app.modules.email.gmail consent` runs the OAuth flow on the redirect already registered (`localhost:8756/m/email/api/oauth/callback`) | `token.json` carries `refresh_token_expires_in = 604799`: the OAuth app is in Testing status and refresh tokens die after 7 days (next around 2026-09-12). Without a re-consent path the module stops within a week; the daemon's port 8765 is not a registered redirect |
+| 8 | `python -m app.modules.email.gmail consent` runs the OAuth flow on the redirect already registered (`localhost:8756/m/email/api/oauth/callback`) | `token.json` carries `refresh_token_expires_in = 604799`: it was issued while the OAuth app was in Testing status, so it dies around 2026-09-12 even after the app is published. One re-consent is required after publishing (owner decided to publish, 2026-09-08), the tool that produced `token.json` is not in this repo, and the daemon's port 8765 is not a registered redirect |
 
 Rejected: `google-api-python-client` (installed, unpinned, synchronous); full mail scope (re-consent and irreversible deletes); querying Gmail per page instead of mirroring; per-row checkboxes; an OAuth route inside the daemon (needs a console change first).
 
@@ -146,14 +146,14 @@ Needs you:
 
 | Item | How |
 |---|---|
-| OAuth publishing status | `token.json` shows `refresh_token_expires_in: 604799`, the mark of Testing status; the refresh token issued 2026-09-05 dies around 2026-09-12. Either publish the consent screen to Production in the Cloud console for project `central-shift-507603-b1`, or run the `consent` command each week |
+| Publish the OAuth app | In the Cloud console for project `central-shift-507603-b1`, set the consent screen to Production (decided 2026-09-08, not yet done). Then run `consent` once after phase 1 lands so the new refresh token has no expiry; the current one dies around 2026-09-12 |
 | Redirect URI | confirm `http://localhost:8756/m/email/api/oauth/callback` is still registered on the client; `consent` depends on it |
 
 Verify:
 
 | Check | Command |
 |---|---|
-| Refresh token lifetime | `.venv/Scripts/python.exe -c "import json;print(json.load(open('data/secrets/token.json')).get('refresh_token_expires_in'))"` (a number means Testing status) |
+| Refresh token has no expiry after re-consent | `.venv/Scripts/python.exe -c "import json;print(json.load(open('data/secrets/token.json')).get('refresh_token_expires_in'))"` (must print `None`) |
 | History endpoint answers from the current cursor | `.venv/Scripts/python.exe -c "from app.modules.email.gmail import read_client; from app.config import load; import asyncio; print(asyncio.run(read_client(load()).history('13770154')))"` after phase 1 |
 | FTS5 available | `.venv/Scripts/python.exe -c "import sqlite3; c=sqlite3.connect(':memory:'); c.execute('CREATE VIRTUAL TABLE t USING fts5(x)'); print('ok')"` |
 
@@ -167,5 +167,4 @@ Work in `../otto-email`. When `email` is merged to `main`, run `/sync-architectu
 
 ## Pending decisions
 
-1. Publish the OAuth consent screen to Production, or accept running `consent` weekly?
-2. Version 0 treats Trash as delete and never deletes permanently. Confirm.
+None. Resolved 2026-09-08: the OAuth consent screen will be published to Production; Trash is delete and permanent delete is out of scope.
