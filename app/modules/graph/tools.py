@@ -11,7 +11,7 @@ from app.modules.graph.routes import NODE_COLUMNS
 from app.store import Store, now_iso
 
 
-def register(read, full, store: Store) -> None:
+def register(read, full, store: Store, config) -> None:
     def _node(tag: str) -> bool:
         return store.one("SELECT tag FROM graph_nodes WHERE tag = ?", (tag,)) is not None
 

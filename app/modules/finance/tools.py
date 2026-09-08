@@ -6,7 +6,7 @@ from app.modules.finance.routes import KINDS, amount_text, monthly, totals
 from app.store import Store
 
 
-def register(read, full, store: Store) -> None:
+def register(read, full, store: Store, config) -> None:
     def finance_list(kind: str | None = None, include_ended: bool = False) -> list[dict]:
         """The owner's entries. kind narrows to account, recurring, holding or budget. Amounts are cents; text is the display form."""
         where, params = [], []

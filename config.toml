@@ -39,6 +39,10 @@ start_difficulty = 3        # 1 to 5 for a new topic
 flow_low = 60               # a completed question below this lowers the topic's difficulty one step
 flow_high = 85              # above this raises it one step
 
+[database]
+max_rows = 1000               # rows a query on the Database page or from the agent returns at most
+max_seconds = 5               # a statement running longer is interrupted
+
 [ui]
 start_page = "home"
 refresh_seconds = 30

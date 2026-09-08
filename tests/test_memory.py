@@ -117,10 +117,10 @@ class RecordingServer:
         return deco
 
 
-def test_memory_tool_split(store):
+def test_memory_tool_split(store, config):
     store.migrate(MEMORY_SCHEMA)
     read, full = RecordingServer(), RecordingServer()
-    register(read, full, store)
+    register(read, full, store, config)
     agent = MANIFEST.agent
     assert read.names == set(agent.read_tools)
     assert full.names == set(agent.read_tools) | set(agent.write_tools)

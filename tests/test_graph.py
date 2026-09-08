@@ -68,10 +68,10 @@ def test_rebuild_from_sources(store):
     assert (nodes(store), edges(store)) == before
 
 
-def test_overlays_and_sources_untouched(store):
+def test_overlays_and_sources_untouched(store, config):
     seed(store)
     read, full = FakeServer(), FakeServer()
-    tools.register(read, full, store)
+    tools.register(read, full, store, config)
     with store.tx() as conn:
         build.rebuild(conn)
     sources_before = snapshot(store)
@@ -95,10 +95,10 @@ def test_overlays_and_sources_untouched(store):
     assert [e["verb"] for e in store.query("SELECT verb FROM events ORDER BY id")] == ["merged", "pruned", "linked", "restored", "unlinked"]
 
 
-def test_write_tools_only_on_full(store):
+def test_write_tools_only_on_full(store, config):
     seed(store)
     read, full = FakeServer(), FakeServer()
-    tools.register(read, full, store)
+    tools.register(read, full, store, config)
     assert set(read.tools) == READ_TOOLS
     assert set(full.tools) == READ_TOOLS | WRITE_TOOLS
 

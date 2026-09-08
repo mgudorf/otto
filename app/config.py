@@ -68,6 +68,12 @@ class Education:
 
 
 @dataclass(frozen=True)
+class Database:
+    max_rows: int      # rows a query returns at most
+    max_seconds: float  # a statement past this is interrupted
+
+
+@dataclass(frozen=True)
 class Ui:
     start_page: str
     refresh_seconds: int
@@ -86,6 +92,7 @@ class Config:
     business: Business
     memory: Memory
     education: Education
+    database: Database
     ui: Ui
 
     @property
@@ -105,5 +112,6 @@ def load(root: Path = ROOT) -> Config:
         business=Business(**raw["business"]),
         memory=Memory(**raw["memory"]),
         education=Education(**raw["education"]),
+        database=Database(**raw["database"]),
         ui=Ui(**raw["ui"]),
     )
