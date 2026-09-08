@@ -26,7 +26,7 @@ The nightly search, its table, its topics and the agree / disagree actions are `
 | 3 | Selecting a row and acting on it goes through the owning module's `item` and `action/<verb>` routes, as it does today | Home's inspector already posts `{id}` to `/api/<module>/action/<verb>`; web_search exposes `agree` and `disagree` as verbs for exactly this |
 | 4 | Home's Current state block gains `Review: N` and one line per queued row | The Home agent answers from that block; it should be able to say what is waiting |
 | 5 | No Home number for the queue | web_search's own `numbers` hook already reports `to review`; a second count would say the same thing twice |
-| 6 | `home.js` is not changed | The existing group renderer takes `{module, label, hue, icon, count, rows, more}`; a decided row disappears on the next refresh because the hook no longer returns it |
+| 6 | `home.js` changes one line: groups are keyed `label:module`, not `module` | A module with both hooks now yields two sibling groups; keying by module alone collided them in Preact. The renderer is otherwise untouched, and a decided row disappears on the next refresh because the hook no longer returns it |
 
 Rejected: Home reading `search_findings` directly (couples Home to one module's schema); reusing `today` with a wider window (today means today for every other module); a `queue` route on web_search that Home calls over HTTP (hooks are in-process; nothing else on Home goes through the network).
 
@@ -37,9 +37,11 @@ Rejected: Home reading `search_findings` directly (couples Home to one module's 
 | `app/modules/__init__.py` | `Module.queue: Callable[[Any], list[dict]] \| None`; `_load_one` picks it up with `getattr(routes_mod, "queue", None)`; docstring names it |
 | `app/modules/home/routes.py` | `left_route` prepends the `Review` groups; `context` adds the queue lines |
 | `app/modules/home/agent.md` | one sentence: the Review lines are what still needs a decision; say which is worth opening, never decide |
+| `app/static/pages/home.js` | group key becomes `label:module` |
 | `docs/ARCHITECTURE.md` Module contract row for `routes.py` | add `queue(store) -> rows` (done by `/sync-architecture` after merge) |
 | `tests/test_app.py` | `test_home_review_group` |
 | `tests/test_platform.py` | add `m.queue` to the hooks-take-the-store loop |
+| `tests/test_scheduler.py` | its fake `Module` gains `queue=None` |
 
 ## Contract
 

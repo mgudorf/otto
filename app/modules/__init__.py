@@ -4,8 +4,8 @@ A module is a package under app/modules/<name>/ with:
   __init__.py   MANIFEST
   schema.sql    its own tables (optional)
   tasks.py      async def <task>(ctx) for each declared schedule (optional)
-  routes.py     router (APIRouter) plus hooks numbers(store), today(store), item(store, id), context(store, registry)
-                (all optional; route handlers must not share these names)
+  routes.py     router (APIRouter) plus hooks numbers(store), today(store), queue(store), item(store, id),
+                context(store, registry) (all optional; route handlers must not share these names)
   tools.py      register(read, full, store, config) adding MCP tools (optional)
   agent.md      system prompt for the module's Claude session (optional)
 A module that fails to import is recorded and skipped; the rest of the app keeps running.
@@ -69,6 +69,7 @@ class Module:
     schema: str | None
     numbers: Callable[[Any], dict | None] | None
     today: Callable[[Any], list[dict]] | None
+    queue: Callable[[Any], list[dict]] | None    # rows still waiting on the owner; Home lists every one
     item: Callable[[Any, str], dict | None] | None
     context: Callable[[Any, Any], str] | None   # (store, registry) -> text for the agent's system prompt
     register_tools: Callable[..., None] | None
@@ -123,6 +124,7 @@ class Registry:
             schema=schema_file.read_text("utf-8") if schema_file.exists() else None,
             numbers=getattr(routes_mod, "numbers", None),
             today=getattr(routes_mod, "today", None),
+            queue=getattr(routes_mod, "queue", None),
             item=getattr(routes_mod, "item", None),
             context=getattr(routes_mod, "context", None),
             register_tools=getattr(tools_mod, "register", None),

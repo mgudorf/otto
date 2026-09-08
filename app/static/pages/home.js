@@ -1,4 +1,4 @@
-// Home: LEFT = today per module · MIDDLE blank = one number per module.
+// Home: LEFT = what waits on a decision, then today per module · MIDDLE blank = one number per module.
 import { html, T, mono13, Row, ModuleHeader, Icon, Empty, dayLabel, fmtInt } from '../rows.js';
 import { get, post } from '../api.js';
 import { Inspector } from '../shell.js';
@@ -17,7 +17,7 @@ export function Left({ app, data, fmt }) {
   return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20 }}>
     <span style=${{ ...mono13, color: T.dim, padding: '0 12px' }}>${dayLabel()}</span>
     ${data.left.groups.length === 0 && html`<${Empty} text="no modules report today" />`}
-    ${data.left.groups.map((g) => html`<div key=${g.module} style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    ${data.left.groups.map((g) => html`<div key=${`${g.label}:${g.module}`} style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <${ModuleHeader} label=${g.label} count=${g.count} hue=${g.hue} icon=${g.icon} onClick=${() => app.go(g.module)} />
       ${g.rows.length === 0 && html`<${Empty} text="nothing today" />`}
       ${g.rows.map((r) => html`<${Row} key=${r.id} row=${r} hue=${g.hue} fmt=${fmt} selected=${!!sel && sel.module === r.module && String(sel.id) === String(r.id)} onSelect=${() => app.select({ module: r.module, id: r.id })} />`)}
