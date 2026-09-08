@@ -148,5 +148,4 @@ Work in `../otto-database`. When `database` is merged to `main`, run `/sync-arch
 
 ## Pending decisions
 
-1. Editing. Version 0 refuses every write. For version 1, should a write statement typed in the editor run after a confirm, or should editing be per row in the grid?
-2. Export. Build it as a CSV download of the current result, or drop the button from this page as the Settings gap did?
+None. Editing and Export were answered on 2026-09-08 and are planned in `docs/roadmap/database-v1/PLAN.md`: writes are SQL run by the owner after a confirm and a backup, Export is a table as CSV, and the agent stays read-only.
