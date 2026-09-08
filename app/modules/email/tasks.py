@@ -11,10 +11,12 @@ import json
 from app.modules.email.gmail import GmailError, read_client
 from app.modules.email.routes import HAS, PRIORITIES
 from app.runner import Skipped
-from app.store import now_iso
+from app.store import now, now_iso
 
-FETCH_CONCURRENCY = 10   # metadata requests in flight; Gmail allows about 50 gets per second per user
+FETCH_CONCURRENCY = 10   # metadata requests in flight; the client pauses them all when Gmail refuses on quota
+PAGE = 100               # messages fetched and committed together during a backfill; a kill loses at most one page
 CURSOR = "email.history"
+BACKFILL = "email.backfill"   # "<historyId>|<started>" while a backfill is in progress; resumed by the next run
 
 UPSERT = """INSERT INTO email_messages(id, thread_id, from_name, from_addr, to_addr, subject, snippet, internal_date, labels, synced_at)
 VALUES (:id, :thread_id, :from_name, :from_addr, :to_addr, :subject, :snippet, :internal_date, :labels, :synced_at)
@@ -55,14 +57,34 @@ async def sync(ctx) -> str:
         await gm.aclose()
 
 
+def _stamp() -> str:
+    """Microsecond UTC stamp: lets a resumed backfill tell its own pages from older rows within the same second."""
+    return now().isoformat(timespec="microseconds")
+
+
 async def _backfill(ctx, gm) -> str:
-    history_id = str((await gm.profile())["historyId"])  # taken first, so nothing between list and commit is lost
+    pending = ctx.cursor(BACKFILL)
+    if pending:
+        history_id, started = pending.split("|", 1)
+        ctx.log(f"resuming the backfill started {started}")
+    else:
+        history_id, started = str((await gm.profile())["historyId"]), _stamp()  # taken first: history covers everything after
+        with ctx.commit(cursor=(BACKFILL, f"{history_id}|{started}")):
+            pass
     days = ctx.config.email.backfill_days
-    rows, _ = await _fetch(gm, await gm.list_ids(f"newer_than:{days}d"))
-    ts = now_iso()
+    ids = await gm.list_ids(f"newer_than:{days}d")
+    have = {r["id"] for r in ctx.store.query("SELECT id FROM email_messages WHERE synced_at >= ?", (started,))}
+    todo = [i for i in ids if i not in have]
+    fetched = 0
+    for i in range(0, len(todo), PAGE):
+        rows, _ = await _fetch(gm, todo[i:i + PAGE])
+        with ctx.commit() as conn:
+            conn.executemany(UPSERT, [{**r, "synced_at": _stamp()} for r in rows])
+        fetched += len(rows)
+        ctx.log(f"backfill {fetched}/{len(todo)}")
     with ctx.commit(cursor=(CURSOR, history_id)) as conn:
-        conn.executemany(UPSERT, [{**r, "synced_at": ts} for r in rows])
-    return f"backfilled {len(rows)} messages from the last {days} days"
+        conn.execute("DELETE FROM cursors WHERE key = ?", (BACKFILL,))
+    return f"backfilled {fetched} messages from the last {days} days ({len(have)} already mirrored)"
 
 
 async def _incremental(ctx, gm, cursor: str) -> str:

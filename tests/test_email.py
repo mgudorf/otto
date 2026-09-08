@@ -16,6 +16,7 @@ from app.daemon import build
 from app.modules import Registry
 from app.modules.email import MANIFEST
 from app.modules.email.gmail import SCOPE, GmailRead, GmailWrite
+import app.modules.email.tasks as tasks_mod
 from app.modules.email.tasks import sync, triage
 from app.modules.email.tools import register
 from app.runner import Runner
@@ -55,6 +56,8 @@ class FakeGmail:
         self.messages = {m["id"]: m for m in messages}
         self.history, self.history_status, self.history_id = [], 200, "100"
         self.modified, self.refreshes = [], 0
+        self.quota_refusals = 0  # metadata gets refused with a 403 quota error before answering
+        self.fail_ids = set()    # metadata gets that answer 500
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -62,6 +65,11 @@ class FakeGmail:
             self.refreshes += 1
             return httpx.Response(200, json={"access_token": "fresh", "expires_in": 3600, "scope": SCOPE, "token_type": "Bearer"})
         assert request.headers["authorization"].startswith("Bearer ")
+        if self.quota_refusals and "/messages/" in path and request.method == "GET":
+            self.quota_refusals -= 1
+            return httpx.Response(403, json={"error": {"code": 403, "message": "Quota exceeded for quota metric 'Total Query Cost'"}})
+        if request.method == "GET" and path.rsplit("/", 1)[1] in self.fail_ids:
+            return httpx.Response(500, json={"error": "boom"})
         if path.endswith("/profile"):
             return httpx.Response(200, json={"emailAddress": "owner@example.com", "historyId": self.history_id})
         if path.endswith("/messages"):
@@ -157,6 +165,48 @@ def test_email_sync(store, email_config, fake):
         await r.drain(1)
 
     run(main())
+
+
+def test_email_backfill_resumes(store, email_config, fake, monkeypatch):
+    store.migrate((EMAIL_DIR / "schema.sql").read_text("utf-8"))
+    monkeypatch.setattr(tasks_mod, "PAGE", 2)
+    fake.fail_ids = {"m3"}
+
+    async def main():
+        r = Runner(store, email_config, registry=None, claude=None)
+        await r.start()
+        with pytest.raises(Exception):
+            await r.submit("email.sync", "email", "gmail", "scheduled", sync).done
+        assert sorted(x["id"] for x in store.query("SELECT id FROM email_messages")) == ["m1", "m2"]
+        assert store.cursor("email.history") is None and store.cursor("email.backfill").startswith("100|")
+        fake.fail_ids = set()
+        assert (await r.submit("email.sync", "email", "gmail", "scheduled", sync).done).startswith("backfilled 1 messages")
+        assert store.cursor("email.history") == "100" and store.cursor("email.backfill") is None
+        assert store.scalar("SELECT COUNT(*) FROM email_messages") == 3
+        await r.drain(1)
+
+    run(main())
+
+
+def test_email_quota_retry(store, email_config, fake, monkeypatch):
+    store.migrate((EMAIL_DIR / "schema.sql").read_text("utf-8"))
+    monkeypatch.setattr(gmail, "QUOTA_WAIT", 0.001)
+    fake.quota_refusals = 4
+
+    async def main():
+        r = Runner(store, email_config, registry=None, claude=None)
+        await r.start()
+        assert (await r.submit("email.sync", "email", "gmail", "scheduled", sync).done).startswith("backfilled 3")
+        fake.quota_refusals = gmail.RETRY_ATTEMPTS + 1
+        fake.history, fake.history_id = [{"messagesAdded": [{"message": {"id": "m1"}}]}], "101"
+        job = r.submit("email.sync", "email", "gmail", "scheduled", sync)
+        with pytest.raises(Exception):
+            await job.done
+        await r.drain(1)
+
+    run(main())
+    assert fake.quota_refusals == 0
+    assert "gmail 403" in store.one("SELECT error FROM jobs ORDER BY id DESC")["error"]
 
 
 def test_email_token_refresh(store, email_config, fake):

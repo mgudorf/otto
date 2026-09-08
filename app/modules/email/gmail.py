@@ -6,11 +6,13 @@ and writes the token file. TRANSPORT is the seam tests replace with an httpx.Moc
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import html
 import json
 import re
 import sys
+import time
 import webbrowser
 from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
@@ -26,6 +28,8 @@ API = "https://gmail.googleapis.com/gmail/v1/users/me"
 SCOPE = "https://www.googleapis.com/auth/gmail.modify"
 MODIFY_CHUNK = 1000                     # ids per batchModify call, the API's maximum
 REFRESH_MARGIN = timedelta(seconds=60)  # refresh this long before the access token expires
+QUOTA_WAIT = 61.0                       # Gmail's quota is per minute: on a refusal every request pauses this long
+RETRY_ATTEMPTS = 5                      # refusals one call tolerates before it fails (about five minutes)
 TRANSPORT: httpx.BaseTransport | None = None
 
 
@@ -67,22 +71,36 @@ class Token:
         return self.data["access_token"]
 
 
+def quota_refusal(r: httpx.Response) -> bool:
+    """Gmail answers a per-minute quota overrun with 429, or 403 naming the quota."""
+    if r.status_code == 429:
+        return True
+    return r.status_code == 403 and ("quota" in r.text.lower() or "ratelimit" in r.text.lower())
+
+
 class GmailRead:
     """Reads only: profile, message ids, metadata, bodies, history. Nothing here can change the mailbox."""
 
     def __init__(self, client_file: Path, token_file: Path):
         self.token = Token(client_file, token_file)
         self.http = httpx.AsyncClient(timeout=30, transport=TRANSPORT)
+        self.pause_until = 0.0  # monotonic; shared by every in-flight call, so one refusal pauses them all
 
     async def aclose(self) -> None:
         await self.http.aclose()
 
     async def _call(self, method: str, path: str, **kw) -> dict:
-        headers = {"Authorization": f"Bearer {await self.token.bearer(self.http)}"}
-        r = await self.http.request(method, f"{API}/{path}", headers=headers, **kw)
-        if r.status_code >= 400:
-            raise GmailError(r.status_code, r.text)
-        return r.json() if r.content else {}
+        for attempt in range(RETRY_ATTEMPTS + 1):
+            await asyncio.sleep(max(0.0, self.pause_until - time.monotonic()))
+            headers = {"Authorization": f"Bearer {await self.token.bearer(self.http)}"}
+            r = await self.http.request(method, f"{API}/{path}", headers=headers, **kw)
+            if attempt < RETRY_ATTEMPTS and quota_refusal(r):
+                self.pause_until = max(self.pause_until, time.monotonic() + QUOTA_WAIT)
+                continue
+            if r.status_code >= 400:
+                raise GmailError(r.status_code, r.text)
+            return r.json() if r.content else {}
+        raise AssertionError("unreachable")
 
     async def profile(self) -> dict:
         return await self._call("GET", "profile")
@@ -177,7 +195,7 @@ def extract_text(msg: dict) -> str:
 
     walk(msg.get("payload", {}))
     if plain:
-        return "\n".join(plain).strip()
+        return "\n".join(plain).replace("\r\n", "\n").strip()
     if rich:
         text = re.sub(r"(?is)<(script|style).*?</\1>", "", "\n".join(rich))
         text = re.sub(r"(?i)<br\s*/?>|</p>|</div>|</tr>", "\n", text)
