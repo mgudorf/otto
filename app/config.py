@@ -49,6 +49,11 @@ class Nightly:
 
 
 @dataclass(frozen=True)
+class Business:
+    leads_per_run: int
+
+
+@dataclass(frozen=True)
 class Ui:
     start_page: str
     refresh_seconds: int
@@ -64,6 +69,7 @@ class Config:
     claude: Claude
     data: Data
     nightly: Nightly
+    business: Business
     ui: Ui
 
     @property
@@ -80,5 +86,6 @@ def load(root: Path = ROOT) -> Config:
         claude=Claude(**raw["claude"]),
         data=Data(db=root / raw["data"]["db"], workspace=root / raw["data"]["workspace"]),
         nightly=Nightly(**raw["nightly"]),
+        business=Business(**raw["business"]),
         ui=Ui(**raw["ui"]),
     )

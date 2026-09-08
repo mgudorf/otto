@@ -26,6 +26,9 @@ max_sessions = 3              # headless runs per day, all tasks combined
 max_turns = 20                # per run
 max_minutes = 15              # per run; the process is killed past this
 
+[business]
+leads_per_run = 3           # new leads the nightly scout may queue per run
+
 [ui]
 start_page = "home"
 refresh_seconds = 30
