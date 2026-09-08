@@ -219,7 +219,6 @@ Built:
 
 1. Houses business plans/networking (people, events, etc.)/documents
 2. Finds/Tracks items immediately relevant to current pursuits, recommendations based on career improvement, business plans, job openings that are realistic, automated; 
-3. Linkedin message monitoring
 
 ### Database
 

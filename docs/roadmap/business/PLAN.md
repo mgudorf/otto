@@ -8,7 +8,7 @@ Business is where the owner keeps what they are pursuing professionally: plans, 
 
 | Source | Governs |
 |---|---|
-| `docs/ARCHITECTURE.md` Business | the three goals: house plans/networking/documents; find and track relevant items and realistic openings, automated; LinkedIn message monitoring |
+| `docs/ARCHITECTURE.md` Business | the three goals: house plans/networking/documents; find and track relevant items and realistic openings, automated |
 | `docs/ARCHITECTURE.md` Daemon, Mechanisms, Config, Claude, Module contract, Platform tables | task shape, `ctx.commit`, `ctx.run_task` as the only LLM path for tasks, budget window, wire shapes, hooks |
 | `docs/ARCHITECTURE.md` Frame contract, Departures | hue `#c98ba8`, briefcase icon, rail order 6; Business split from the artboard's Money |
 | `docs/ARCHITECTURE.md` Home page | numbers per module, today rows, review queue for nightly finds |
@@ -28,10 +28,9 @@ Business is where the owner keeps what they are pursuing professionally: plans, 
 | 5 | Event dates stay in the text | Same rule as Memory; a `when_at` column with parsing is structure the owner did not ask for |
 | 6 | Search is `LIKE`, not FTS5 | Hundreds of rows at most; the FTS trigger set is cost with no gain here |
 | 7 | One knob, `[business] leads_per_run` in `config.toml` | A cap is required by the Home section; it belongs in config, not in code. Everything else is derived from existing config |
-| 8 | LinkedIn message monitoring is not in version 0 | LinkedIn offers no messaging API to individuals; the only route is scraping the logged-in browser session, which breaks their terms and the owner must decide (Pending 1) |
-| 9 | Hue `#c98ba8`, briefcase icon, order 6 | Already fixed in ARCHITECTURE; the artboard has no Business entry |
+| 8 | Hue `#c98ba8`, briefcase icon, order 6 | Already fixed in ARCHITECTURE; the artboard has no Business entry |
 
-Rejected: storing business items as tagged memories (entangles two modules and breaks the replace-a-module seam); a separate leads table; an upload route and file store; Playwright against LinkedIn; a document `Summarize` action (the session pane already does this through `Send to session`).
+Rejected: storing business items as tagged memories (entangles two modules and breaks the replace-a-module seam); a separate leads table; an upload route and file store; a document `Summarize` action (the session pane already does this through `Send to session`).
 
 ## Layout
 
@@ -137,7 +136,6 @@ Needs you
 | Item | How |
 |---|---|
 | At least one plan captured before the first nightly window | `scout` returns `Skipped` with no plans, since plans are its only steer |
-| Pending decision 1 | reply below |
 
 Verify
 
@@ -157,4 +155,4 @@ Work in `../otto-business`. When the branch is merged to `main`, run `/sync-arch
 
 ## Pending decisions
 
-1. LinkedIn message monitoring. There is no messaging API for individuals. Options: leave it out (this plan), scrape the logged-in Chrome profile (brittle, against LinkedIn's terms, needs its own module), or paste messages into a `person` row by hand. Which?
+None.
