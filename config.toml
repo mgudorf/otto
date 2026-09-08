@@ -29,6 +29,12 @@ max_minutes = 15              # per run; the process is killed past this
 [business]
 leads_per_run = 3           # new leads the nightly scout may queue per run
 
+[education]
+queue_size = 3              # unanswered questions the nightly run keeps waiting
+start_difficulty = 3        # 1 to 5 for a new topic
+flow_low = 60               # a completed question below this lowers the topic's difficulty one step
+flow_high = 85              # above this raises it one step
+
 [ui]
 start_page = "home"
 refresh_seconds = 30

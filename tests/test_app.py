@@ -48,9 +48,9 @@ def test_memory_end_to_end(config):
             assert item["tags"] == ["reading"] and item["actions"][-1]["verb"] == "forget"
             assert (await c.post("/api/memory/action/tag", json={"id": mid, "tags": ["books"]})).json()["tags"] == ["books", "reading"]
             home = (await c.get("/api/home/left")).json()
-            assert home["groups"][0]["module"] == "memory" and home["groups"][0]["count"] == 2
+            assert next(g for g in home["groups"] if g["module"] == "memory")["count"] == 2
             numbers = (await c.get("/api/home/numbers")).json()
-            assert numbers[0]["value"] == 2
+            assert next(n for n in numbers if n["module"] == "memory")["value"] == 2
             assert (await c.post("/api/memory/action/forget", json={"id": mid})).status_code == 200
             assert (await c.get(f"/api/memory/item/{mid}")).status_code == 404
             ev = (await c.get("/api/events?module=memory")).json()
