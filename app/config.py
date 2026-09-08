@@ -60,6 +60,11 @@ class Memory:
 
 
 @dataclass(frozen=True)
+class Feedback:
+    max_turns: int
+
+
+@dataclass(frozen=True)
 class Ui:
     start_page: str
     refresh_seconds: int
@@ -77,6 +82,7 @@ class Config:
     nightly: Nightly
     business: Business
     memory: Memory
+    feedback: Feedback
     ui: Ui
 
     @property
@@ -95,5 +101,6 @@ def load(root: Path = ROOT) -> Config:
         nightly=Nightly(**raw["nightly"]),
         business=Business(**raw["business"]),
         memory=Memory(**raw["memory"]),
+        feedback=Feedback(**raw["feedback"]),
         ui=Ui(**raw["ui"]),
     )

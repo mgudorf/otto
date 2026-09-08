@@ -199,9 +199,10 @@ class ClaudeRunner:
             (now_iso(), ctx.job.module, ctx.job.task, ctx.job.id, status, minutes, session_id, int(budgeted)),
         )
 
-    async def oneshot(self, ctx, mod, prompt: str) -> str:
-        """User-triggered, read-only, unbudgeted single answer (session close tagging)."""
-        args = self._args(self._system_prompt(mod, scheduled=True), READ_SERVER, [], ["--max-turns", "2", "--no-session-persistence"])
+    async def oneshot(self, ctx, mod, prompt: str, tools: tuple[str, ...] = (), max_turns: int = 2) -> str:
+        """User-triggered, read-only, unbudgeted single answer (session close tagging, feedback filing)."""
+        allowed = [f"mcp__{READ_SERVER}__{t}" for t in tools]
+        args = self._args(self._system_prompt(mod, scheduled=True), READ_SERVER, allowed, ["--max-turns", str(max_turns), "--no-session-persistence"])
         started = now()
         try:
             final = await self._stream(args, prompt, self.config.nightly.max_minutes * 60, None)

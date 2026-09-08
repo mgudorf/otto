@@ -33,6 +33,9 @@ leads_per_run = 3           # new leads the nightly scout may queue per run
 suggest_lookback_days = 7   # memories the nightly suggest task reads
 suggest_max = 3             # action items it may propose per run
 
+[feedback]
+max_turns = 12             # per filing run: list docs, read a few, reply
+
 [ui]
 start_page = "home"
 refresh_seconds = 30
