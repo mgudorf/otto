@@ -54,6 +54,11 @@ class Business:
 
 
 @dataclass(frozen=True)
+class WebSearch:
+    max_findings: int
+
+
+@dataclass(frozen=True)
 class Ui:
     start_page: str
     refresh_seconds: int
@@ -70,6 +75,7 @@ class Config:
     data: Data
     nightly: Nightly
     business: Business
+    web_search: WebSearch
     ui: Ui
 
     @property
@@ -87,5 +93,6 @@ def load(root: Path = ROOT) -> Config:
         data=Data(db=root / raw["data"]["db"], workspace=root / raw["data"]["workspace"]),
         nightly=Nightly(**raw["nightly"]),
         business=Business(**raw["business"]),
+        web_search=WebSearch(**raw["web_search"]),
         ui=Ui(**raw["ui"]),
     )

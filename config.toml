@@ -29,6 +29,9 @@ max_minutes = 15              # per run; the process is killed past this
 [business]
 leads_per_run = 3           # new leads the nightly scout may queue per run
 
+[web_search]
+max_findings = 3            # findings the nightly search may queue per run
+
 [ui]
 start_page = "home"
 refresh_seconds = 30
