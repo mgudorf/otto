@@ -13,6 +13,8 @@ MANIFEST = Manifest(
     agent=Agent(
         placeholder="Ask about the notebook…",
         skills=("inspect-cell", "run", "explain-output", "refactor"),
+        read_tools=("science_files", "science_notebook", "science_cell", "science_kernels"),
+        write_tools=("science_run", "science_set_cell"),
     ),
 )
 

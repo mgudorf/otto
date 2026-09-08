@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import json
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -101,6 +102,77 @@ def test_science_run_streams_and_saves(sci, monkeypatch):
         app.state.store.close()
 
     run(main())
+
+
+def test_science_edits_write_valid_notebooks(sci):
+    async def main():
+        app = build(sci)
+        await app.state.runner.start()
+        root = sci.science.root
+        async with client_for(app) as c:
+            post = lambda verb, body: c.post(f"/api/science/action/{verb}", json=body)
+            assert (await post("set_cell", {"id": "analysis.ipynb", "index": 0, "source": "print(2)"})).status_code == 200
+            assert (await post("insert_cell", {"id": "analysis.ipynb", "after": 0, "type": "markdown"})).json()["index"] == 1
+            assert (await post("insert_cell", {"id": "analysis.ipynb"})).json()["index"] == 3
+            cells = (await c.get("/api/science/item/analysis.ipynb")).json()["cells"]
+            assert [(x["type"], x["source"]) for x in cells] == [("code", "print(2)"), ("markdown", ""), ("markdown", "# notes"), ("code", "")]
+            assert (await post("delete_cell", {"id": "analysis.ipynb", "index": 1})).status_code == 200
+            assert (await post("set_cell", {"id": "analysis.ipynb", "index": 9, "source": "x"})).status_code == 400
+            assert (await post("set_cell", {"id": "etl.py", "index": 0, "source": "x"})).status_code == 400
+            assert (await post("new", {"name": "fresh"})).json() == {"id": "fresh.ipynb"}
+            assert (await post("new", {"name": "fresh"})).status_code == 409
+            assert (await post("new", {"name": "../fresh"})).status_code == 400
+            assert (await post("new", {"name": ""})).status_code == 400
+            left = (await c.get("/api/science/left")).json()
+            assert {r["text"] for g in left["groups"] for r in g["rows"]} == {"analysis.ipynb", "etl.py", "fresh.ipynb"}
+            assert [e["verb"] for e in (await c.get("/api/events?module=science")).json()["events"]] == ["created", "deleted"]
+        for name in ("analysis.ipynb", "fresh.ipynb"):
+            nb = nbformat.read(str(root / name), as_version=4)
+            nbformat.validate(nb)
+        assert len(nbformat.read(str(root / "analysis.ipynb"), as_version=4).cells) == 3
+        assert nbformat.read(str(root / "fresh.ipynb"), as_version=4).metadata["kernelspec"]["name"] == "python3"
+        assert not list(root.glob("*.tmp"))
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())
+
+
+def test_science_read_tools_never_write(sci, monkeypatch):
+    async def main():
+        app = build(sci)
+        read_names = {t.name for t in await app.state.mcp_read.list_tools()}
+        full_names = {t.name for t in await app.state.mcp_full.list_tools()}
+        agent = app.state.registry.get("science").manifest.agent
+        assert {n for n in read_names if n.startswith("science_")} == set(agent.read_tools)
+        assert set(agent.write_tools) <= full_names and not set(agent.write_tools) & read_names
+        assert set(agent.read_tools) <= full_names
+
+        async def fake_execute(path, index, source, on_output=None):
+            assert source == "print(1)"
+            return 7, [{"output_type": "stream", "name": "stdout", "text": "y" * (sci.science.tool_output_chars + 50)}]
+
+        monkeypatch.setattr(state.kernels, "execute", fake_execute)
+        full = app.state.mcp_full
+        run = _data(await full.call_tool("science_run", {"id": "analysis.ipynb", "index": 0}))
+        assert run["execution_count"] == 7 and run["outputs"][0]["text"].endswith("[50 more chars]")
+        assert _data(await full.call_tool("science_cell", {"id": "analysis.ipynb", "index": 0}))["outputs"][0]["text"] == "y" * (sci.science.tool_output_chars + 50)
+        assert _data(await full.call_tool("science_set_cell", {"id": "analysis.ipynb", "index": 1, "source": "# renamed"})) == {"id": "analysis.ipynb", "index": 1}
+        nb = _data(await app.state.mcp_read.call_tool("science_notebook", {"id": "analysis.ipynb"}))
+        assert nb["cells"][0]["execution_count"] == 7 and nb["cells"][1]["source"] == "# renamed"
+        assert "error" in _data(await full.call_tool("science_run", {"id": "etl.py", "index": 0}))
+        files = [json.loads(c.text) for c in (await app.state.mcp_read.call_tool("science_files", {})).content]
+        assert {f["id"] for f in files} == {"analysis.ipynb", "etl.py"} and all(f["kernel"] is None for f in files)
+        assert [e["verb"] for e in app.state.store.query("SELECT verb FROM events WHERE module = 'science' ORDER BY id")] == ["ran", "edited"]
+        app.state.store.close()
+
+    run(main())
+
+
+def _data(result):
+    """The payload of an MCPServer.call_tool result: structured when the server built one, else the JSON text block."""
+    structured = getattr(result, "structured_content", None)
+    return structured if structured is not None else json.loads(result.content[0].text)
 
 
 def test_science_reap(sci):

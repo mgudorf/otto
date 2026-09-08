@@ -59,6 +59,14 @@ def write(path: Path, nb) -> None:
     os.replace(tmp, path)
 
 
+def new(path: Path) -> None:
+    """A notebook with one empty code cell, marked for the python3 kernel like any Jupyter-made file."""
+    nb = nbformat.v4.new_notebook()
+    nb.cells.append(nbformat.v4.new_code_cell(""))
+    nb.metadata["kernelspec"] = {"name": "python3", "display_name": "Python 3 (ipykernel)", "language": "python"}
+    write(path, nb)
+
+
 def join(v) -> str:
     return "".join(v) if isinstance(v, list) else (v or "")
 

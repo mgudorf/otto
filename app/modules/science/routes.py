@@ -64,19 +64,28 @@ async def action(request: Request, verb: str, body: dict = Body(default={})) -> 
     st = request.app.state
     if verb == "run":
         return _run(st, body)
-    if verb not in ACTIONS:
+    if verb == "new":
+        return await _new(st, body)
+    if verb not in KERNEL_ACTIONS and verb not in EDIT_ACTIONS:
         raise HTTPException(404, f"unknown action {verb}")
     file_id = str(body.get("id", ""))
     path = notebook.resolve(_root(), file_id)
-    if state.kernels.get(path) is None:
-        raise HTTPException(409, "no kernel")
-    if verb == "interrupt":   # never queued: it must get past a running cell
-        await state.kernels.interrupt(path)
-        st.store.event("science", "interrupted", path.name, ref=file_id)
-        return {"ok": True}
+    if verb in KERNEL_ACTIONS:
+        if state.kernels.get(path) is None:
+            raise HTTPException(409, "no kernel")
+        if verb == "interrupt":   # never queued: it must get past a running cell
+            await state.kernels.interrupt(path)
+            st.store.event("science", "interrupted", path.name, ref=file_id)
+            return {"ok": True}
+    else:
+        if path.suffix != ".ipynb":
+            raise HTTPException(400, "only notebooks are edited here")
+        if "index" in body:   # reject a bad index here, as a 400, not inside the job
+            _cell_index(notebook.read(path), body)
+    fn = KERNEL_ACTIONS.get(verb) or EDIT_ACTIONS[verb]
 
     async def run(ctx):
-        return await ACTIONS[verb](st, path, file_id, body, ctx)
+        return await fn(st, path, file_id, body, ctx)
 
     return await st.runner.run_action(f"science.{verb}", "science", f"kernel:{file_id}", run)
 
@@ -127,7 +136,64 @@ async def _shutdown(st, path, file_id, body, ctx) -> dict:
     return {"ok": True}
 
 
-ACTIONS = {"interrupt": None, "restart": _restart, "shutdown": _shutdown}
+KERNEL_ACTIONS = {"interrupt": None, "restart": _restart, "shutdown": _shutdown}
+
+
+# ---- edits: the file on disk is the document; every edit is one atomic write -----------------
+def _cell_index(nb, body: dict) -> int:
+    index = int(body.get("index", -1))
+    if not 0 <= index < len(nb.cells):
+        raise HTTPException(400, "no such cell")
+    return index
+
+
+async def _set_cell(st, path, file_id, body, ctx) -> dict:
+    nb = notebook.read(path)
+    index = _cell_index(nb, body)
+    nb.cells[index].source = str(body.get("source", ""))
+    notebook.write(path, nb)
+    return {"id": file_id, "index": index}
+
+
+async def _insert_cell(st, path, file_id, body, ctx) -> dict:
+    nb = notebook.read(path)
+    after = int(body.get("after", len(nb.cells) - 1))
+    kind = body.get("type", "code")
+    cell = nbformat.v4.new_markdown_cell("") if kind == "markdown" else nbformat.v4.new_code_cell("")
+    index = max(0, min(after + 1, len(nb.cells)))
+    nb.cells.insert(index, cell)
+    notebook.write(path, nb)
+    return {"id": file_id, "index": index}
+
+
+async def _delete_cell(st, path, file_id, body, ctx) -> dict:
+    nb = notebook.read(path)
+    index = _cell_index(nb, body)
+    gone = nb.cells.pop(index)
+    notebook.write(path, nb)
+    ctx.event("deleted", f"{path.name} cell {index}: {notebook.join(gone.source)[:80]}", ref=file_id)
+    return {"id": file_id, "index": index}
+
+
+EDIT_ACTIONS = {"set_cell": _set_cell, "insert_cell": _insert_cell, "delete_cell": _delete_cell}
+
+
+async def _new(st, body: dict) -> dict:
+    name = str(body.get("name", "")).strip()
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        raise HTTPException(400, "give the notebook a plain file name")
+    if not name.endswith(".ipynb"):
+        name += ".ipynb"
+    path = _root() / name
+    if path.exists():
+        raise HTTPException(409, "that file exists")
+
+    async def run(ctx):
+        notebook.new(path)
+        ctx.event("created", path.name, ref=name)
+        return {"id": name}
+
+    return await st.runner.run_action("science.new", "science", RESOURCE, run)
 
 
 # ---- shell hooks ---------------------------------------------------------------------------
