@@ -7,7 +7,7 @@ The middle is the main interaction/use of the module, which displays the main ou
 
 ### What runs today
 
-Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps every module's state current on a schedule; the window renders that state and holds none of it. One session per module is open at a time; `/clear` closes it, tags it, and starts a fresh one. Known defects and gaps against the requirements live in `docs/defects/`, one file each.
+Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps every module's state current on a schedule; the window renders that state and holds none of it. One session per module is open at a time; `/clear` closes it, tags it, and starts a fresh one. Known findings live one file each in `docs/bugs/` (code does the wrong thing), `docs/defects/` (built as designed, but wrong for the owner) and `docs/gaps/` (requirement or artboard element not met yet).
 
 | Piece | What it is |
 |---|---|

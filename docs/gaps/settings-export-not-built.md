@@ -1,6 +1,5 @@
 # Settings, Data: Export button not built
 
-- Kind: gap
 - Where: artboard Settings > Data (`Back up now`, `Export`, `Vacuum`); `app/static/pages/settings.js`
 - Found: 2026-09-07, sync-architecture
 - Status: open, needs a decision

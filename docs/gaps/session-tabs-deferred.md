@@ -1,6 +1,5 @@
 # One session per module; tabs not built
 
-- Kind: gap
 - Where: Summary requirement "Multiple conversations should be spawnable/selectable via tabs"; `app/api.py` sessions, `app/static/session.js`
 - Found: 2026-09-07, sync-architecture
 - Status: deferred by the owner

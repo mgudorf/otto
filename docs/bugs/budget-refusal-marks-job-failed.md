@@ -1,6 +1,5 @@
 # Budget refusal marks the job failed instead of skipped
 
-- Kind: defect
 - Where: `app/claude.py` `run_task`; every task that calls `ctx.run_task` (today `app/modules/memory/tasks.py` `suggest`)
 - Found: 2026-09-07, sync-architecture
 - Status: open

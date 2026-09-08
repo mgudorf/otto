@@ -1,6 +1,5 @@
 # Home shows no nightly search results
 
-- Kind: gap
 - Where: Home page requirement 2 and the Nightly Process section; `app/modules/home/`
 - Found: 2026-09-07, sync-architecture
 - Status: open, needs its roadmap item
