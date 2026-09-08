@@ -58,12 +58,12 @@ Routes, prefix `/api/web_search`:
 
 | Route | Wire shape |
 |---|---|
-| `GET left?query&chip&page` | LEFT shape; groups by night (`05 Sep`), rows `{id, module, text: title, stamp: found_at, leading: {kind}, done: status != open}`; chips `All / Open / Agreed / Disagreed` |
+| `GET left?query&chip&page` | LEFT shape; groups by night (`05 Sep`), rows `{id, module, text: title, stamp: found_at, leading: {kind}, done: status == disagreed}`; chips `All / Open / Agreed / Disagreed` |
 | `GET blank` | `{kinds, topics: [{id, kind, text}], queue: [{id, kind, title, url, summary, found_at}], last_run}` |
 | `GET item/{id}` | `{id, module, kind, text: title + summary, url, status, created_at: found_at, actions}`; actions `Open` (href), `Agree` (primary), `Disagree`; decided findings show only `Open` |
-| `POST action/topic_add` | `{kind, text}` → `{id}`; event `topic added` |
+| `POST action/topic_add` | `{kind, text}` → `{id}`; 409 when listed; event `topic added` |
 | `POST action/topic_remove` | `{id}` → `{id}`; findings keep their `kind` |
-| `POST action/decide` | `{id, status: agreed|disagreed}` → `{id, status}`; event `agreed` / `disagreed` with `ref` |
+| `POST action/agree`, `POST action/disagree` | `{id}` → `{id, status}`; 409 when already decided; event `agreed` / `disagreed` with `ref`. Two verbs so Home's generic inspector can post them with only an id |
 
 Hooks: `numbers` → open findings, label `to review`; `today` → findings found in the local day, any status; `item`; `context` → topics by kind, the open queue, last run stamp.
 
@@ -101,7 +101,7 @@ The external system is the public web, read-only by nature; this module has no w
 
 - `test_nightly_inserts_and_is_idempotent`: `fake_spawn` returns a JSON array of two findings; the run inserts two rows and the cursor in one transaction; the same reply run again inserts zero.
 - `test_nightly_skips_without_topics`: no topics returns `Skipped` and never calls `spawn`.
-- `test_actions_write_status`: through the real app, add a topic, seed a finding, `decide` sets status and `decided_at`, `left?chip=Agreed` shows it, `/api/home/left` carries the `web_search` group and `/api/home/numbers` the open count.
+- `test_actions_write_status`: through the real app, add a topic, seed a finding, `agree` sets status and `decided_at`, `left?chip=Agreed` shows it, `/api/home/left` carries the `web_search` group and `/api/home/numbers` the open count.
 - `test_registry_loads_real_modules` already covers the manifest import.
 
 ## Manifest
@@ -141,4 +141,4 @@ Work there. When `web_search` merges to `main`, run `/sync-architecture`.
 
 ## Pending decisions
 
-1. Title `Search`, hue `#d9915b`, magnifier icon, rail order 9: keep, or name another?
+1. Title `Search`, hue `#d9915b`, magnifier icon, rail order 9: built as proposed on 2026-09-08; change `MANIFEST` in `app/modules/web_search/__init__.py` to pick another.
