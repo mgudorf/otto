@@ -54,6 +54,12 @@ class Business:
 
 
 @dataclass(frozen=True)
+class Memory:
+    suggest_lookback_days: int
+    suggest_max: int
+
+
+@dataclass(frozen=True)
 class Ui:
     start_page: str
     refresh_seconds: int
@@ -70,6 +76,7 @@ class Config:
     data: Data
     nightly: Nightly
     business: Business
+    memory: Memory
     ui: Ui
 
     @property
@@ -87,5 +94,6 @@ def load(root: Path = ROOT) -> Config:
         data=Data(db=root / raw["data"]["db"], workspace=root / raw["data"]["workspace"]),
         nightly=Nightly(**raw["nightly"]),
         business=Business(**raw["business"]),
+        memory=Memory(**raw["memory"]),
         ui=Ui(**raw["ui"]),
     )
