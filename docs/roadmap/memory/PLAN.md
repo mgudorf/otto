@@ -1,6 +1,6 @@
 # Memory v0 Plan
 
-Status: planning, 2026-09-07.
+Status: planning, 2026-09-08.
 
 Memory is where the owner dumps notes, links, quotes, facts and tasks in their own words, finds them again, and gets a nightly nudge when the pile clearly calls for an action. Without it the other modules have no owner-written record to tag, and Graph has nothing to read.
 
@@ -31,8 +31,9 @@ Version 0 is the proving build already on `main` plus what the Memory requiremen
 | 3 | The suggest task's knobs move to `config.toml` `[memory]`: `suggest_lookback_days`, `suggest_max` | Hard-coded parameters are not allowed; the task reads them once per nightly run, so boot values suffice and a missing key fails at boot |
 | 4 | The suggest prompt lists every prior suggestion, any status, with no cap | Requirement 3 says a suggestion is made once, ever; the current last-50 cap lets an old one come back |
 | 5 | `Done` is the primary action on an open task; `Open` only on links | Requirement 1 calls Memory a to-do list, which needs completion; `Open` means nothing for a note |
-| 6 | Agent chips are recall, tag, add, suggest | Chips are display-only and name what the agent can do; `summarize` contradicts requirement 3 (literal, never reworded) and `link` has no meaning yet (pending 2) |
-| 7 | The artboard's `Link` action is not built in v0 | The artboard gives it a label and nothing else; building it means inventing what it links |
+| 6 | Agent chips are recall, tag, add, suggest | Chips are display-only and name what the agent can do; `summarize` contradicts requirement 3 (literal, never reworded) and the artboard's `link` is tagging (decision 7), already named `tag` |
+| 7 | The artboard's `Link` action is the tag row already in the inspector; no separate action | The owner defines Link as tagging, which Graph picks up in consolidation; tags already live in `memory_tags` and Graph reads them |
+| 8 | Journaling gets no feature of its own; the day-grouped stream of captures is the journal | The owner calls it a qualitative name for a notepad of the mind, not a feature to build |
 
 Rejected: rebuilding Memory from scratch; a journal kind; a Settings-page section for the memory knobs; a memory-to-memory link table; a vector index for search (FTS5 is in the stdlib and answers the requirement).
 
@@ -82,8 +83,8 @@ Agent: the Memory agent recalls with the read tools and quotes the owner literal
 Departures from the artboard:
 
 - Chips add Facts and Tasks (decision 2).
-- Inspector: `Done` primary on open tasks, `Open` only on links, no `Link` (decisions 5 and 7).
-- Agent chips replace `link` and `summarize` with `add` and `suggest` (decision 6).
+- Inspector: `Done` primary on open tasks, `Open` only on links; the artboard's `Link` is the tag row under the body (decisions 5 and 7).
+- Agent chips replace `link` and `summarize` with `add` and `suggest`; `tag` covers `link` (decision 6).
 - MIDDLE blank state (capture box, open suggestions) is not in the artboard; carried over from the platform plan.
 - Session header reads `claude · memory`, a platform-wide choice.
 
@@ -153,6 +154,4 @@ Work there. When `memory` is merged to `main`, run `/sync-architecture`.
 
 ## Pending decisions
 
-1. Scope: v0 is the proving build plus phase 1. Name anything else v0 must hold, or confirm.
-2. The artboard's `Link` action and `link` chip: what does a memory link to (another memory, a Graph node, an external item)? Until answered it stays out.
-3. Journaling (requirement 1): is the day-grouped stream of notes the journal, or is a journal a distinct thing with its own shape?
+None. Scope, Link and journaling were decided by the owner on 2026-09-08 (decisions 1, 7 and 8).
