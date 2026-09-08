@@ -180,6 +180,12 @@ def today(store: Store) -> list[dict]:
     return [_row(r) for r in rows]
 
 
+def queue(store: Store) -> list[dict]:
+    """Every finding still waiting on the owner, newest first; Home lists these under Review."""
+    rows = store.query("SELECT * FROM search_findings WHERE status = 'open' ORDER BY found_at DESC, id DESC")
+    return [_row(r) for r in rows]
+
+
 def context(store: Store, registry) -> str:
     topics = store.query("SELECT id, kind, text FROM search_topics ORDER BY kind, created_at")
     queue = store.query("SELECT id, kind, title, url FROM search_findings WHERE status = 'open' ORDER BY found_at DESC")

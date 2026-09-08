@@ -59,6 +59,9 @@ def test_actions_write_status(config):
             numbers = (await c.get("/api/home/numbers")).json()
             n = next(n for n in numbers if n["module"] == "web_search")
             assert n["value"] == 1 and n["label"] == "to review"
+            from app.modules.web_search.routes import queue
+
+            assert [r["id"] for r in queue(store)] == [f2]
             assert (await c.post("/api/web_search/action/topic_remove", json={"id": tid})).status_code == 200
             assert (await c.get("/api/web_search/blank")).json()["topics"] == []
             ev = (await c.get("/api/events?module=web_search")).json()
