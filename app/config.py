@@ -60,6 +60,14 @@ class Memory:
 
 
 @dataclass(frozen=True)
+class Education:
+    queue_size: int
+    start_difficulty: int
+    flow_low: int
+    flow_high: int
+
+
+@dataclass(frozen=True)
 class Ui:
     start_page: str
     refresh_seconds: int
@@ -77,6 +85,7 @@ class Config:
     nightly: Nightly
     business: Business
     memory: Memory
+    education: Education
     ui: Ui
 
     @property
@@ -95,5 +104,6 @@ def load(root: Path = ROOT) -> Config:
         nightly=Nightly(**raw["nightly"]),
         business=Business(**raw["business"]),
         memory=Memory(**raw["memory"]),
+        education=Education(**raw["education"]),
         ui=Ui(**raw["ui"]),
     )
