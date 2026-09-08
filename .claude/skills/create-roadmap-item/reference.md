@@ -4,8 +4,8 @@ Fill each; delete a section only if the item truly has nothing for it, and say s
 
 1. **Title and status.** `# <Item> Plan`, then `Status: planning, <date>.` One sentence on what the
    item does for the owner and what breaks without it. Layman's terms before mechanisms.
-2. **Sources.** Table `Source | Governs`: the ARCHITECTURE section, the app plan sections, the
-   artboard elements, the code files, and every input the request named.
+2. **Sources.** Table `Source | Governs`: the ARCHITECTURE sections, the artboard elements, the
+   code files, and every input the request named.
 3. **Decisions.** Table `# | Decision | Why`, then one `Rejected:` line naming the alternatives.
 4. **Layout.** Files added or changed, one line each. A module follows the Module contract:
    `app/modules/<name>/{__init__.py, schema.sql, tasks.py, routes.py, tools.py, agent.md}` plus
@@ -31,8 +31,8 @@ Fill each; delete a section only if the item truly has nothing for it, and say s
 
 ## Where the constraints come from
 
-- Daemon requirements and module goals: `docs/ARCHITECTURE.md`.
-- Frame, module and daemon contracts, tokens, hues, rail order: `docs/roadmap/app/PLAN.md`.
+- Daemon requirements and mechanisms, module goals, the Module contract, Config, Claude, and the
+  UI frame contract (tokens, hues, rail order): `docs/ARCHITECTURE.md`.
 - Tenets and coding rules (no hard-coded parameters, MVP has functionality, minimal tests):
   the user-level and project `CLAUDE.md`, loaded every session.
 

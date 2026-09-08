@@ -6,8 +6,8 @@ description: Use when a module or feature of Otto is about to be built and needs
 # Create a roadmap item
 
 Writes `docs/roadmap/<slug>/PLAN.md`: the plan for one unit of work, built later in its own
-git worktree. Assumes `main` is checked out and clean, and that `docs/ARCHITECTURE.md`,
-`docs/roadmap/app/PLAN.md` and `docs/design/Personal Dashboard App.dc.html` exist.
+git worktree. Assumes `main` is checked out and clean, and that `docs/ARCHITECTURE.md` and
+`docs/design/Personal Dashboard App.dc.html` exist.
 
 ## Do this
 
@@ -15,8 +15,8 @@ git worktree. Assumes `main` is checked out and clean, and that `docs/ARCHITECTU
    `finance`) or a feature (`session-tabs`). If `docs/roadmap/<slug>/PLAN.md` exists,
    update it; never create a second plan for the same item.
 2. Read every input before writing a word:
-   - `docs/ARCHITECTURE.md`: the item's section and the Daemon requirements.
-   - `docs/roadmap/app/PLAN.md`: Frame contract, Module contract, Daemon contract, Manifest format.
+   - `docs/ARCHITECTURE.md`: the item's section, the Daemon requirements and mechanisms, the
+     Module contract, Config, Claude, and the UI frame contract with the item's hue and order.
    - `docs/design/Personal Dashboard App.dc.html`: the item's LEFT and MIDDLE shapes, hue, icon.
    - The code the item touches under `app/`, and anything the request names (files, URLs,
      credentials, prior sessions).
@@ -27,7 +27,7 @@ git worktree. Assumes `main` is checked out and clean, and that `docs/ARCHITECTU
    `data/secrets/`, external APIs and their scopes. Record each as present, missing,
    needs the owner, or verify, with exact versions, paths and commands.
 4. Write `PLAN.md` with the sections in `reference.md`, in that order, as tables and
-   bullets. `docs/roadmap/app/PLAN.md` is the ceiling on length; most items need less.
+   bullets. Three hundred lines is the ceiling; most items need far less.
 5. Reply with the Decisions and Manifest tables and any question the owner must answer.
 6. Commit the plan on `main` (`Plan <slug>`), and print the worktree command from the
    plan's Worktree section. Implementation never happens on `main`.
