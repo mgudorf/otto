@@ -41,6 +41,15 @@ class Store:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.execute("PRAGMA busy_timeout=5000")
+        self._ro: sqlite3.Connection | None = None
+        self.ro_lock = threading.Lock()
+
+    def read_only(self) -> sqlite3.Connection:
+        """A second connection opened mode=ro: SQLite itself refuses every write on it. Guard use with ro_lock."""
+        if self._ro is None:
+            self._ro = sqlite3.connect(f"file:{self.path.resolve().as_posix()}?mode=ro", uri=True, check_same_thread=False)
+            self._ro.execute("PRAGMA busy_timeout=5000")
+        return self._ro
 
     def migrate(self, sql: str) -> None:
         with self._lock:
@@ -116,3 +125,6 @@ class Store:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+        if self._ro is not None:
+            with self.ro_lock:
+                self._ro.close()

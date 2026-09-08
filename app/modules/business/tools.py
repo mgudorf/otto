@@ -8,7 +8,7 @@ from app.store import Store, now_iso
 COLUMNS = "id, kind, text, ref, why, status, created_at, updated_at"
 
 
-def register(read, full, store: Store) -> None:
+def register(read, full, store: Store, config) -> None:
     def business_search(query: str, kind: str | None = None, limit: int = 20) -> list[dict]:
         """Search plans, people, events, documents and leads by words in their text or link. kind narrows. Newest first."""
         where, params = _search(query)

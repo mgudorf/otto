@@ -59,7 +59,7 @@ def build(config: Config, spawn_fn=None) -> FastAPI:
     full = MCPServer(FULL_SERVER, instructions="Tools over the owner's Otto data, including writes the owner asked for.")
     for m in registry.ordered():
         if m.register_tools:
-            m.register_tools(read, full, store)
+            m.register_tools(read, full, store, config)
     read_app = read.streamable_http_app(streamable_http_path="/mcp/read", json_response=True, stateless_http=True)
     full_app = full.streamable_http_app(streamable_http_path="/mcp/full", json_response=True, stateless_http=True)
 

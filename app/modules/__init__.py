@@ -6,7 +6,7 @@ A module is a package under app/modules/<name>/ with:
   tasks.py      async def <task>(ctx) for each declared schedule (optional)
   routes.py     router (APIRouter) plus hooks numbers(store), today(store), item(store, id), context(store, registry)
                 (all optional; route handlers must not share these names)
-  tools.py      register(read, full, store) adding MCP tools (optional)
+  tools.py      register(read, full, store, config) adding MCP tools (optional)
   agent.md      system prompt for the module's Claude session (optional)
 A module that fails to import is recorded and skipped; the rest of the app keeps running.
 """
