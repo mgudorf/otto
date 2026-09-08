@@ -21,6 +21,19 @@ def no_real_claude(monkeypatch):
     monkeypatch.setattr(claude_mod, "spawn", forbidden)
 
 
+@pytest.fixture(autouse=True)
+def no_real_gmail(monkeypatch):
+    """Gmail is mocked at the transport seam; a real call raises."""
+    import httpx
+
+    import app.modules.email.gmail as gmail_mod
+
+    def forbidden(request):
+        raise RuntimeError(f"real gmail call inside tests: {request.url}")
+
+    monkeypatch.setattr(gmail_mod, "TRANSPORT", httpx.MockTransport(forbidden))
+
+
 @pytest.fixture
 def config(tmp_path: Path):
     base = load(ROOT)

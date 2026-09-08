@@ -29,6 +29,12 @@ max_minutes = 15              # per run; the process is killed past this
 [business]
 leads_per_run = 3           # new leads the nightly scout may queue per run
 
+[email]
+client_file = "data/secrets/google_client.json"   # Google OAuth web client
+token_file = "data/secrets/token.json"            # the owner's Gmail token, scope gmail.modify, refreshed in place
+backfill_days = 90            # the first sync mirrors mail newer than this
+triage_batch = 40             # messages the nightly triage prioritizes per run
+
 [ui]
 start_page = "home"
 refresh_seconds = 30

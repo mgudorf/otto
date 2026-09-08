@@ -54,6 +54,14 @@ class Business:
 
 
 @dataclass(frozen=True)
+class Email:
+    client_file: Path
+    token_file: Path
+    backfill_days: int
+    triage_batch: int
+
+
+@dataclass(frozen=True)
 class Ui:
     start_page: str
     refresh_seconds: int
@@ -70,6 +78,7 @@ class Config:
     data: Data
     nightly: Nightly
     business: Business
+    email: Email
     ui: Ui
 
     @property
@@ -87,5 +96,9 @@ def load(root: Path = ROOT) -> Config:
         data=Data(db=root / raw["data"]["db"], workspace=root / raw["data"]["workspace"]),
         nightly=Nightly(**raw["nightly"]),
         business=Business(**raw["business"]),
+        email=Email(
+            client_file=root / raw["email"]["client_file"], token_file=root / raw["email"]["token_file"],
+            backfill_days=raw["email"]["backfill_days"], triage_batch=raw["email"]["triage_batch"],
+        ),
         ui=Ui(**raw["ui"]),
     )
