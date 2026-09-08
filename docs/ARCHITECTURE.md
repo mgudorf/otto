@@ -185,7 +185,24 @@ Not built. The `[nightly]` budget already applies to every scheduled LLM run.
 #### Education Constraints
 
 1. Breadth over depth; do not repeat the same questions over and over again, even if I get them wrong. 
-2. Topics covered should include 
+2. Topics covered should include
+   1. Probability and statistics
+   2. Agentic AI
+   3. Deep learning
+   4. Machine Learning
+   5. Natural Language Model/Processing
+   6. Reinforcement Learning
+   7. Modern time series forecasting and foundational models
+   8. Causal Inference
+   9. Mathematics
+   10. Optimization and decision science
+   11. Physics
+   12. Supply chain optimization
+   13. Robotics
+   14. Quantitative finance
+3. On demand: pursued when there is time, with an anticipation of 3 questions per day. Nothing is scheduled to a date.
+4. Progress and score are tracked by domain, one per topic above.
+5. New tech (pick a new technology, see if I can understand how it works): a separate roadmap item, `docs/roadmap/new-tech/`.
 
 ### Memory
 
