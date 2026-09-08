@@ -28,7 +28,7 @@ lists nobody ever reads together.
 | 2 | Two edge kinds: `cooccur` (two tags on the same item, weight = shared items) and `link` (curated by the agent) | co-occurrence is the only edge the sources imply; the artboard says "curated links as edges" |
 | 3 | `graph_nodes` and `graph_edges` are rebuilt whole, in one transaction, by a scheduled task every 15 minutes and after every curation write | the page and the agent read plain tables; a full rebuild is idempotent and kill-safe by construction; the schedule is what keeps the view current |
 | 4 | Curation lives in overlay tables (`graph_merges`, `graph_pruned`, `graph_links`) applied during rebuild; Memory and session rows are never written | Graph requirement 1: view-only over other modules' data; overlays make curation survive every rebuild |
-| 5 | Node key is the tag lowercased and stripped | Memory tags are free text, session tags are lowercase; otherwise `SQLite` and `sqlite` are two nodes the agent must merge by hand |
+| 5 | Tags are case-insensitive: the node key is the tag lowercased and stripped, and nodes display in lowercase | owner's call, 2026-09-08: `gradient descent`, `GRADient descent` and `gradient DESCENT` are one node |
 | 6 | Curation reaches the graph only through the agent's write tools; no curation buttons | the artboard's Graph page has no actions; requirement 3 names the agent as the architect |
 | 7 | MIDDLE draws exactly the nodes LEFT lists (search and page applied) on a deterministic ring computed by the page | the artboard's own layout; `ui.page_size` already bounds how many nodes are drawn, so no new knob |
 | 8 | Selecting a node highlights it and its neighbours; no inspector | the artboard's Graph MIDDLE does this |
@@ -156,4 +156,4 @@ Work in `../otto-graph`. When `graph` is merged to `main`, run `/sync-architectu
 
 ## Pending decisions
 
-1. Tags are folded to lowercase (decision 5). If case must stay significant, say so before phase 1 and the key becomes the exact tag.
+None. Case-insensitive tags were confirmed by the owner on 2026-09-08 (decision 5).
