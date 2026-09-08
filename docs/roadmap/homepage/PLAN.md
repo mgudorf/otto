@@ -71,7 +71,7 @@ Hooks: `numbers(store)` → `{value: pending, label: "to review"}`; `item(store,
 
 Agent's job: see the day at a glance from the Current state block, including what the nightly search queued; say which finding is worth opening and why, in the owner's terms; never claim to agree or disagree on the owner's behalf, since it has no tool to do so.
 
-Departures from the artboard: the `Review` group and its rows are not in the artboard (the Home variants board `Personal Dashboard.dc.html` named in ARCHITECTURE is not in `docs/design/`); they reuse the artboard's module-group header, 36px rows with a 6px dot, and the inspector's primary / secondary buttons. Home's own `to review` number is added to the grid, which the artboard shows only for other modules.
+Departures from the artboard: the `Review` group and its rows are not in the artboard; they reuse the artboard's module-group header, 36px rows with a 6px dot, and the inspector's primary / secondary buttons. Home's own `to review` number is added to the grid, which the artboard shows only for other modules.
 
 ## Data
 
@@ -152,4 +152,3 @@ Work in `../otto-homepage`. When `homepage` is merged to `main`, run `/sync-arch
 
 1. Topics: what goes in `[home] topics`? Phase 1 cannot run without the list.
 2. Follow-ups (Nightly Process bullets 1 and 2, "schedule them for the future") are left out of v0. Confirm they are a later item, or name them for v0 and this plan grows a `follow_up_on` date on `findings` and a due-follow-ups block in the prompt.
-3. ARCHITECTURE names `Personal Dashboard.dc.html` as holding Home variants; it is not in `docs/design/`. If it exists elsewhere and shows a review queue, point me to it and the `Review` group follows it instead of decision 8.

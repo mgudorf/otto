@@ -260,7 +260,7 @@ Activity: LEFT is the `events` log by day with a chip per module; MIDDLE blank s
 
 ## UI
 
-Follows style of, but not limited to, the Claude Design project `9459ddf2-3c53-45d8-9252-7a17bd027bf4` (`Personal Dashboard App.dc.html`; `Personal Dashboard.dc.html` holds Home variants). The artboard and its runtime are imported to `docs/design/`; open the html in a browser to run it.
+Follows style of, but not limited to, the Claude Design project `9459ddf2-3c53-45d8-9252-7a17bd027bf4` (`Personal Dashboard App.dc.html`). The artboard and its runtime are imported to `docs/design/`; open the html in a browser to run it.
 
 ### Frame contract
 
