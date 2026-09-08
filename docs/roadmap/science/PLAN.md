@@ -1,6 +1,6 @@
 # Science Plan
 
-Status: planning, 2026-09-07. Version 0.
+Status: planning, 2026-09-08. Version 0.
 
 Science lets the owner open a notebook from Otto, run its cells on the user-wide Python, see the outputs, edit cells, and ask the module's agent to read, debug and run them. Without it, experiments stay in VS Code with the kernel handling the owner dislikes, and the agent has no view of them.
 
@@ -122,7 +122,6 @@ Needs you
 
 | Item | How |
 |---|---|
-| `science.root` | pending decision 1 |
 | Scientific packages in the user-wide Python (numpy, pandas, matplotlib are not installed today) | `C:\Users\gudo\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pip install <pkg>` as experiments need them; the module does not manage them |
 
 Verify
@@ -131,7 +130,7 @@ Verify
 |---|---|
 | Kernel launches on the user-wide Python | `.venv/Scripts/python.exe -c "import asyncio; from jupyter_client.manager import AsyncKernelManager; from jupyter_client.kernelspec import KernelSpec, KernelSpecManager; PY=r'C:\Users\gudo\AppData\Local\Python\pythoncore-3.14-64\python.exe'; S=type('S',(KernelSpecManager,),{'get_kernel_spec':lambda self,n: KernelSpec(argv=[PY,'-m','ipykernel_launcher','-f','{connection_file}'],display_name='otto',language='python')}); km=AsyncKernelManager(kernel_name='otto',kernel_spec_manager=S()); asyncio.run(km.start_kernel()); print('ok'); asyncio.run(km.shutdown_kernel(now=True))"` |
 | Pins match the machine | `.venv/Scripts/python.exe -m pip index versions jupyter_client` and `... nbformat` |
-| `root` exists and holds notebooks | `ls <root>/**/*.ipynb` |
+| `root` is created at boot | `ls data/workspace/science` after `python -m app` |
 
 ## Worktree
 
@@ -143,4 +142,4 @@ Work there. When `science` is merged to `main`, run `/sync-architecture`.
 
 ## Pending decisions
 
-1. Which directory is `science.root`? No `.ipynb` was found under `C:\Users\gudo` outside `AppData` today. A folder inside `data.workspace` would also let the agent's `Grep` builtin search the notebooks; a folder elsewhere keeps experiments out of the repo tree. Name the path.
+None. `science.root` was decided on 2026-09-08 (decision 6).
