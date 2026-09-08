@@ -54,6 +54,14 @@ class Business:
 
 
 @dataclass(frozen=True)
+class Science:
+    python: str
+    root: Path
+    idle_minutes: int
+    tool_output_chars: int
+
+
+@dataclass(frozen=True)
 class Ui:
     start_page: str
     refresh_seconds: int
@@ -70,6 +78,7 @@ class Config:
     data: Data
     nightly: Nightly
     business: Business
+    science: Science
     ui: Ui
 
     @property
@@ -87,5 +96,6 @@ def load(root: Path = ROOT) -> Config:
         data=Data(db=root / raw["data"]["db"], workspace=root / raw["data"]["workspace"]),
         nightly=Nightly(**raw["nightly"]),
         business=Business(**raw["business"]),
+        science=Science(**{**raw["science"], "root": root / raw["science"]["root"]}),
         ui=Ui(**raw["ui"]),
     )

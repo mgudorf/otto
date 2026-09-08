@@ -59,7 +59,7 @@ export function Row({ row, selected, onSelect, hue, fmt, height = 36 }) {
       <span style=${{ position: 'absolute', left: 0, top: 0, bottom: 0, background: hue, width: `${lead.pct}%` }} /></span>`;
   return html`<div class="row" onClick=${onSelect} style=${{ display: 'flex', alignItems: 'center', gap: 12, height, padding: '0 12px', borderRadius: 6, cursor: 'pointer', background: selected ? T.raised : 'transparent' }}>
     ${leading}
-    <span style=${{ flex: '1 1 auto', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: row.done ? T.dim : T.text, textDecoration: row.done ? 'line-through' : 'none' }}>${row.text}</span>
+    <span style=${{ flex: '1 1 auto', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: row.done ? T.dim : T.text, textDecoration: row.done ? 'line-through' : 'none', ...(row.mono ? mono13 : {}) }}>${row.text}</span>
     <span style=${{ flex: 'none', ...mono13, color: T.dim }}>${row.stampText !== undefined ? row.stampText : stamp(row.stamp, fmt)}</span>
   </div>`;
 }

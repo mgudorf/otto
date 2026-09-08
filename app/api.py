@@ -370,9 +370,14 @@ def _closer(st, mod, sid: str):
 
 @router.get("/api/session/{module}/events")
 async def session_events(request: Request, module: str) -> StreamingResponse:
-    st = request.app.state
     _module(request, module)
-    q = st.broadcast.subscribe(module)
+    return event_stream(request, module)
+
+
+def event_stream(request: Request, key: str) -> StreamingResponse:
+    """Server-sent events for one broadcast key, until the client disconnects."""
+    st = request.app.state
+    q = st.broadcast.subscribe(key)
 
     async def gen():
         try:
@@ -387,6 +392,6 @@ async def session_events(request: Request, module: str) -> StreamingResponse:
                     continue
                 yield f"data: {json.dumps(ev)}\n\n"
         finally:
-            st.broadcast.unsubscribe(module, q)
+            st.broadcast.unsubscribe(key, q)
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

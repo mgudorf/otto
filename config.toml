@@ -29,6 +29,12 @@ max_minutes = 15              # per run; the process is killed past this
 [business]
 leads_per_run = 3           # new leads the nightly scout may queue per run
 
+[science]
+python = "C:/Users/gudo/AppData/Local/Python/pythoncore-3.14-64/python.exe"  # interpreter every kernel runs on
+root = "data/workspace/science"  # notebooks and scripts; created at boot, inside the Claude workspace
+idle_minutes = 60                # a kernel unused this long is shut down by science.reap
+tool_output_chars = 2000         # per-output cap in what the agent's tools return
+
 [ui]
 start_page = "home"
 refresh_seconds = 30

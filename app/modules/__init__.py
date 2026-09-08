@@ -8,7 +8,8 @@ A module is a package under app/modules/<name>/ with:
                 (all optional; route handlers must not share these names)
   tools.py      register(read, full, store) adding MCP tools (optional)
   agent.md      system prompt for the module's Claude session (optional)
-A module that fails to import is recorded and skipped; the rest of the app keeps running.
+  setup(config) / async shutdown()   on the package, for modules that own process resources (optional)
+A module that fails to import or set up is recorded and skipped; the rest of the app keeps running.
 """
 
 from __future__ import annotations
@@ -73,6 +74,8 @@ class Module:
     context: Callable[[Any, Any], str] | None   # (store, registry) -> text for the agent's system prompt
     register_tools: Callable[..., None] | None
     prompt: str | None
+    setup: Callable[[Any], None] | None = None          # (config) at build, for modules holding process resources
+    shutdown: Callable[[], Awaitable[None]] | None = None  # awaited when the daemon stops
 
     @property
     def name(self) -> str:
@@ -127,6 +130,8 @@ class Registry:
             context=getattr(routes_mod, "context", None),
             register_tools=getattr(tools_mod, "register", None),
             prompt=prompt_file.read_text("utf-8") if prompt_file else None,
+            setup=getattr(mod, "setup", None),
+            shutdown=getattr(mod, "shutdown", None),
         )
 
     def ordered(self) -> list[Module]:
