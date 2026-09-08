@@ -30,7 +30,7 @@ Version 0 is manual entry only: no bank, broker or price feed, no scheduled work
 | 5 | LEFT groups by kind, the stamp slot shows the amount, the leading slot is an active or ended dot | Amount is what the owner scans for; the entry time is visible in the inspector |
 | 6 | Search is `LIKE` over name and note, no paging | Tens of rows, typed by hand. FTS5 and paging would be structure without function |
 | 7 | No schedules and no LLM task | Nothing arrives from outside to sync or annotate. The scheduler table shows no Finance rows, which is correct |
-| 8 | The agent has read tools only; writes go through the page | ARCHITECTURE limits the Finance agent to questions. A read-only agent also makes the read/write split trivial to prove |
+| 8 | The agent has read tools only; writes go through the page | Owner's ruling, 2026-09-08: agents are read-only for insight for now; writes are left to a future version. ARCHITECTURE also limits the Finance agent to questions, and a read-only agent makes the read/write split trivial to prove |
 | 9 | Ended entries stay listed, struck through, at the foot of their group | A cancelled subscription is still a fact the agent may be asked about; `forget` exists for mistakes |
 
 Rejected: a currency setting; a separate table per kind; FTS5 over entries; paging with `ui.page_size`; a nightly summary task; agent write tools (`finance_add`, `finance_update`); a document kind (documents belong to Business per the ARCHITECTURE split).
@@ -149,4 +149,4 @@ Work in `../otto-finance`. When the branch is merged to `main`, run `/sync-archi
 
 ## Pending decisions
 
-1. Should the Finance agent be able to add or update entries from the session, as the Memory agent can? Version 0 plans a read-only agent; every write is a page action.
+None. The agent-write question was settled read-only on 2026-09-08 (Decision 8).
