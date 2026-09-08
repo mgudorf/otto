@@ -1,8 +1,11 @@
-"""Education: topics, questions and grading end to end, and the read/write tool split."""
+"""Education: topics, questions and grading end to end, the nightly generate task, and the read/write tool split."""
+
+import json
 
 from app.daemon import build
 from app.modules.education.tools import add_question, grade
-from tests.conftest import run
+from app.store import now_iso
+from tests.conftest import fake_spawn, run
 from tests.test_app import client_for
 
 
@@ -87,3 +90,47 @@ def test_education_tool_split(config):
     writes = {"education_add_topic", "education_add_question", "education_grade", "education_record_feedback"}
     assert reads <= read and not (writes & read)
     assert reads | writes <= full
+
+
+def test_generate_task(config, monkeypatch):
+    reply = json.dumps([
+        {"topic_id": 1, "title": "Entropy, really", "premise": "S counts arrangements.", "parts": ["a", "b", "c"], "difficulty": 3},
+        {"topic_id": 1, "title": "Second for the same topic", "premise": "p", "parts": ["a", "b", "c"], "difficulty": 3},
+        {"topic_id": 9, "title": "Wrong topic", "premise": "p", "parts": ["a", "b", "c"], "difficulty": 3},
+        {"topic_id": 1, "title": "Two parts", "premise": "p", "parts": ["a", "b"], "difficulty": 3},
+    ])
+    fenced = "```json\n" + reply + "\n```"
+    lines = [json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": fenced, "session_id": "g1"})]
+
+    async def main():
+        app = build(config, spawn_fn=fake_spawn(lines))
+        await app.state.runner.start()
+        st = app.state
+        store = st.store
+        monkeypatch.setattr(st.claude, "budget", lambda: {"used": 0, "max": 3, "window": "02:00-05:00", "in_window": True})
+        task = st.registry.get("education").tasks["generate"]
+
+        async def run_once():
+            job = st.runner.submit("education.generate", "education", "education", "scheduled", task)
+            return await job.done
+
+        assert str(await run_once()) == "no topics"
+        store.execute("INSERT INTO topics(name, difficulty, created_at) VALUES ('Physics', 3, ?)", (now_iso(),))
+        out = await run_once()
+        assert out.startswith("1 new question(s) for Physics") and "3 rejected" in out
+        q = store.one("SELECT * FROM questions")
+        assert q["title"] == "Entropy, really" and q["source"] == "nightly" and q["started_at"] is None
+        assert store.scalar("SELECT COUNT(*) FROM question_parts") == 3 and store.cursor("education.generate")
+        # a budget refusal ends as skipped, not failed
+        monkeypatch.setattr(st.claude, "budget", lambda: {"used": 3, "max": 3, "window": "02:00-05:00", "in_window": True})
+        assert "budget" in str(await run_once())
+        # a full queue never spends a run
+        for i in range(config.education.queue_size):
+            add_question(store, 1, f"filler {i}", "p", ["a", "b", "c"], 3, "nightly", False)
+        assert str(await run_once()).startswith("queue full")
+        assert [r["status"] for r in store.query("SELECT status FROM jobs ORDER BY id")] == ["skipped", "done", "skipped", "skipped"]
+        assert store.scalar("SELECT COUNT(*) FROM events WHERE verb = 'failed'") == 0
+        await st.runner.drain(1)
+        store.close()
+
+    run(main())

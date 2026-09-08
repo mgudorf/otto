@@ -26,6 +26,8 @@ def validate_question(store: Store, topic_id, title, premise, parts, difficulty)
     """The rules every new question meets, nightly or in session. Returns the problem, or None."""
     if store.one("SELECT id FROM topics WHERE id = ? AND retired_at IS NULL", (topic_id,)) is None:
         return f"no active topic {topic_id}"
+    if not isinstance(parts, (list, tuple)):
+        return "parts must be a list"
     n = len(_clean_parts(parts))
     if not PARTS[0] <= n <= PARTS[1]:
         return f"a question has {PARTS[0]} to {PARTS[1]} parts, got {n}"
