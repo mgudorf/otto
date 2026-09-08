@@ -24,7 +24,7 @@ Science lets the owner open a notebook from Otto, run its cells on the user-wide
 | 3 | A run is a queued job on resource `kernel:<path>`; the route returns the job id. Outputs stream to the page over server-sent events through the shell's `Broadcast` on key `science`; the page reloads the item when the cell finishes | Runs on one notebook serialize, long cells never hit an HTTP timeout, and the page stays a view of daemon state. Reuses the session pane's mechanism |
 | 4 | No module tables. LEFT walks `science.root` at request time | The file system is the index; a table would be a copy that has to be kept in sync |
 | 5 | Kernels live in `app.state.kernels`, die with the daemon (lifespan shuts them down), and a scheduled `reap` shuts down kernels idle past `science.idle_minutes` | Kernels are daemon-owned resources in a process that runs from logon; without a reaper memory only grows |
-| 6 | The agent reads notebooks through MCP tools, never the CLI's `Read` builtin | The CLI's cwd is `data.workspace` and its file tools are confined there; `root` lives elsewhere (pending decision 1) |
+| 6 | `root` is `data/workspace/science`, created at boot if missing. The agent reads notebooks through the `science_*` tools; the CLI's `Read` and `Grep` builtins reach the same files because `root` sits under `data.workspace` | Owner's decision, 2026-09-08. Tools give shaped cells and capped outputs where raw `.ipynb` JSON is noise; search across notebooks comes free |
 | 7 | Agent write tools are `science_run` and `science_set_cell` only. Delete cell, new notebook, interrupt, restart and shutdown are UI actions | Daemon contract: deletion is a user action; debugging needs run and refactor needs set |
 | 8 | `.py` files are listed and viewable with the label `module`, not runnable | Artboard shows `module` with no kernel state; scripts are a different execution model, out of version 0 |
 | 9 | Outputs rendered: `stream` and `text/plain` in mono, `image/png` as an image, `text/html` as the kernel's own markup, errors as the traceback in `#cf7b7b` | Covers the artboard's three output kinds (text, table, plot); tracebacks need a color the artboard does not give |
@@ -52,7 +52,7 @@ Rejected: nbclient (batch-executes a whole notebook, no interactive kernel); a `
 
 Manifest: `name="science"`, `title="Science"`, `hue="#6fb3b8"`, `icon='<path d="M8 3v6l-4.5 7.5A1 1 0 0 0 4.4 18h11.2a1 1 0 0 0 .9-1.5L12 9V3"></path><path d="M6.5 3h7"></path><path d="M6 13h8"></path>'`, `order=4`, `schedules=(Schedule(task="reap", every="5m", resource="science"),)`, `agent=Agent(placeholder="Ask about the notebook…", skills=("inspect-cell", "run", "explain-output", "refactor"), read_tools=("science_files", "science_notebook", "science_cell", "science_kernels"), write_tools=("science_run", "science_set_cell"))`.
 
-Config `[science]` (boot): `python` (interpreter path), `root` (directory of `.ipynb` and `.py` files, walked recursively), `idle_minutes` (reap threshold), `tool_output_chars` (per-output cap in agent tool replies). No live settings.
+Config `[science]` (boot): `python` (interpreter path), `root` = `data/workspace/science` (directory of `.ipynb` and `.py` files, walked recursively; gitignored with the workspace, so the daemon creates it at boot), `idle_minutes` (reap threshold), `tool_output_chars` (per-output cap in agent tool replies). No live settings.
 
 | Route | Wire shape |
 |---|---|
