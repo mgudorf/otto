@@ -65,7 +65,7 @@ Routes, prefix `/api/web_search`:
 | `POST action/topic_remove` | `{id}` → `{id}`; findings keep their `kind` |
 | `POST action/agree`, `POST action/disagree` | `{id}` → `{id, status}`; 409 when already decided; event `agreed` / `disagreed` with `ref`. Two verbs so Home's generic inspector can post them with only an id |
 
-Hooks: `numbers` → open findings, label `to review`; `today` → findings found in the local day, any status; `item`; `context` → topics by kind, the open queue, last run stamp.
+Hooks: `numbers` → open findings, label `to review`; `today` → findings found in the local day, any status; `queue` → every open finding, newest first, in the LEFT row shape (Home's `Review` group, per `docs/roadmap/homepage/PLAN.md`); `item`; `context` → topics by kind, the open queue, last run stamp.
 
 Page: LEFT is search, chips, rows by night. MIDDLE blank is the topic editor (kind chips, input, `Add`, topics as removable chips) above the open queue, each row with `Agree` / `Disagree` like Memory's suggestions. MIDDLE selected is the shared Inspector.
 
