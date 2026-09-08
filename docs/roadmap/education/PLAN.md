@@ -30,14 +30,14 @@ Education keeps a queue of conceptual questions on the owner's topics, grades th
 | 6 | The prompt lists every prior title on the topic as "never repeat these or close variants" | Constraint 1: a question is asked once, even when answered badly. Skipped questions count as asked |
 | 7 | The tutor can write a question on demand with `education_add_question`, which starts it immediately | Day one has no nightly output yet; "quiz me on X now" is the natural tutor request. Same insert as the nightly path, `source = session` |
 | 8 | Owner feedback is stored verbatim in its own table, separate from the tutor's notes | Requirement 5 and agent_base: the owner's words are quoted literally; the generator reads both |
-| 9 | `register(read, full, store, config)`: tool registration receives the config | `education_grade` needs the flow band and `education_add_topic` needs `start_difficulty`; tools are daemon code and get daemon config through the seam, not a second `config.toml` read. Memory's signature gains the parameter and ignores it |
+| 9 | Education's tools take their knobs through `register(read, full, store, config=None)`, loading `config.toml` when the daemon passes nothing | `education_grade` needs the flow band and `education_add_topic` needs `start_difficulty`. The database worktree already changes the shared seam to pass config while finance, graph and web_search add three-argument registers, so touching the seam here would collide at merge; the optional argument works on both sides of that change |
 | 10 | Knobs in `config.toml` under `[education]`: `queue_size`, `start_difficulty`, `flow_low`, `flow_high` | Boot values like `[nightly]`; nothing hidden in code. `queue_size` is 3: the owner expects about three questions a day |
 | 11 | LEFT search uses `LIKE` over title and premise, no FTS table | A few questions a day; triggers and a virtual table buy nothing here |
 | 12 | Questions are worked on demand from the queue; nothing is scheduled to a date | The owner pursues Education when there is time. The nightly run keeps three waiting and the tutor writes more on request, so a free day is never short of questions and there is no calendar state to maintain |
 | 13 | The task catches `BudgetExceeded` and returns `Skipped` | The per-task fix named in `docs/bugs/budget-refusal-marks-job-failed.md`; a refusal must not read as a failure in Activity |
 | 14 | A topic is one of the owner's domains; progress is tracked per topic: difficulty, graded/asked, average, the last five scores, last asked. Each question keeps its score and per-part notes | Requirement 3 at the level the owner thinks in; per-question history keeps the finer grain without a second table |
 
-Rejected: grading through a MIDDLE answer form with a one-shot LLM call; whole-question grading with one score list; a per-topic rolling average with a window knob; FTS5 for search; reading `config.toml` again inside `tools.py`; seeding topics in code.
+Rejected: grading through a MIDDLE answer form with a one-shot LLM call; whole-question grading with one score list; a per-topic rolling average with a window knob; FTS5 for search; changing the shared registration seam in this branch; seeding topics in code.
 
 ## Layout
 
@@ -47,15 +47,13 @@ Rejected: grading through a MIDDLE answer form with a one-shot LLM call; whole-q
 | `app/modules/education/schema.sql` | `topics`, `questions`, `question_parts`, `feedback` |
 | `app/modules/education/tasks.py` | `generate(ctx)` |
 | `app/modules/education/routes.py` | `left`, `blank`, `item/{id}`, `action/{start\|skip\|add_topic\|retire_topic}`, hooks `numbers`, `today`, `item`, `context` |
-| `app/modules/education/tools.py` | `add_question`, `grade` as plain functions; `register(read, full, store, config)` wraps them and the read tools |
+| `app/modules/education/tools.py` | `validate_question`, `insert_question`, `add_question`, `grade` as plain functions; `register(read, full, store, config=None)` wraps them and the read tools |
 | `app/modules/education/agent.md` | the tutor's job |
 | `app/static/pages/education.js` | `load`, `meta`, `Left`, `Middle` |
 | `app/static/shell.js` | import `pages/education.js`, add it to `PAGES` |
 | `app/config.py` | `Education` dataclass, `education` field on `Config`, one line in `load` |
 | `config.toml` | `[education]` section |
-| `app/daemon.py` | pass `config` to each module's `register` |
-| `app/modules/__init__.py` | docstring: `register(read, full, store, config)` |
-| `app/modules/memory/tools.py` | `register` accepts and ignores `config` |
+| `tests/test_app.py` | the memory test finds its Home group and number by module name; Education now precedes Memory |
 | `tests/test_education.py` | the three tests below |
 
 ## Contract
@@ -148,7 +146,7 @@ No external system is touched. The split is proved by `test_education_tool_split
 
 | Phase | Builds | Usable result |
 |---|---|---|
-| 1 | schema, manifest, `[education]` config and dataclass, the `register` seam, routes and hooks, tools, `agent.md`, page, `shell.js` entry, `test_education_end_to_end`, `test_education_tool_split` | The owner enters the fourteen topics, asks the tutor for a question, answers it in the pane part by part, watches the score bar in LEFT and the topic's difficulty and recent scores move, and sees `N due` on Home |
+| 1 | schema, manifest, `[education]` config and dataclass, routes and hooks, tools, `agent.md`, page, `shell.js` entry, `test_education_end_to_end`, `test_education_tool_split` | The owner enters the fourteen topics, asks the tutor for a question, answers it in the pane part by part, watches the score bar in LEFT and the topic's difficulty and recent scores move, and sees `N due` on Home |
 | 2 | `tasks.py generate`: queue top-up, topic rotation, no-repeat list, JSON parse, `BudgetExceeded` to `Skipped`, cursor; `test_generate_task` | Three questions wait each morning; Activity shows the run and its result |
 
 ## Tests
