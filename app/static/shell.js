@@ -5,10 +5,11 @@ import { get, inflight } from './api.js';
 import { Session } from './session.js';
 import * as home from './pages/home.js';
 import * as memory from './pages/memory.js';
+import * as business from './pages/business.js';
 import * as activity from './pages/activity.js';
 import * as settings from './pages/settings.js';
 
-const PAGES = { home, memory, activity, settings };
+const PAGES = { home, memory, business, activity, settings };
 const FOOT = [
   { name: 'activity', title: 'Activity', hue: '#e6e7ea', icon: '<path d="M3 12h4l2-6 3 10 2-6h3"></path>' },
   { name: 'settings', title: 'Settings', hue: '#e6e7ea', icon: '<circle cx="10" cy="10" r="6.5"></circle><circle cx="10" cy="10" r="2"></circle>' },
