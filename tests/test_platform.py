@@ -37,7 +37,7 @@ def test_registry_loads_real_modules():
     import inspect
 
     for m in reg.modules.values():
-        for hook in (m.numbers, m.today, m.item, m.context):
+        for hook in (m.numbers, m.today, m.queue, m.item, m.context):
             if hook is not None:
                 assert "request" not in inspect.signature(hook).parameters, f"{m.name}: {hook.__name__} is a route, not a hook"
     assert reg.get("home").numbers is None and reg.get("home").context is not None
@@ -55,6 +55,24 @@ def test_registry_skips_broken_module(tmp_path: Path, monkeypatch):
     reg.load("pkgx")
     assert set(reg.modules) == {"good"}
     assert "broken on purpose" in reg.errors["bad"]
+
+
+def test_registry_picks_up_queue_hook(tmp_path: Path, monkeypatch):
+    """A routes.py that defines queue(store) reaches Module.queue; one that does not leaves it None."""
+    pkg = tmp_path / "pkgq"
+    (pkg / "withq").mkdir(parents=True)
+    (pkg / "without").mkdir()
+    (pkg / "__init__.py").write_text("")
+    manifest = "from app.modules import Manifest\nMANIFEST = Manifest(name='{n}', title='{n}', hue='#fff', icon='', order=1)\n"
+    (pkg / "withq" / "__init__.py").write_text(manifest.format(n="withq"))
+    (pkg / "withq" / "routes.py").write_text("def queue(store):\n    return [{'id': 1, 'text': 'waiting'}]\n")
+    (pkg / "without" / "__init__.py").write_text(manifest.format(n="without"))
+    monkeypatch.syspath_prepend(str(tmp_path))
+    reg = Registry()
+    reg.load("pkgq")
+    assert reg.errors == {}
+    assert reg.get("withq").queue(None) == [{"id": 1, "text": "waiting"}]
+    assert reg.get("without").queue is None
 
 
 def test_tasks_never_reach_interactive_claude():

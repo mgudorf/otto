@@ -1,10 +1,12 @@
 """Routes through the real app: memory module end to end, and sessions with a fake CLI."""
 
 import json
+from pathlib import Path
 
 import httpx
 
 from app.daemon import build
+from app.modules import Manifest, Module
 from tests.conftest import fake_spawn, run
 
 INIT = json.dumps({"type": "system", "subtype": "init", "session_id": "s1", "tools": ["mcp__otto__memory_search"]})
@@ -27,6 +29,24 @@ async def settle(app):
         await asyncio.sleep(0.01)
         if not app.state.runner.running and app.state.runner._queue.empty():
             return
+
+
+def queue_module(pending: list[dict]) -> Module:
+    """A page module whose only hook is queue(store); stands in for web_search."""
+    return Module(
+        manifest=Manifest(name="queued", title="Queued", hue="#d9915b", icon="", order=9),
+        path=Path(__file__).parent,
+        tasks={},
+        router=None,
+        schema=None,
+        numbers=None,
+        today=None,
+        queue=lambda store: list(pending),
+        item=None,
+        context=None,
+        register_tools=None,
+        prompt=None,
+    )
 
 
 def test_memory_end_to_end(config):
@@ -115,6 +135,49 @@ def test_failed_first_turn_retires_session(config):
             assert s["session"] is None
             rows = app.state.store.query("SELECT * FROM sessions")
             assert rows[0]["closed_at"] and rows[0]["title"] == "(failed to start)"
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())
+
+
+def test_home_review_group(config):
+    """A module with a queue hook leads Home with every waiting row; empty or disabled, it shows nothing."""
+    pending = [
+        {"id": 7, "module": "queued", "text": "a finding worth reading", "stamp": "2026-09-08T09:00:00+00:00"},
+        {"id": 8, "module": "queued", "text": "another finding", "stamp": "2026-09-08T08:00:00+00:00"},
+    ]
+
+    async def main():
+        app = build(config)
+        await app.state.runner.start()
+        st = app.state
+        st.registry.modules["queued"] = queue_module(pending)
+        st.store.set_setting("modules.queued.enabled", True)
+        home = st.registry.get("home")
+        async with client_for(app) as c:
+            await c.post("/api/memory/action/capture", json={"kind": "note", "text": "a note from today"})
+
+            groups = (await c.get("/api/home/left")).json()["groups"]
+            assert groups[0]["module"] == "queued" and groups[0]["label"] == "Review"
+            assert groups[0]["count"] == 2 and groups[0]["more"] == 0
+            assert [r["id"] for r in groups[0]["rows"]] == [7, 8]
+            assert [g["module"] for g in groups if g["label"] == "Review"] == ["queued"]
+            assert any(g["module"] == "memory" and g["label"] == "Memory" for g in groups)
+            text = home.context(st.store, st.registry)
+            assert "Review: 2 waiting" in text
+            assert "  - (queued 7) a finding worth reading" in text and "  - (queued 8) another finding" in text
+
+            pending.clear()
+            groups = (await c.get("/api/home/left")).json()["groups"]
+            assert all(g["label"] != "Review" for g in groups)
+            assert "Review: nothing waiting" in home.context(st.store, st.registry)
+
+            pending.extend([{"id": 7, "module": "queued", "text": "back again", "stamp": "2026-09-08T09:00:00+00:00"}])
+            st.store.set_setting("modules.queued.enabled", False)
+            groups = (await c.get("/api/home/left")).json()["groups"]
+            assert all(g["label"] != "Review" for g in groups)
+            assert "Review" not in home.context(st.store, st.registry)
         await app.state.runner.drain(1)
         app.state.store.close()
 
