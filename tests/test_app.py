@@ -31,8 +31,8 @@ async def settle(app):
             return
 
 
-def queue_module(pending: list[dict]) -> Module:
-    """A page module whose only hook is queue(store); stands in for web_search."""
+def queue_module(pending: list[dict], todays: list[dict]) -> Module:
+    """A page module with both hooks, as web_search will have: a queue and today's rows."""
     return Module(
         manifest=Manifest(name="queued", title="Queued", hue="#d9915b", icon="", order=9),
         path=Path(__file__).parent,
@@ -40,7 +40,7 @@ def queue_module(pending: list[dict]) -> Module:
         router=None,
         schema=None,
         numbers=None,
-        today=None,
+        today=lambda store: list(todays),
         queue=lambda store: list(pending),
         item=None,
         context=None,
@@ -147,12 +147,13 @@ def test_home_review_group(config):
         {"id": 7, "module": "queued", "text": "a finding worth reading", "stamp": "2026-09-08T09:00:00+00:00"},
         {"id": 8, "module": "queued", "text": "another finding", "stamp": "2026-09-08T08:00:00+00:00"},
     ]
+    todays = [{"id": 9, "module": "queued", "text": "found this morning", "stamp": "2026-09-08T07:00:00+00:00"}]
 
     async def main():
         app = build(config)
         await app.state.runner.start()
         st = app.state
-        st.registry.modules["queued"] = queue_module(pending)
+        st.registry.modules["queued"] = queue_module(pending, todays)
         st.store.set_setting("modules.queued.enabled", True)
         home = st.registry.get("home")
         async with client_for(app) as c:
@@ -164,6 +165,10 @@ def test_home_review_group(config):
             assert [r["id"] for r in groups[0]["rows"]] == [7, 8]
             assert [g["module"] for g in groups if g["label"] == "Review"] == ["queued"]
             assert any(g["module"] == "memory" and g["label"] == "Memory" for g in groups)
+            # one module, two groups: the page keys them label:module, so the keys stay distinct
+            mine = [(g["label"], g["module"]) for g in groups if g["module"] == "queued"]
+            assert mine == [("Review", "queued"), ("Queued", "queued")]
+            assert len({f"{label}:{mod}" for label, mod in mine}) == 2
             text = home.context(st.store, st.registry)
             assert "Review: 2 waiting" in text
             assert "  - (queued 7) a finding worth reading" in text and "  - (queued 8) another finding" in text
