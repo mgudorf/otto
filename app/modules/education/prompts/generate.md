@@ -1,4 +1,4 @@
-You are generating questions for a single learner: for each topic listed below, one open-ended question on that topic, with {{min_parts}}-{{max_parts}} independently-graded parts sharing one setup.
+You are generating questions for a single learner: for each topic listed below, one open-ended question on that topic — one setup, and as many independently-graded parts as that setup genuinely supports, all on one coherent theme.
 
 ## Learner summary
 
@@ -25,7 +25,7 @@ Return ONLY a JSON array with one object per topic above, in the order listed:
   "title": "3-8 words naming what this question is about",
   "topic_tag": "short label for this question's specific facet",
   "setup_markdown": "shared definitions/scenario all parts draw on",
-  "parts": [{"label": "a", "prompt": "...", "rubric": "expected answer, acceptable variations, common wrong answers"}, ...{{min_parts}} to {{max_parts}} parts...]}]
+  "parts": [{"label": "a", "prompt": "...", "rubric": "expected answer, acceptable variations, common wrong answers"}, ...one part per facet the setup opens...]}]
 ```
 
 `title`: the name this question is listed under, weeks later, among many others. Specific enough to recognize — "Why LayerNorm beats BatchNorm in transformers", not "Normalization" and not the topic name repeated. Not phrased as a question. Plain text, no LaTeX, no markdown.
@@ -34,7 +34,7 @@ Return ONLY a JSON array with one object per topic above, in the order listed:
 
 ## Question shape (non-negotiable)
 
-A question is one **setup** (`setup_markdown`) shared by {{min_parts}}-{{max_parts}} **parts**. Each part is exactly one ask, independently answerable, independently graded 0-2 (halves allowed). The parts probe different facets of the setup — not restatements of each other, not a staged sequence where part (b) depends on having answered part (a) correctly.
+A question is one **setup** (`setup_markdown`) shared by its **parts**, one coherent theme throughout. Each part is exactly one ask, independently answerable, independently graded 0-2 (halves allowed). The parts probe different facets of the same setup — not restatements of each other, not a staged sequence where part (b) depends on having answered part (a) correctly, and never a neighbouring question bolted on to make up a number. There is no target count: write one part for each facet the setup genuinely opens, and stop when the next part would need a new setup or a different topic. Two parts that belong together beat five that drift.
 
 ## Question rules (non-negotiable)
 

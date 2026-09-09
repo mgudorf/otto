@@ -4,7 +4,7 @@ Status: planning, 2026-09-09. Version 1, on the built v0 base (2026-09-08).
 
 Education keeps a queue of questions on the owner's topics and grades the owner's answers. Version 1 brings
 back the question and answer format of the owner's previous project (`mylife`): one titled question with a
-shared setup written in markdown and LaTeX, three to five lettered parts each with a hidden rubric, an answer
+shared setup written in markdown and LaTeX, lettered parts on one theme each with a hidden rubric, an answer
 box under every part, and a verdict with an explanation landing right where the answer was typed. The
 generator's rules come over with it. The tutor on the right stays the place for conversation. Without it the
 middle shows plain-text questions written to a one-line rule, and every answer has to be typed into the chat.
@@ -31,7 +31,7 @@ middle shows plain-text questions written to a one-line rule, and every answer h
 
 | # | Decision | Why |
 |---|---|---|
-| 1 | The question shape is `mylife`'s: `title` (3 to 8 words, not a question), `topic_tag` (the facet, 2 to 5 words), a setup in markdown with math in LaTeX (`questions.premise` keeps its column), then 3 to 5 parts `(a)`…`(e)`, each one ask with a hidden rubric | The format the owner liked. Requirement 7 fixes the count at 3 to 5 where the old prompt allowed 7; one constant, `PARTS` |
+| 1 | The question shape is `mylife`'s: `title` (3 to 8 words, not a question), `topic_tag` (the facet, 2 to 5 words), a setup in markdown with math in LaTeX (`questions.premise` keeps its column), then lettered parts `(a)`, `(b)`, … each one ask with a hidden rubric | The format the owner liked |
 | 2 | One generator, `prompts/generate.md`: the old prompt's altitude paragraph and rules verbatim (define every variable and equation, no unexplained names, cross-field-expert basis, definitions in and explanations out, no leading, one ask per part, self-answer test, conceptual not computational, LaTeX, header acronyms bound in the body), plus Otto's topic context (difficulty 1 to 5, what the owner wants, every title asked, the last grades, the owner's feedback verbatim). It asks for one question per listed topic as a JSON array | The old altitude says what kind of question; the flow difficulty says how deep; they compose. One template, one parser, one validator on every path. An array keeps the nightly run one budgeted session for `queue_size` topics; a page press lists one topic |
 | 3 | A `Generate` button on the blank state: `POST action/generate` runs the generator through `oneshot` for the topic that has waited longest, awaited by the route, and the page selects the new question | The old module's one question per press; the only on-demand path through the generator rather than the tutor's hand. `oneshot` from a route is the Feedback precedent; unbudgeted |
 | 4 | Grading happens on the page. Submit stores the answer, starts the question, and runs `prompts/grade.md` (the old `grade_turn` reduced to one turn: verdict, score 0 to 2 in halves, explanation) through `oneshot`, awaited; the part then shows the answer, the explanation and a score pill in the verdict's colour | The answer format the owner liked. The exchange that followed in the old project (follow-ups, resolve) is the tutor's job now |
@@ -47,10 +47,11 @@ middle shows plain-text questions written to a one-line rule, and every answer h
 | 14 | `education_add_question` keeps the tutor's hand-written path in the new shape; the difficulty is the topic's | "quiz me on X now" stays a sentence to the tutor; the same validator gates both writers |
 | 15 | Actions stay `Start` and `Skip`; a submitted answer starts its question by itself | Home's inspector and the tutor's Current state key on the started question; the old view had no start step |
 | 16 | Not ported: assessments, educator rules and their compression, curriculum proposals and coverage, FSRS scheduling and the concept graph, misconceptions, takeaways, per-part feedback chips, delete | The request names three things. Conversation and feedback live in the session pane (`education_record_feedback`); the curriculum is the topics table |
+| 17 | No limit on the number of parts. The generator is asked for one part per facet the setup genuinely opens, on one theme, and to stop rather than pad; the validator requires only that a question has at least one part with a prompt and a rubric; labels run past `(z)` as `(aa)` | Owner, 2026-09-09: a count makes the model invent adjacent questions to reach it, and the result reads as several topics. Supersedes the count in requirement 7; its cohesion clause is what the prompt enforces |
 
 Standing from v0: 2, 3 (a part is graded on its own), 4 (difficulty per topic and the flow band), 5, 6, 8, 9, 10, 11, 12, 13, 14. Superseded: v0 decision 1 (grading in the session) by 4 and 5; v0 decision 7 keeps the tool but in the new shape (14).
 
-Rejected: grading in the tutor session with the page as a mirror (the middle would wait on a tool call it cannot see, and the explanation would show twice); multi-turn grading on the page (the session pane exists for that); CDN scripts; 0 to 2 scores in the store (every reader would change); a `migrate(store)` hook on the module contract (a shared seam every branch conflicts on, for one module's five columns); a per-topic Generate control (the breadth rule picks the topic); a takeaway line (a fourth LLM call for a line the owner did not ask for); keeping the old 3 to 7 parts (requirement 7 says 3 to 5; pending decision 1).
+Rejected: grading in the tutor session with the page as a mirror (the middle would wait on a tool call it cannot see, and the explanation would show twice); multi-turn grading on the page (the session pane exists for that); CDN scripts; 0 to 2 scores in the store (every reader would change); a `migrate(store)` hook on the module contract (a shared seam every branch conflicts on, for one module's five columns); a per-topic Generate control (the breadth rule picks the topic); a takeaway line (a fourth LLM call for a line the owner did not ask for); any part count at all, 3 to 5 or the old 3 to 7 (decision 17).
 
 ## Layout
 
@@ -71,7 +72,7 @@ Rejected: grading in the tutor session with the page as a mirror (the middle wou
 | `app/static/pages/education.js` | the question view with answer boxes; `Generate` on the blank state |
 | `tests/test_education.py` | rewritten, below |
 
-Untouched: `app/config.py`, `config.toml`, `app/static/shell.js`, `app/modules/__init__.py`, the other modules. No new knob: the format constants (`PARTS`, the halves-to-percent scale, the label letters) are the format, not settings.
+Untouched: `app/config.py`, `config.toml`, `app/static/shell.js`, `app/modules/__init__.py`, the other modules. No new knob: the format constants (the halves-to-percent scale, the label letters) are the format, not settings.
 
 ## Contract
 
@@ -89,7 +90,7 @@ Manifest, schedule (`education.generate`, 24h, resource `education`, llm), hooks
 | `education_questions(topic_id=None, status=None, limit=50)` | read | unchanged plus `topic_tag` |
 | `education_question(id)` | read | the item shape plus `rubric` on graded parts only |
 | `education_add_topic`, `education_record_feedback` | full | unchanged |
-| `education_add_question(topic_id, title, topic_tag, setup, parts)` | full | `parts` is 3 to 5 of `{prompt, rubric}`; validated as the generator's output is; difficulty from the topic; starts at once |
+| `education_add_question(topic_id, title, topic_tag, setup, parts)` | full | `parts` is any number of `{prompt, rubric}`, at least one; validated as the generator's output is; difficulty from the topic; starts at once |
 | `education_grade(question_id, part, score, note)` | full | score 0 to 100, note is the explanation shown under the answer; verdict from the score (100 correct, 0 incorrect, else partial); completion and flow as before |
 
 `context(store, registry)`: the topic table; the due count; the started question in full (title, tag, setup, then each part with its prompt, the answer or "not answered", the verdict, score and explanation once graded, and the rubric once graded); the last five graded; the latest feedback verbatim.
@@ -128,10 +129,10 @@ The split is proved by `test_education_tool_split` (unchanged), the AST guard ov
 
 ## Tests
 
-- `test_education_end_to_end`: a fake CLI answering in sequence (generate reply, grade replies, one non-JSON reply). Add a topic; `add_question` refuses two parts and a part without a rubric, accepts four; `item` carries labels and no rubric; `action/generate` inserts a question with rubrics and writes the event; `action/answer` grades part (a) to `correct` 100, starts the question, and the tutor's context shows the answer, the explanation and the rubric; a non-JSON reply answers 502 and keeps the answer, the retry grades it; 409 on a graded part, 400 empty, 404 bad part; `grade` completes the question, the topic's difficulty rises, LEFT shows the score, the spawn args of the grade run name `otto-read` and `--no-session-persistence`; search, skip, retire and return as in v0.
-- `test_generate_task`: reply array with one good element, a second for the same topic, a wrong topic, two parts, a part without a rubric: one inserted with rubrics and `source = nightly`, four rejected; cursor written; a budget refusal ends `skipped`; a full queue spends no run.
+- `test_education_end_to_end`: a fake CLI answering in sequence (generate reply, grade replies, one non-JSON reply). Add a topic; `add_question` refuses an empty part list and a part without a rubric, and the validator accepts one, two or four parts; `item` carries labels and no rubric; `action/generate` inserts a question with rubrics and writes the event; `action/answer` grades part (a) to `correct` 100, starts the question, and the tutor's context shows the answer, the explanation and the rubric; a non-JSON reply answers 502 and keeps the answer, the retry grades it; 409 on a graded part, 400 empty, 404 bad part; `grade` completes the question, the topic's difficulty rises, LEFT shows the score, the spawn args of the grade run name `otto-read` and `--no-session-persistence`; search, skip, retire and return as in v0.
+- `test_generate_task`: reply array with one good element, a second for the same topic, a wrong topic, no parts, a part without a rubric: one inserted with rubrics and `source = nightly`, four rejected; cursor written; a budget refusal ends `skipped`; a full queue spends no run.
 - `test_setup_adds_columns`: a v0-shaped database gains the five columns after `setup(config)`; a second call is a no-op; the v0 question still serves through `item`.
-- `test_unbound_acronyms`: `Tokenization and BPE` with a setup that never binds it → `["BPE"]`; bound → `[]`.
+- `test_unbound_acronyms`: `Tokenization and BPE` with a setup that never binds it → `["BPE"]`; bound → `[]`. `test_labels_run_past_z`: `(aa)` follows `(z)`.
 - `test_education_tool_split` and the existing guards unchanged; the suite stays offline.
 
 ## Manifest
@@ -160,7 +161,7 @@ Needs you
 
 | Item | How |
 |---|---|
-| The merge | `main` is mid-merge with `web_search` from another session (conflicts in `app/config.py`, `config.toml`, `app/static/shell.js`). This branch is committed on `education` and merges after that resolves: `git merge main` on the branch, run the suite, merge into `main`, `/sync-architecture` |
+| The merge | `main` moved under this branch during the build (the `web_search` merge, two plans). The branch has merged `main` and the suite is green there; what remains is `git merge education` on `main`, the suite on `main`, then `/sync-architecture` |
 | Daemon restart after the merge | `python -m app` restarts on the revision change; the columns land at boot |
 | The three v0 questions | answer or skip them; they render without a tag chip and grade without a rubric |
 
@@ -182,4 +183,4 @@ Exists; fast-forwarded to `main` at `191715e` today. Work there. When `education
 
 ## Pending decisions
 
-1. Parts per question: 3 to 5 as requirement 7 says (built), or the old prompt's 3 to 7? One constant, `PARTS` in `questions.py`, and the two numbers in `generate.md` follow it.
+None. The part count was settled on 2026-09-09: no limit, cohesion instead (decision 17).

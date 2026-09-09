@@ -6,7 +6,7 @@ import sqlite3
 from app.daemon import build
 from app.modules.education import setup
 from app.modules.education.grading import grade
-from app.modules.education.questions import add_question, unbound_acronyms
+from app.modules.education.questions import add_question, label, unbound_acronyms, validate_question
 from app.store import now_iso
 from tests.conftest import FakeProc, fake_spawn, run
 from tests.test_app import client_for
@@ -61,8 +61,10 @@ def test_education_end_to_end(config):
             assert (await c.post("/api/education/action/add_topic", json={"name": " "})).status_code == 400
             blank = (await c.get("/api/education/blank")).json()
             assert blank["due"] == 0 and blank["topics"][0]["difficulty"] == start_d and blank["topics"][0]["recent"] == []
-            # a question has 3 to 5 parts, each with a prompt and a rubric, and a title used once per topic
-            assert "parts" in add_question(store, tid, "Too short", "tag", "s", PARTS[:2], "nightly", False)["error"]
+            # a question has at least one part, each with a prompt and a rubric, and a title used once per topic; no count is imposed
+            assert "at least one part" in add_question(store, tid, "No parts", "tag", "s", [], "nightly", False)["error"]
+            assert validate_question(store, tid, "One part", "tag", "s", PARTS[:1]) is None
+            assert validate_question(store, tid, "Two parts", "tag", "s", PARTS[:2]) is None
             assert "(b) needs" in add_question(store, tid, "No rubric", "tag", "s", [PARTS[0], {"prompt": "x"}, PARTS[2]], "nightly", False)["error"]
             qid = add_question(
                 store, tid, "Why is the sky blue?", "Rayleigh scattering", "Sunlight is a mix of colours; $\\lambda$ is a wavelength.",
@@ -162,7 +164,7 @@ def test_education_tool_split(config):
 
 def test_generate_task(config, monkeypatch):
     reply = json.dumps([                                       # the malformed ones first: after a topic is served, its later elements are "not asked for"
-        {**QUESTION, "title": "Two parts", "parts": PARTS[:2]},
+        {**QUESTION, "title": "No parts", "parts": []},
         {**QUESTION, "title": "No rubric", "parts": [PARTS[0], {"prompt": "x"}, PARTS[2]]},
         {**QUESTION, "topic_id": 9, "title": "Wrong topic"},
         QUESTION,
@@ -191,7 +193,7 @@ def test_generate_task(config, monkeypatch):
         assert [p["rubric"] for p in store.query("SELECT rubric FROM question_parts ORDER BY n")] == [p["rubric"] for p in PARTS]
         assert store.cursor("education.generate")
         logs = " ".join(r["message"] for r in store.query("SELECT message FROM job_logs"))
-        assert "got 2" in logs and "(b) needs a prompt and a rubric" in logs and "topic 9 not asked for" in logs
+        assert "at least one part" in logs and "(b) needs a prompt and a rubric" in logs and "topic 9 not asked for" in logs
         # a budget refusal ends as skipped, not failed
         monkeypatch.setattr(st.claude, "budget", lambda: {"used": 3, "max": 3, "window": "02:00-05:00", "in_window": True})
         assert "budget" in str(await run_once())
@@ -244,3 +246,7 @@ def test_unbound_acronyms():
     parts = [{"prompt": "Why merge the most frequent pair?", "rubric": "r"}]
     assert unbound_acronyms("Tokenization and BPE", "subword merges", "LLMs", "Start from a 256-byte alphabet and merge pairs.", parts) == ["BPE", "LLM"]
     assert unbound_acronyms("Tokenization and BPE", "subword merges", "Agentic AI", "Byte-pair encoding (BPE) merges pairs.", parts) == []
+
+
+def test_labels_run_past_z():
+    assert [label(n) for n in (1, 2, 26, 27, 28, 52, 53)] == ["a", "b", "z", "aa", "ab", "az", "ba"]

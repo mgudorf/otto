@@ -105,7 +105,7 @@ class Question extends Component {
     const hue = mod.hue;
     const chip = { padding: '2px 8px', borderRadius: 6, fontSize: 13, color: T.muted, boxShadow: 'inset 0 0 0 1px rgba(230,231,234,.1)' };
     const when = `${dayLabel(item.created_at)} ${new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: fmt === '12h' })}`;
-    return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: '72ch' }}>
+    return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: '72ch', margin: '0 auto' }}>
       <div style=${{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <span style=${{ display: 'grid', placeItems: 'center', width: 16, height: 16, color: hue }}><${Icon} svg=${mod.icon} /></span>
         <span style=${{ ...mono13, color: T.muted }}>${item.kind} · ${when}</span>
@@ -193,7 +193,7 @@ export function Middle({ app, data, mod, fmt }) {
   };
   const cols = 'minmax(0,1fr) 28px 56px 40px 120px 64px 16px';
   const cell = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 720 }}>
+  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16 }}>
     <span style=${{ ...mono13, color: T.dim }}>${b.due} due · ${b.topics.length} topics</span>
     <${Generate} app=${app} hue=${hue} />
     <div style=${{ display: 'flex', flexDirection: 'column', ...mono13 }}>

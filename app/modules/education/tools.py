@@ -85,7 +85,7 @@ def register(read, full, store: Store, config=None) -> None:
         return {"id": tid, "difficulty": config.education.start_difficulty if not existing else existing["difficulty"]}
 
     def education_add_question(topic_id: int, title: str, topic_tag: str, setup: str, parts: list[dict]) -> dict:
-        """Write a question the owner will answer now on the page. title: 3 to 8 words naming it, not a question. topic_tag: its facet, 2 to 5 words. setup: the shared basis in markdown, every symbol and equation defined before use, math in LaTeX, no answer given away. parts: 3 to 5 of {prompt, rubric}, each prompt one ask answerable in a few sentences of reasoning (no computation), each rubric the expected answer, acceptable variations and common wrong answers, never shown to the owner. It starts at once."""
+        """Write a question the owner will answer now on the page. title: 3 to 8 words naming it, not a question. topic_tag: its facet, 2 to 5 words. setup: the shared basis in markdown, every symbol and equation defined before use, math in LaTeX, no answer given away. parts: {prompt, rubric} objects, one per facet the setup genuinely opens and no more (no target count), each prompt one ask answerable in a few sentences of reasoning (no computation), each rubric the expected answer, acceptable variations and common wrong answers, never shown to the owner. It starts at once."""
         out = add_question(store, topic_id, title, topic_tag, setup, parts, "session", True)
         if "id" in out:
             store.event("education", "asked", f"(agent) {title.strip()[:120]}", ref=str(out["id"]))

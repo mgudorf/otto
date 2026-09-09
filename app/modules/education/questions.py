@@ -2,8 +2,8 @@
 
 The reads shared by the routes, the tools, the task and the grader live here. The generator is one prompt,
 prompts/generate.md, written for the owner's previous project: one titled question per listed topic, a shared
-setup in markdown and LaTeX, PARTS lettered parts each with a hidden rubric. Every writer (the nightly task, a
-page press, the tutor's hand) passes validate_question; the two LLM writers also share render, parse_array and
+setup in markdown and LaTeX, lettered parts each with a hidden rubric, as many as the setup supports on one theme
+and never a count. Every writer (the nightly task, a page press, the tutor's hand) passes validate_question; the two LLM writers also share render, parse_array and
 unbound_acronyms.
 """
 
@@ -16,8 +16,6 @@ from pathlib import Path
 from app.store import Store, now_iso
 
 PROMPTS = Path(__file__).parent / "prompts"
-PARTS = (3, 5)                                                 # parts per question, requirement 7
-LABELS = "abcdefg"
 RECENT = 5                                                     # scores listed per topic, items listed in the agent's state
 OPEN = "q.graded_at IS NULL AND q.skipped_at IS NULL"
 SELECT = """SELECT q.*, t.name AS topic,
@@ -32,7 +30,12 @@ ACRONYM_EXCEPTIONS = {"AI", "ML", "II", "III", "IV", "VI", "VII", "VIII", "IX", 
 
 
 def label(n: int) -> str:
-    return LABELS[n - 1]
+    """(a), (b), ... and past (z) the spreadsheet way, (aa), (ab): no count is imposed on a question."""
+    out = ""
+    while n > 0:
+        n, r = divmod(n - 1, 26)
+        out = chr(97 + r) + out
+    return out
 
 
 # ---- reads ---------------------------------------------------------------------------------------
@@ -147,8 +150,6 @@ def generate_prompt(store: Store, topics: list[dict]) -> str:
         "summary": summary,
         "topics": "\n\n".join(_topic_block(store, t) for t in topics),
         "feedback": feedback_lines(store),
-        "min_parts": str(PARTS[0]),
-        "max_parts": str(PARTS[1]),
     })
 
 
@@ -181,8 +182,8 @@ def validate_question(store: Store, topic_id, title, topic_tag, setup, parts) ->
     if not isinstance(parts, (list, tuple)):
         return "parts must be a list"
     clean = clean_parts(parts)
-    if not PARTS[0] <= len(clean) <= PARTS[1]:
-        return f"a question has {PARTS[0]} to {PARTS[1]} parts, got {len(clean)}"
+    if not clean:
+        return "a question needs at least one part"
     for i, p in enumerate(clean, 1):
         if not p["prompt"] or not p["rubric"]:
             return f"part ({label(i)}) needs a prompt and a rubric"
