@@ -90,6 +90,11 @@ class Email:
 
 
 @dataclass(frozen=True)
+class WebSearch:
+    max_findings: int
+
+
+@dataclass(frozen=True)
 class Feedback:
     max_turns: int
 
@@ -100,6 +105,8 @@ class Ui:
     refresh_seconds: int
     time_format: str
     page_size: int
+    side_max: int
+    middle_max: int
 
 
 @dataclass(frozen=True)
@@ -116,6 +123,7 @@ class Config:
     education: Education
     database: Database
     email: Email
+    web_search: WebSearch
     feedback: Feedback
     ui: Ui
 
@@ -142,6 +150,7 @@ def load(root: Path = ROOT) -> Config:
             client_file=root / raw["email"]["client_file"], token_file=root / raw["email"]["token_file"],
             backfill_days=raw["email"]["backfill_days"], triage_batch=raw["email"]["triage_batch"],
         ),
+        web_search=WebSearch(**raw["web_search"]),
         feedback=Feedback(**raw["feedback"]),
         ui=Ui(**raw["ui"]),
     )

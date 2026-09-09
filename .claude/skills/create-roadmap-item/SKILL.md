@@ -11,9 +11,24 @@ git worktree. Assumes `main` is checked out and clean, and that `docs/ARCHITECTU
 
 ## Do this
 
-1. Name the item. `<slug>` is kebab-case: a module name from ARCHITECTURE.md (`email`,
-   `finance`) or a feature (`session-tabs`). If `docs/roadmap/<slug>/PLAN.md` exists,
-   update it; never create a second plan for the same item.
+1. Resolve the directory before writing anything. Every plan lives under
+   `docs/roadmap/<slug>/PLAN.md` and nowhere else — never `docs/roadmap/PLAN.md`, never a
+   bare file at the repo root, and never anywhere under `app/`. `app/` holds source code
+   and data only; a plan written there is a defect, not a shortcut.
+   - List `docs/roadmap/` and `app/modules/` first. They are the only source of the slug;
+     do not invent one from the request's wording. `app/modules/` is read here for the
+     canonical spelling of a module name and for nothing else — the skill never writes
+     into it.
+   - The item is an existing module: `<slug>` is that module's directory name copied
+     exactly, spelling and all — `home`, not `homepage`; `web_search` keeps its underscore.
+   - A `docs/roadmap/` directory already covers this item under any spelling: write into
+     that directory and update the `PLAN.md` in it. Never a suffixed sibling
+     (`-v1`, `-v2`, `-new`, `-rev`), never a second plan for one item. A rewrite, a later
+     version and a course correction are all edits to the plan that is already there.
+   - Nothing matches and the item is not a module: a new kebab-case feature slug
+     (`session-tabs`), `mkdir -p docs/roadmap/<slug>`, and say in the reply that the
+     directory is new.
+   Print the resolved path and confirm it is under `docs/roadmap/<slug>/` before step 2.
 2. Read every input before writing a word:
    - `docs/ARCHITECTURE.md`: the item's section, the Daemon requirements and mechanisms, the
      Module contract, Config, Claude, and the UI frame contract with the item's hue and order.
@@ -45,3 +60,5 @@ git worktree. Assumes `main` is checked out and clean, and that `docs/ARCHITECTU
 - Every departure from the artboard is named in the plan with its reason. Nothing is
   invented silently, including hues and icons for modules the artboard lacks.
 - Do not write code, stubs or scaffolding while planning; do not create the worktree here.
+- One directory per item, forever. If the resolved directory looks wrong — two candidates
+  match, or the item spans modules — stop and ask which one, rather than opening a new one.

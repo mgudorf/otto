@@ -60,6 +60,8 @@ def build(config: Config, spawn_fn=None) -> FastAPI:
         "ui.refresh_seconds": config.ui.refresh_seconds,
         "ui.time_format": config.ui.time_format,
         "ui.page_size": config.ui.page_size,
+        "ui.side_max": config.ui.side_max,
+        "ui.middle_max": config.ui.middle_max,
         **{f"modules.{m.name}.enabled": True for m in registry.ordered() if m.manifest.page},
     })
 

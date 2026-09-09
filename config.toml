@@ -55,6 +55,9 @@ token_file = "data/secrets/token.json"            # the owner's Gmail token, sco
 backfill_days = 90            # the first sync mirrors mail newer than this
 triage_batch = 40             # messages the nightly triage prioritizes per run
 
+[web_search]
+max_findings = 3            # findings the nightly search may queue per run
+
 [feedback]
 max_turns = 12             # per filing run: list docs, read a few, reply
 
@@ -63,3 +66,5 @@ start_page = "home"
 refresh_seconds = 30
 time_format = "24h"
 page_size = 40
+side_max = 420                # px ceiling the LEFT and RIGHT tracks stop growing at
+middle_max = 1400             # px ceiling for MIDDLE content, centred in its track

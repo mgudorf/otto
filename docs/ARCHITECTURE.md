@@ -94,7 +94,7 @@ The UI is a view of daemon state. Pages render from the store and poll or subscr
 | database | max_rows, max_seconds |
 | email | client_file, token_file, backfill_days, triage_batch |
 | feedback | max_turns |
-| ui | start_page, refresh_seconds, time_format (`24h` or `12h`), page_size |
+| ui | start_page, refresh_seconds, time_format (`24h` or `12h`), page_size, side_max, middle_max |
 
 ### Claude
 
@@ -355,9 +355,9 @@ Every page uses three fixed tracks. Selection swaps what renders inside MIDDLE a
 | Rail | 56px wide, 32px icon buttons (20px SVG, stroke 1.5), 6px gap, 14px top padding; active background `#23262c`; Activity and Settings pinned at the foot |
 | Header | 48px, padding `14px 32px 0`, 20px/600 title, mono 13px meta in `#5f636c` |
 | Loading line | 1px, margin `0 32px`; a 30% `#8b8f98` bar animates `translateX(-100% to 340%)` over 1.2s while a fetch is in flight |
-| Tracks | `minmax(220px,4fr) minmax(300px,9fr) minmax(220px,4fr)`, gap `0 24px`, padding `19px 24px 24px`; opacity fades out and in over 120ms on page switch |
+| Tracks | `clamp(220px,22.8%,ui.side_max) minmax(300px,1fr) clamp(220px,22.8%,ui.side_max)`, gap `0 24px`, padding `19px 24px 24px`; opacity fades out and in over 120ms on page switch. 22.8% is the artboard's 4/17 side share, so the tracks match it until the ceiling bites (~1950px wide); past that the sides hold and MIDDLE takes the surplus |
 | LEFT | panel `#1a1c21`, radius 6, padding `12px 8px 24px`: search (36px, `#23262c`, 1px focus ring in the hue), chips, groups of one-line rows with a stamp |
-| MIDDLE | ground, padding `8px 16px 40px`: the module's blank state or the item inspector |
+| MIDDLE | ground, padding `8px 16px 40px`, content `min(100%, ui.middle_max)` centred: the module's blank state or the item inspector. Prose (the inspector, Activity's detail) holds a `72ch` measure inside that |
 | RIGHT | panel, padding `16px 12px 12px`: the session pane, identical on every page |
 
 | Token | Value |

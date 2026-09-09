@@ -114,7 +114,7 @@ class Notebook extends Component {
     const k = item.kernel;
     const label = item.kind === 'py' ? 'module' : k ? `python3 · ${k.state}` : 'python3 · no kernel';
     const ref = editing ? `cell ${editing.index}` : `${item.cells.length} cells`;
-    return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 960 }}>
+    return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <style>${'.nb-html table{border-collapse:collapse;font-family:inherit}.nb-html th,.nb-html td{height:28px;padding:0 16px 0 0;text-align:left;border-top:1px solid rgba(230,231,234,.08);font-weight:400}.nb-html th{color:#5f636c}'}</style>
       <div style=${{ display: 'flex', alignItems: 'center', gap: 12, ...mono13 }}>
         <span style=${{ display: 'grid', placeItems: 'center', width: 16, height: 16, color: hue }}><${Icon} svg=${mod.icon} /></span>

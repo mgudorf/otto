@@ -67,7 +67,7 @@ export function Middle({ app, data, mod, fmt }) {
     capture.text = ''; capture.ref = '';
     app.refresh();
   };
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 720 }}>
+  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16 }}>
     <div style=${{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
       ${b.kinds.map((k) => html`<span key=${k} class="ring" onClick=${() => { capture.kind = k; app.forceUpdate(); }} style=${{ padding: '3px 9px', borderRadius: 6, fontSize: 13, cursor: 'pointer', background: capture.kind === k ? hue : 'transparent', color: capture.kind === k ? T.ground : T.muted }}>${k}</span>`)}
       <span style=${{ marginLeft: 'auto', ...mono13, color: T.dim }}>${Object.entries(b.counts).map(([k, n]) => `${n} ${k}`).join(' · ') || 'empty'}</span>

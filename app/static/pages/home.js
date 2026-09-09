@@ -38,7 +38,7 @@ export function Middle({ app, data, mod, fmt }) {
     }} />`;
   }
   if (data.numbers.length === 0) return html`<div style=${{ ...mono13, color: T.dim }}>no module reports a number yet</div>`;
-  return html`<div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '40px 32px', maxWidth: 640 }}>
+  return html`<div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '40px 32px', maxWidth: 640, margin: '0 auto' }}>
     ${data.numbers.map((n) => html`<div key=${n.module} onClick=${() => app.go(n.module)} style=${{ display: 'flex', flexDirection: 'column', gap: 4, cursor: 'pointer' }}>
       <span style=${{ fontFamily: T.mono, fontSize: 28, lineHeight: 1.1, fontWeight: 500 }}>${fmtInt(n.value)}</span>
       <span style=${{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: T.muted }}><${Icon} svg=${n.icon} color=${n.hue} />${n.label}</span>

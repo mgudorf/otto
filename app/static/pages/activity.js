@@ -57,7 +57,7 @@ export function Middle({ app, data, fmt }) {
     const e = sel.local;
     const job = e.job_id ? cache.jobs[e.job_id] : null;
     if (e.job_id && !job) get(`/api/jobs/${e.job_id}`).then((j) => { cache.jobs[e.job_id] = j; app.forceUpdate(); });
-    return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: '72ch' }}>
+    return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: '72ch', margin: '0 auto' }}>
       <div style=${{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <span style=${{ width: 6, height: 6, borderRadius: 3, background: app.module(e.module).hue }} />
         <span style=${{ ...mono13, color: T.muted }}>${e.module} · ${e.verb} · ${dayLabel(e.ts)} ${clock(e.ts, fmt)}</span>
