@@ -74,6 +74,14 @@ class Database:
 
 
 @dataclass(frozen=True)
+class Email:
+    client_file: Path
+    token_file: Path
+    backfill_days: int
+    triage_batch: int
+
+
+@dataclass(frozen=True)
 class Ui:
     start_page: str
     refresh_seconds: int
@@ -93,6 +101,7 @@ class Config:
     memory: Memory
     education: Education
     database: Database
+    email: Email
     ui: Ui
 
     @property
@@ -113,5 +122,9 @@ def load(root: Path = ROOT) -> Config:
         memory=Memory(**raw["memory"]),
         education=Education(**raw["education"]),
         database=Database(**raw["database"]),
+        email=Email(
+            client_file=root / raw["email"]["client_file"], token_file=root / raw["email"]["token_file"],
+            backfill_days=raw["email"]["backfill_days"], triage_batch=raw["email"]["triage_batch"],
+        ),
         ui=Ui(**raw["ui"]),
     )

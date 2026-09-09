@@ -4,6 +4,7 @@ import { html, T, Icon, mono13, Button, dayLabel } from './rows.js';
 import { get, inflight } from './api.js';
 import { Session } from './session.js';
 import * as home from './pages/home.js';
+import * as email from './pages/email.js';
 import * as education from './pages/education.js';
 import * as memory from './pages/memory.js';
 import * as database from './pages/database.js';
@@ -13,7 +14,7 @@ import * as graph from './pages/graph.js';
 import * as activity from './pages/activity.js';
 import * as settings from './pages/settings.js';
 
-const PAGES = { home, education, memory, business, finance, graph, database, activity, settings };
+const PAGES = { home, email, education, memory, business, finance, graph, database, activity, settings };
 const FOOT = [
   { name: 'activity', title: 'Activity', hue: '#e6e7ea', icon: '<path d="M3 12h4l2-6 3 10 2-6h3"></path>' },
   { name: 'settings', title: 'Settings', hue: '#e6e7ea', icon: '<circle cx="10" cy="10" r="6.5"></circle><circle cx="10" cy="10" r="2"></circle>' },

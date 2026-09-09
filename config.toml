@@ -43,6 +43,12 @@ flow_high = 85              # above this raises it one step
 max_rows = 1000               # rows a query on the Database page or from the agent returns at most
 max_seconds = 5               # a statement running longer is interrupted
 
+[email]
+client_file = "data/secrets/google_client.json"   # Google OAuth web client
+token_file = "data/secrets/token.json"            # the owner's Gmail token, scope gmail.modify, refreshed in place
+backfill_days = 90            # the first sync mirrors mail newer than this
+triage_batch = 40             # messages the nightly triage prioritizes per run
+
 [ui]
 start_page = "home"
 refresh_seconds = 30
