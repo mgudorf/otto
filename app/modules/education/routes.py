@@ -1,28 +1,20 @@
-"""Education: a queue of conceptual questions per topic, graded in the tutor session. Page actions write through the runner."""
+"""Education: questions on the owner's topics, answered on the page and graded through oneshot. Page actions write through the runner."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
+from app.modules.education import grading, questions
+from app.modules.education.questions import (
+    OPEN, RECENT, SELECT, due_count, due_queue, feedback_of, label, parts_of, question, status_of, topic_rows,
+)
+from app.runner import JobFailed
 from app.store import Store, now_iso, parse
 
 router = APIRouter(prefix="/api/education")
 
-RESOURCE = "education"
-RECENT = 5                                                     # scores listed per topic, items listed in the agent's state
-OPEN = "q.graded_at IS NULL AND q.skipped_at IS NULL"
-SELECT = """SELECT q.*, t.name AS topic,
-  (SELECT COUNT(*) FROM question_parts p WHERE p.question_id = q.id) AS parts,
-  (SELECT COUNT(*) FROM question_parts p WHERE p.question_id = q.id AND p.score IS NOT NULL) AS graded_parts
-FROM questions q JOIN topics t ON t.id = q.topic_id"""
-
-
-def status_of(q: dict) -> str:
-    if q["graded_at"]:
-        return "graded"
-    if q["skipped_at"]:
-        return "skipped"
-    return "started" if q["started_at"] else "open"
+RESOURCE = "education"                                         # page actions
+RESOURCE_LLM = "education.llm"                                 # the generate and grade runs: they serialize with each other, never with page actions
 
 
 def _row(q: dict) -> dict:
@@ -41,72 +33,35 @@ def _day_label(ts: str) -> str:
 def _group_by_day(rows: list[dict]) -> list[dict]:
     groups: list[dict] = []
     for q in rows:
-        label = _day_label(q["graded_at"] or q["skipped_at"])
-        if not groups or groups[-1]["label"] != label:
-            groups.append({"label": label, "count": 0, "rows": []})
+        day = _day_label(q["graded_at"] or q["skipped_at"])
+        if not groups or groups[-1]["label"] != day:
+            groups.append({"label": day, "count": 0, "rows": []})
         groups[-1]["rows"].append(_row(q))
         groups[-1]["count"] += 1
     return groups
 
 
-# ---- reads shared with tools.py ----------------------------------------------------------------
-def due_queue(store: Store) -> list[dict]:
-    return store.query(f"{SELECT} WHERE {OPEN} ORDER BY q.started_at IS NULL, q.created_at")
-
-
-def due_count(store: Store) -> int:
-    return store.scalar(f"SELECT COUNT(*) FROM questions q WHERE {OPEN}")
-
-
-def question(store: Store, question_id: int) -> dict | None:
-    return store.one(f"{SELECT} WHERE q.id = ?", (question_id,))
-
-
-def parts_of(store: Store, question_id: int) -> list[dict]:
-    return store.query("SELECT n, text, score, note FROM question_parts WHERE question_id = ? ORDER BY n", (question_id,))
-
-
-def feedback_of(store: Store, question_id: int) -> list[str]:
-    return [f["text"] for f in store.query("SELECT text FROM education_feedback WHERE question_id = ? ORDER BY id", (question_id,))]
-
-
-def topic_rows(store: Store) -> list[dict]:
-    """Progress per topic: difficulty, graded/asked, average, the last RECENT scores, last asked."""
-    rows = store.query(
-        """SELECT t.id, t.name, t.description, t.difficulty,
-             (SELECT COUNT(*) FROM questions q WHERE q.topic_id = t.id) AS asked,
-             (SELECT COUNT(*) FROM questions q WHERE q.topic_id = t.id AND q.graded_at IS NOT NULL) AS graded,
-             (SELECT AVG(score) FROM questions q WHERE q.topic_id = t.id AND q.graded_at IS NOT NULL) AS average,
-             (SELECT MAX(created_at) FROM questions q WHERE q.topic_id = t.id) AS last_asked
-           FROM topics t WHERE t.retired_at IS NULL ORDER BY t.name"""
-    )
-    for t in rows:
-        t["average"] = None if t["average"] is None else round(t["average"])
-        t["recent"] = [
-            r["score"] for r in store.query(
-                "SELECT score FROM questions WHERE topic_id = ? AND graded_at IS NOT NULL ORDER BY graded_at DESC LIMIT ?", (t["id"], RECENT)
-            )
-        ]
-    return rows
-
-
 def detail(store: Store, question_id: int) -> dict | None:
-    """The item inspector's shape. `text` is self-contained for Home's generic inspector; the page uses premise and parts."""
+    """The item inspector's shape. `text` is self-contained for Home's generic inspector; the page renders setup and parts as markdown. Rubrics never leave the server."""
     q = question(store, question_id)
     if q is None:
         return None
     st = status_of(q)
-    parts = parts_of(store, q["id"])
+    parts = [
+        {"n": p["n"], "label": label(p["n"]), "text": p["text"], "answer": p["answer"], "answered_at": p["answered_at"],
+         "verdict": p["verdict"], "score": p["score"], "note": p["note"], "graded_at": p["graded_at"]}
+        for p in parts_of(store, q["id"])
+    ]
     actions = []
     if st == "open":
         actions.append({"verb": "start", "label": "Start", "primary": True})
     if st in ("open", "started"):
         actions.append({"verb": "skip", "label": "Skip"})
     kind = f"{q['topic']} · d{q['difficulty']}" + (f" · {q['score']}" if st == "graded" else "")
-    text = f"{q['title']}\n\n{q['premise']}\n\n" + "\n".join(f"{p['n']}. {p['text']}" for p in parts)
+    text = f"{q['title']}\n\n{q['premise']}\n\n" + "\n".join(f"({p['label']}) {p['text']}" for p in parts)
     return {
-        "id": q["id"], "module": "education", "kind": kind, "title": q["title"], "text": text, "premise": q["premise"],
-        "topic_id": q["topic_id"], "topic": q["topic"], "difficulty": q["difficulty"], "source": q["source"],
+        "id": q["id"], "module": "education", "kind": kind, "title": q["title"], "topic_tag": q["topic_tag"], "text": text,
+        "setup": q["premise"], "topic_id": q["topic_id"], "topic": q["topic"], "difficulty": q["difficulty"], "source": q["source"],
         "created_at": q["created_at"], "status": st, "score": q["score"], "parts": parts,
         "feedback": feedback_of(store, q["id"]), "actions": actions,
     }
@@ -148,6 +103,95 @@ def item(store: Store, question_id: str) -> dict:
     return d
 
 
+def _question_for(store: Store, body: dict, allowed: tuple[str, ...]) -> dict:
+    q = question(store, int(body.get("id") or 0))
+    if q is None:
+        raise HTTPException(404, "no such question")
+    if status_of(q) not in allowed:
+        raise HTTPException(409, f"question is {status_of(q)}")
+    return q
+
+
+def _reason(e: JobFailed) -> str:
+    lines = [line for line in str(e).strip().splitlines() if line.strip()]
+    return (lines[-1] if lines else "failed")[:300]
+
+
+# The two LLM actions come before the generic verb route so their literal paths win.
+@router.post("/action/answer")
+async def answer(request: Request, body: dict = Body(default={})) -> dict:
+    """Store the owner's answer to one part, start its question, and grade it: one oneshot run, awaited."""
+    st = request.app.state
+    store: Store = st.store
+    q = _question_for(store, body, ("open", "started"))
+    n = int(body.get("n") or 0)
+    part = store.one("SELECT * FROM question_parts WHERE question_id = ? AND n = ?", (q["id"], n))
+    if part is None:
+        raise HTTPException(404, "no such part")
+    if part["graded_at"]:
+        raise HTTPException(409, "part is graded")
+    text = (body.get("answer") or "").strip()
+    if not text:
+        raise HTTPException(400, "empty answer")
+    ts = now_iso()
+    with store.tx() as conn:
+        conn.execute(
+            "UPDATE questions SET started_at = NULL WHERE started_at IS NOT NULL AND graded_at IS NULL AND skipped_at IS NULL AND id != ?", (q["id"],)
+        )
+        conn.execute("UPDATE questions SET started_at = COALESCE(started_at, ?) WHERE id = ?", (ts, q["id"]))
+        conn.execute("UPDATE question_parts SET answer = ?, answered_at = ? WHERE question_id = ? AND n = ?", (text, ts, q["id"], n))
+    mod = st.registry.modules["education"]
+
+    async def run(ctx):
+        fresh = question(store, q["id"])
+        if fresh is None or fresh["skipped_at"]:
+            raise ValueError("the question was skipped")
+        raw = await st.claude.oneshot(ctx, mod, grading.grade_prompt(store, fresh, {**part, "answer": text}))
+        verdict, score, explanation = grading.parse_grade(raw)
+        with ctx.commit() as conn:
+            out = grading.apply_grade(conn, ctx.config, fresh, n, score, explanation, verdict)
+        if out.get("completed"):
+            ctx.event("graded", f"Q{q['id']} {q['title'][:100]}: {out['question_score']}", ref=str(q["id"]))
+        return {"id": q["id"], "n": n, "verdict": verdict, "score": score}
+
+    try:
+        return await st.runner.run_action("education.grade", "education", RESOURCE_LLM, run)
+    except JobFailed as e:
+        raise HTTPException(502, _reason(e))
+
+
+@router.post("/action/generate")
+async def generate_now(request: Request, body: dict = Body(default={})) -> dict:
+    """One question on the topic that has waited longest, through the generator the nightly run uses; awaited."""
+    st = request.app.state
+    store: Store = st.store
+    topics = questions.waiting_topics(store, 1)
+    if not topics:
+        raise HTTPException(409, "no active topic")
+    t = topics[0]
+    prompt = questions.generate_prompt(store, topics)
+    mod = st.registry.modules["education"]
+
+    async def run(ctx):
+        raw = await st.claude.oneshot(ctx, mod, prompt)
+        items = [it for it in questions.parse_array(raw) if isinstance(it, dict)]
+        it = next((it for it in items if str(it.get("topic_id")) == str(t["id"])), items[0] if items else {})
+        err = questions.validate_question(store, t["id"], it.get("title"), it.get("topic_tag"), it.get("setup_markdown"), it.get("parts"))
+        if err:
+            raise ValueError(f"rejected: {err}")
+        unbound = questions.unbound_acronyms(it["title"], it["topic_tag"], t["name"], it["setup_markdown"], it["parts"])
+        with ctx.commit() as conn:
+            qid = questions.insert_question(conn, t["id"], it["title"], it["topic_tag"], it["setup_markdown"], it["parts"], t["difficulty"], "session", False)
+        warning = ("header acronym(s) not bound in the question body: " + ", ".join(unbound)) if unbound else None
+        ctx.event("generated", str(it["title"]).strip()[:120] + (f" (warning: {warning})" if warning else ""), ref=str(qid))
+        return {"id": qid, "warning": warning} if warning else {"id": qid}
+
+    try:
+        return await st.runner.run_action("education.generate_now", "education", RESOURCE_LLM, run)
+    except JobFailed as e:
+        raise HTTPException(502, _reason(e))
+
+
 @router.post("/action/{verb}")
 async def action(request: Request, verb: str, body: dict = Body(default={})) -> dict:
     st = request.app.state
@@ -160,15 +204,6 @@ async def action(request: Request, verb: str, body: dict = Body(default={})) -> 
         return write(ctx)
 
     return await st.runner.run_action(f"education.{verb}", "education", RESOURCE, run)
-
-
-def _question_for(store: Store, body: dict, allowed: tuple[str, ...]) -> dict:
-    q = question(store, int(body.get("id") or 0))
-    if q is None:
-        raise HTTPException(404, "no such question")
-    if status_of(q) not in allowed:
-        raise HTTPException(409, f"question is {status_of(q)}")
-    return q
 
 
 def _start(store: Store, body: dict):
@@ -259,13 +294,18 @@ def context(store: Store, registry) -> str:
     lines.append(f"Due: {len(due)} question(s) waiting" + ("; " + "; ".join(f"Q{q['id']} {q['title'][:80]}" for q in due[:RECENT]) if due else ""))
     started = next((q for q in due if q["started_at"]), None)
     if started:
-        lines.append(f"Started question Q{started['id']} ({started['topic']}, d{started['difficulty']}): {started['title']}")
-        lines.append("  Premise: " + started["premise"])
+        tag = f", tag: {started['topic_tag']}" if started["topic_tag"] else ""
+        lines.append(f"Started question Q{started['id']} \"{started['title']}\" ({started['topic']}, d{started['difficulty']}{tag}):")
+        lines.append("  Setup: " + started["premise"])
         for p in parts_of(store, started["id"]):
-            graded = f" -> {p['score']}/100" + (f": {p['note']}" if p["note"] else "") if p["score"] is not None else " -> not graded"
-            lines.append(f"  {p['n']}. {p['text']}{graded}")
+            lines.append(f"  ({label(p['n'])}) {p['text']}")
+            lines.append(f"      answer: {p['answer']}" if p["answer"] else "      not answered")
+            if p["graded_at"]:
+                lines.append(f"      graded: {p['verdict']} {p['score']}/100" + (f" — {p['note']}" if p["note"] else ""))
+                if p["rubric"]:
+                    lines.append(f"      rubric: {p['rubric']}")
     else:
-        lines.append("No question is started. The owner starts one from the page, or asks you for a new one.")
+        lines.append("No question is started. The owner answers on the page; a submitted answer starts its question.")
     last = store.query(f"{SELECT} WHERE q.graded_at IS NOT NULL ORDER BY q.graded_at DESC LIMIT ?", (RECENT,))
     if last:
         lines.append("Last graded: " + "; ".join(f"Q{q['id']} {q['title'][:60]} ({q['topic']}) {q['score']}" for q in last))

@@ -1,3 +1,9 @@
+"""Education: questions on the owner's topics, answered and graded on the page; the tutor discusses and revises."""
+
+from __future__ import annotations
+
+import sqlite3
+
 from app.modules import Agent, Manifest, Schedule
 
 MANIFEST = Manifest(
@@ -14,3 +20,29 @@ MANIFEST = Manifest(
         write_tools=("education_add_topic", "education_add_question", "education_grade", "education_record_feedback"),
     ),
 )
+
+# v1 columns on the tables v0 created. schema.sql only creates tables, so a database that already has them is
+# brought up here; a fresh one has every column from schema.sql and this finds nothing to add.
+COLUMNS = {
+    "questions": {"topic_tag": "TEXT"},
+    "question_parts": {
+        "rubric": "TEXT",
+        "answer": "TEXT",
+        "answered_at": "TEXT",
+        "verdict": "TEXT CHECK (verdict IN ('correct', 'partial', 'incorrect'))",
+    },
+}
+
+
+def setup(config) -> None:
+    """Called once by daemon.build after the schemas: add the columns a v0 database lacks."""
+    conn = sqlite3.connect(config.data.db, timeout=5)
+    try:
+        for table, columns in COLUMNS.items():
+            have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+            for name, ddl in columns.items():
+                if name not in have:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+        conn.commit()
+    finally:
+        conn.close()
