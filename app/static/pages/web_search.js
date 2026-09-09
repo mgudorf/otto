@@ -63,7 +63,7 @@ export function Middle({ app, data, mod, fmt }) {
     draft.text = '';
     app.refresh();
   };
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 720 }}>
+  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16 }}>
     <div style=${{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
       ${b.kinds.map((k) => html`<span key=${k} class="ring" onClick=${() => { draft.kind = k; app.forceUpdate(); }} style=${{ padding: '3px 9px', borderRadius: 6, fontSize: 13, cursor: 'pointer', background: draft.kind === k ? hue : 'transparent', color: draft.kind === k ? T.ground : T.muted }}>${k}</span>`)}
       <span style=${{ marginLeft: 'auto', ...mono13, color: T.dim }}>${b.last_run ? `last run ${stamp(b.last_run, fmt)}` : 'never run'}</span>

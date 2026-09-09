@@ -38,6 +38,7 @@ middle's content is capped in fixed pixels and does not grow at all. That gap is
 | 3 | The MIDDLE content cap becomes `min(100%, <ui.middle_max>px)`, centred in the track | One rule replaces the seven per-page pixel caps; at windowed it resolves to the full track (725px against 720 today) and at maximized to 1400px centred, so the content never floats as a small blob against the left edge of a 2432px track |
 | 4 | Prose keeps a reading measure: the Inspector (`shell.js:157`) and Activity's detail (`activity.js:60`) stay at `72ch`, centred | A 1400px line of body text reads worse, not better; the complaint is about the module's working area, not its prose |
 | 5 | `ui.side_max` = 420 and `ui.middle_max` = 1400 are live settings, seeded from `[ui]`, edited on Settings > General | Same pattern as `ui.page_size`; the owner tunes the ceilings against the real monitor without restarting the daemon, and no ceiling is hard-coded. Both defaults confirmed by the owner 2026-09-09 |
+| 9 | The two `auto-fit` stat strips bound themselves: `home.js` keeps 640 and centres, `finance.js` gets 720 on the strip only | Found by looking at the built page: `repeat(auto-fit, minmax(140px,1fr))` given 1400px spreads home's nine numbers into eight across plus an orphan, which reads worse than the compact block. A strip of numbers has a natural width; a list or table does not. Finance's strip stays left-aligned so it lines up with the tables under it, which do take the full 1400 |
 | 8 | One ceiling for both sides, not one per side, and the middle's content centred rather than left-aligned | The owner asked for symmetry: LEFT and RIGHT stay identical at every width, and the ground left over in the middle track is split evenly (500px each side at maximized) instead of pooling on the right |
 | 6 | The 22.8% stays in code, not a knob | It is the artboard's 4:9:4 ratio restated as a percentage, i.e. the design contract; making it adjustable would let the frame drift off the artboard |
 | 7 | Pure CSS, no resize listener and no `matchMedia` | `clamp()` re-resolves on every window resize for free; the frontend has no viewport JS today and this adds none |
@@ -66,7 +67,7 @@ Measured with the proposal injected into the live page, all three widths, no hor
 | `app/daemon.py` | two more lines in the settings seed block at lines 59-62 |
 | `app/api.py` | `UI_KEYS` gains both keys as `int`, with range checks `280 <= side_max <= 900` and `640 <= middle_max <= 3000` |
 | `app/static/shell.js` | the grid template is built from the two settings; the MIDDLE wrapper applies the cap and centring; the Inspector keeps `72ch` and gains `margin: 0 auto` |
-| `app/static/pages/*.js` | remove the seven fixed `maxWidth` values (640, 720 x5, 960) now that the frame owns the cap; `activity.js:60` keeps its `72ch` |
+| `app/static/pages/*.js` | remove the eight fixed `maxWidth` values (640, 720 x6 including `web_search`, 960) now that the frame owns the cap; `activity.js:60` keeps its `72ch` and centres; the two stat strips keep a ceiling of their own (decision 9) |
 | `app/static/pages/settings.js` | two `num()` rows in the General section |
 | `docs/ARCHITECTURE.md` | the Frame contract Tracks row restated; Config gains the two keys |
 | `tests/test_app.py` | settings validation cases |
@@ -148,8 +149,8 @@ entries in the order written here, then run `/sync-architecture` on `main`.
 None. Both ceilings were settled by the owner on 2026-09-09: `ui.side_max` 420 and
 `ui.middle_max` 1400, one knob for both sides, middle content centred, on a 3440x1440 primary.
 
-At maximized the frame reads 420 | 500 | 1400 | 500 | 420, symmetric about the middle. The
-side-by-side capture of 1200 / 1400 / 1800 against today's 720 has not been made yet: the working
-tree was mid-merge with `web_search` and `app/static/shell.js` carried conflict markers, so the app
-would not render. Worth one look at the real window before phase 1 is called done; the arithmetic
-and the injected-CSS measurements above are unaffected, having been taken before that merge began.
+At maximized the frame reads 420 | 500 | 1400 | 500 | 420, symmetric about the middle.
+
+Confirmed in the built app on 2026-09-09, a worktree instance on port 8766 rendered at 3440x1392 and
+1600x1000: tracks 420 / 2432 / 420, middle content 1400 centred when maximized and 725 when
+windowed, matching the plan's arithmetic exactly. Looking at it is what turned up decision 9.

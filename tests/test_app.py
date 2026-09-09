@@ -78,6 +78,11 @@ def test_memory_end_to_end(config):
             s = (await c.put("/api/settings", json={"ui.page_size": 20})).json()
             assert s["ui.page_size"] == 20
             assert (await c.put("/api/settings", json={"ui.page_size": 5})).status_code == 400
+            assert s["ui.side_max"] == 420 and s["ui.middle_max"] == 1400
+            f = (await c.put("/api/settings", json={"ui.side_max": 520, "ui.middle_max": 1800})).json()
+            assert (f["ui.side_max"], f["ui.middle_max"]) == (520, 1800)
+            assert (await c.put("/api/settings", json={"ui.side_max": 100})).status_code == 400
+            assert (await c.put("/api/settings", json={"ui.middle_max": 9000})).status_code == 400
         await app.state.runner.drain(1)
         app.state.store.close()
 

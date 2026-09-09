@@ -79,7 +79,7 @@ export function Middle({ app, data, mod, fmt }) {
   };
   const cols = 'minmax(0,1fr) 28px 56px 40px 120px 64px 16px';
   const cell = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 720 }}>
+  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16 }}>
     <span style=${{ ...mono13, color: T.dim }}>${b.due} due · ${b.topics.length} topics</span>
     <div style=${{ display: 'flex', flexDirection: 'column', ...mono13 }}>
       <div style=${{ display: 'grid', gridTemplateColumns: cols, gap: 12, height: 28, alignItems: 'center', padding: '0 12px', color: T.muted }}>topic<span>d</span><span>graded</span><span>avg</span><span>recent</span><span>last</span><span /></div>

@@ -107,6 +107,9 @@ class App extends Component {
   render(_, s) {
     if (!s.shell) return html`<div style=${{ height: '100vh', display: 'grid', placeItems: 'center', background: T.ground, color: T.dim, fontFamily: 'Inter, system-ui, sans-serif', ...mono13 }}>${s.error || 'connecting…'}</div>`;
     const fmt = s.shell.settings['ui.time_format'] || '24h';
+    // 22.8% is the artboard's 4/17 side share; the clamp holds it until the ceiling bites.
+    const side = `clamp(220px, 22.8%, ${s.shell.settings['ui.side_max'] || 420}px)`;
+    const middleMax = s.shell.settings['ui.middle_max'] || 1400;
     const mod = this.module(s.page);
     const impl = PAGES[s.page];
     const rail = s.shell.modules.filter((m) => m.enabled || m.error);
@@ -133,12 +136,14 @@ class App extends Component {
         <div style=${{ height: 1, margin: '0 32px', position: 'relative', overflow: 'hidden', flex: 'none' }}>
           ${s.loading > 0 && html`<div style=${{ position: 'absolute', top: 0, left: 0, height: 1, width: '30%', background: T.muted, animation: 'otto-load 1.2s ease-in-out infinite' }} />`}
         </div>
-        <div style=${{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(220px,4fr) minmax(300px,9fr) minmax(220px,4fr)', gap: '0 24px', padding: '19px 24px 24px', opacity: s.op, transition: 'opacity 120ms ease' }}>
+        <div style=${{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: `${side} minmax(300px,1fr) ${side}`, gap: '0 24px', padding: '19px 24px 24px', opacity: s.op, transition: 'opacity 120ms ease' }}>
           <div style=${{ minWidth: 0, minHeight: 0, overflow: 'auto', background: T.panel, borderRadius: 6, padding: '12px 8px 24px' }}>
             ${impl && s.data ? impl.Left({ app: this, data: s.data, mod, fmt }) : null}
           </div>
           <div style=${{ minWidth: 0, minHeight: 0, overflow: 'auto', padding: '8px 16px 40px' }}>
-            ${impl && s.data ? impl.Middle({ app: this, data: s.data, mod, fmt }) : null}
+            <div style=${{ maxWidth: `min(100%, ${middleMax}px)`, margin: '0 auto' }}>
+              ${impl && s.data ? impl.Middle({ app: this, data: s.data, mod, fmt }) : null}
+            </div>
           </div>
           ${mod.agent
             ? html`<${Session} module=${s.page} hue=${mod.hue} fmt=${fmt} selected=${!!s.sel} prefill=${s.prefill} onIdle=${() => this.refresh()} />`
@@ -155,7 +160,7 @@ export function Inspector({ app, item, mod, fmt, children, onAction }) {
   if (item.error) return html`<div style=${{ ...mono13, color: '#cf7b7b' }}>${item.error}</div>`;
   const hue = (app.module(item.module) || mod).hue;
   const icon = (app.module(item.module) || mod).icon;
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: '72ch' }}>
+  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: '72ch', margin: '0 auto' }}>
     <div style=${{ display: 'flex', alignItems: 'center', gap: 12 }}>
       <span style=${{ display: 'grid', placeItems: 'center', width: 16, height: 16, color: hue }}><${Icon} svg=${icon} /></span>
       <span style=${{ ...mono13, color: T.muted }}>${item.kind || item.verb || ''}${item.created_at ? ` · ${dayLabel(item.created_at)} ${new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: fmt === '12h' })}` : ''}</span>

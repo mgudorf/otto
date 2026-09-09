@@ -87,8 +87,8 @@ export function Middle({ app, data, mod, fmt }) {
     ['accounts', b.totals.accounts], ['holdings', b.totals.holdings],
     ['recurring /mo', b.totals.monthly_recurring], ['budget /mo', b.totals.monthly_budget],
   ];
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 28, maxWidth: 720 }}>
-    <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '24px 32px' }}>
+  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+    <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '24px 32px', maxWidth: 720 }}>
       ${numbers.map(([label, cents]) => html`<div key=${label} style=${{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span style=${{ fontFamily: T.mono, fontSize: 28, lineHeight: 1.1, fontWeight: 500 }}>${money(cents)}</span>
         <span style=${{ fontSize: 13, color: T.muted }}>${label}</span>
