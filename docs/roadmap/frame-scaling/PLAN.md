@@ -37,7 +37,8 @@ middle's content is capped in fixed pixels and does not grow at all. That gap is
 | 2 | A ceiling on the sides, not on the whole frame | Capping the frame and centring it would leave ~700px of dead ground on each side of a monitor bought for width; the owner asked for a bigger middle, not an emptier screen |
 | 3 | The MIDDLE content cap becomes `min(100%, <ui.middle_max>px)`, centred in the track | One rule replaces the seven per-page pixel caps; at windowed it resolves to the full track (725px against 720 today) and at maximized to 1400px centred, so the content never floats as a small blob against the left edge of a 2432px track |
 | 4 | Prose keeps a reading measure: the Inspector (`shell.js:157`) and Activity's detail (`activity.js:60`) stay at `72ch`, centred | A 1400px line of body text reads worse, not better; the complaint is about the module's working area, not its prose |
-| 5 | `ui.side_max` (default 420) and `ui.middle_max` (default 1400) are live settings, seeded from `[ui]`, edited on Settings > General | Same pattern as `ui.page_size`; the owner tunes the ceilings against the real monitor without restarting the daemon, and no ceiling is hard-coded |
+| 5 | `ui.side_max` = 420 and `ui.middle_max` = 1400 are live settings, seeded from `[ui]`, edited on Settings > General | Same pattern as `ui.page_size`; the owner tunes the ceilings against the real monitor without restarting the daemon, and no ceiling is hard-coded. Both defaults confirmed by the owner 2026-09-09 |
+| 8 | One ceiling for both sides, not one per side, and the middle's content centred rather than left-aligned | The owner asked for symmetry: LEFT and RIGHT stay identical at every width, and the ground left over in the middle track is split evenly (500px each side at maximized) instead of pooling on the right |
 | 6 | The 22.8% stays in code, not a knob | It is the artboard's 4:9:4 ratio restated as a percentage, i.e. the design contract; making it adjustable would let the frame drift off the artboard |
 | 7 | Pure CSS, no resize listener and no `matchMedia` | `clamp()` re-resolves on every window resize for free; the frontend has no viewport JS today and this adds none |
 
@@ -127,7 +128,7 @@ Present:
 
 Missing: none. This item adds no package, binary, credential, external API or scope.
 
-Needs you: nothing before the work starts; the two defaults are under Pending decisions.
+Needs you: nothing. Both defaults are settled.
 
 | Check | Command |
 |---|---|
@@ -144,5 +145,11 @@ entries in the order written here, then run `/sync-architecture` on `main`.
 
 ## Pending decisions
 
-1. `ui.middle_max` default 1400px: nearly double today's 720, leaving 516px of ground on each side of the content when maximized. Larger (1800) fills more but stretches list rows further; smaller (1100) keeps rows tight and leaves more ground. Confirm 1400 or name another.
-2. `ui.side_max` default 420px: the ceiling the side panels stop at, 25% above the windowed 337. Confirm, or say whether the session pane on the right should be allowed to run wider than the list on the left, which would need two knobs instead of one.
+None. Both ceilings were settled by the owner on 2026-09-09: `ui.side_max` 420 and
+`ui.middle_max` 1400, one knob for both sides, middle content centred, on a 3440x1440 primary.
+
+At maximized the frame reads 420 | 500 | 1400 | 500 | 420, symmetric about the middle. The
+side-by-side capture of 1200 / 1400 / 1800 against today's 720 has not been made yet: the working
+tree was mid-merge with `web_search` and `app/static/shell.js` carried conflict markers, so the app
+would not render. Worth one look at the real window before phase 1 is called done; the arithmetic
+and the injected-CSS measurements above are unaffected, having been taken before that merge began.
