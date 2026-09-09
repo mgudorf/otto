@@ -16,3 +16,8 @@ Otto, a personification of the word "auto" is a PERSONALIZED dashboard applicati
    - On a branch: add your entries in rail order (the `order` in the manifest), one line each, never reflow neighbours. Tests find a module by name, never by index.
    - Before merging: `git merge main` into the branch first; the branch resolves, `main` stays clean.
    - Resolving: keep both sides in rail order. The contract docstring and shared tests take `main`'s side, then re-add anything only the branch had. Run the suite on `main` before committing the merge, then `/sync-architecture`.
+
+
+## Documentation
+
+1. ARCHITECTURE.md is periodically synced against the code base. This will TYPICALLY be up to date, but may be subject to changes from active worktrees. 
