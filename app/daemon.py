@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import time
+import traceback
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -42,6 +43,13 @@ def build(config: Config, spawn_fn=None) -> FastAPI:
     for m in registry.ordered():
         if m.schema:
             store.migrate(m.schema)
+    for m in registry.ordered():
+        if m.setup:
+            try:
+                m.setup(config)
+            except Exception:
+                registry.errors[m.name] = traceback.format_exc()
+                del registry.modules[m.name]
     with store.tx() as conn:
         conn.execute("DELETE FROM module_errors")
         for name, err in registry.errors.items():
@@ -59,7 +67,7 @@ def build(config: Config, spawn_fn=None) -> FastAPI:
     full = MCPServer(FULL_SERVER, instructions="Tools over the owner's Otto data, including writes the owner asked for.")
     for m in registry.ordered():
         if m.register_tools:
-            m.register_tools(read, full, store)
+            m.register_tools(read, full, store, config)
     read_app = read.streamable_http_app(streamable_http_path="/mcp/read", json_response=True, stateless_http=True)
     full_app = full.streamable_http_app(streamable_http_path="/mcp/full", json_response=True, stateless_http=True)
 
@@ -102,6 +110,12 @@ async def lifespan(app: FastAPI):
             tick.cancel()
             await asyncio.gather(tick, return_exceptions=True)
             await st.runner.drain(st.config.scheduler.drain_seconds)
+            for m in st.registry.ordered():
+                if m.shutdown:
+                    try:
+                        await m.shutdown()
+                    except Exception:
+                        log.exception("module %s shutdown failed", m.name)
             st.store.event("system", "stopped", f"daemon rev {st.rev}")
             st.store.close()
             log.info("daemon stopped")

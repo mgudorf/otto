@@ -40,6 +40,7 @@ Rejected: classifying statements by parsing SQL; `set_authorizer` (more code, sa
 |---|---|
 | `app/store.py` | `Store.read_only()` returning the `mode=ro` connection; `Store.close()` closes it too |
 | `app/config.py`, `config.toml` | `Database(max_rows, max_seconds)` dataclass and `[database]` section |
+| `app/daemon.py`, `app/modules/__init__.py`, every `tools.py` | tool registration becomes `register(read, full, store, config)`: the caps above are boot knobs and the tools need them |
 | `app/modules/database/__init__.py` | `MANIFEST` |
 | `app/modules/database/schema.sql` | `db_queries` |
 | `app/modules/database/query.py` | `run(conn, sql, max_rows, max_seconds)` returning `{columns, rows, total, truncated, ms}` or `{error}`; `explain(...)`; `tables(conn)`; shared by routes and tools |

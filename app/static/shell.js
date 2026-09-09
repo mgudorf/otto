@@ -3,14 +3,21 @@ import { render, Component } from './vendor/preact.mjs';
 import { html, T, Icon, mono13, Button, dayLabel } from './rows.js';
 import { get, inflight } from './api.js';
 import { Session } from './session.js';
+import { Feedback } from './feedback.js';
 import * as home from './pages/home.js';
+import * as email from './pages/email.js';
+import * as education from './pages/education.js';
 import * as memory from './pages/memory.js';
+import * as science from './pages/science.js';
+import * as database from './pages/database.js';
 import * as business from './pages/business.js';
+import * as finance from './pages/finance.js';
+import * as graph from './pages/graph.js';
 import * as web_search from './pages/web_search.js';
 import * as activity from './pages/activity.js';
 import * as settings from './pages/settings.js';
 
-const PAGES = { home, memory, business, web_search, activity, settings };
+const PAGES = { home, email, education, memory, science, business, finance, graph, database, web_search, activity, settings };
 const FOOT = [
   { name: 'activity', title: 'Activity', hue: '#e6e7ea', icon: '<path d="M3 12h4l2-6 3 10 2-6h3"></path>' },
   { name: 'settings', title: 'Settings', hue: '#e6e7ea', icon: '<circle cx="10" cy="10" r="6.5"></circle><circle cx="10" cy="10" r="2"></circle>' },
@@ -24,7 +31,7 @@ function pageFromHash() {
 class App extends Component {
   constructor() {
     super();
-    this.state = { shell: null, page: null, data: null, sel: null, item: null, query: '', chip: 'All', more: 0, op: 1, loading: 0, error: null, prefill: null, section: 'General' };
+    this.state = { shell: null, page: null, data: null, sel: null, item: null, query: '', chip: 'All', more: 0, op: 1, loading: 0, error: null, prefill: null, section: 'General', feedback: null };
   }
 
   async componentDidMount() {
@@ -66,6 +73,7 @@ class App extends Component {
       clearInterval(this.timer);
       this.timer = setInterval(() => this.refresh(), this.interval);
     }
+    get('/api/feedback/recent').then((feedback) => this.setState({ feedback })).catch(() => {});
     if (!impl) { this.setState({ data: { empty: true } }); return; }
     try {
       const data = await impl.load(this);
@@ -117,7 +125,10 @@ class App extends Component {
         <div style=${{ height: 48, flex: 'none', display: 'flex', alignItems: 'baseline', gap: 12, padding: '14px 32px 0' }}>
           <span style=${{ fontSize: 20, fontWeight: 600, lineHeight: 1.2 }}>${mod.title}</span>
           <span style=${{ ...mono13, color: T.dim }}>${meta}</span>
-          ${s.error && html`<span style=${{ marginLeft: 'auto', ...mono13, color: '#cf7b7b' }}>${s.error}</span>`}
+          <span style=${{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: 12 }}>
+            ${s.error && html`<span style=${{ ...mono13, color: '#cf7b7b' }}>${s.error}</span>`}
+            <${Feedback} page=${s.page} hue=${mod.hue} sel=${s.sel} item=${s.item} recent=${s.feedback} onSent=${() => this.refresh()} />
+          </span>
         </div>
         <div style=${{ height: 1, margin: '0 32px', position: 'relative', overflow: 'hidden', flex: 'none' }}>
           ${s.loading > 0 && html`<div style=${{ position: 'absolute', top: 0, left: 0, height: 1, width: '30%', background: T.muted, animation: 'otto-load 1.2s ease-in-out infinite' }} />`}

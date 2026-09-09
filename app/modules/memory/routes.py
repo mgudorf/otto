@@ -110,17 +110,19 @@ def item(store: Store, memory_id: str) -> dict:
 async def action(request: Request, verb: str, body: dict = Body(default={})) -> dict:
     st = request.app.state
     store: Store = st.store
-    fn = ACTIONS.get(verb)
-    if fn is None:
+    prepare = ACTIONS.get(verb)
+    if prepare is None:
         raise HTTPException(404, f"unknown action {verb}")
+    write = prepare(store, body)  # validates here, so a bad request answers 400 / 404 and never becomes a failed job
 
     async def run(ctx):
-        return fn(store, body, ctx)
+        return write(ctx)
 
     return await st.runner.run_action(f"memory.{verb}", "memory", RESOURCE, run)
 
 
-def _capture(store: Store, body: dict, ctx) -> dict:
+# Each action validates against the store first and returns the write to run inside the job.
+def _capture(store: Store, body: dict):
     kind = body.get("kind", "note")
     text = (body.get("text") or "").strip()
     tags = [t.strip() for t in body.get("tags", []) if t.strip()]
@@ -128,59 +130,84 @@ def _capture(store: Store, body: dict, ctx) -> dict:
         raise HTTPException(400, "bad kind")
     if not text:
         raise HTTPException(400, "empty text")
-    ts = now_iso()
-    with ctx.commit() as conn:
-        cur = conn.execute("INSERT INTO memories(kind, text, created_at, updated_at) VALUES (?, ?, ?, ?)", (kind, text, ts, ts))
-        for t in tags:
-            conn.execute("INSERT OR IGNORE INTO memory_tags(memory_id, tag) VALUES (?, ?)", (cur.lastrowid, t))
-    ctx.event("captured", f"{kind}: {text[:120]}", ref=str(cur.lastrowid))
-    return {"id": cur.lastrowid}
+
+    def write(ctx) -> dict:
+        ts = now_iso()
+        with ctx.commit() as conn:
+            cur = conn.execute("INSERT INTO memories(kind, text, created_at, updated_at) VALUES (?, ?, ?, ?)", (kind, text, ts, ts))
+            for t in tags:
+                conn.execute("INSERT OR IGNORE INTO memory_tags(memory_id, tag) VALUES (?, ?)", (cur.lastrowid, t))
+        ctx.event("captured", f"{kind}: {text[:120]}", ref=str(cur.lastrowid))
+        return {"id": cur.lastrowid}
+
+    return write
 
 
-def _forget(store: Store, body: dict, ctx) -> dict:
+def _forget(store: Store, body: dict):
     r = _get(store, int(body["id"]))
-    with ctx.commit() as conn:
-        conn.execute("DELETE FROM memories WHERE id = ?", (r["id"],))
-    ctx.event("forgot", f"{r['kind']}: {r['text'][:120]}", ref=str(r["id"]))
-    return {"id": r["id"]}
+
+    def write(ctx) -> dict:
+        with ctx.commit() as conn:
+            conn.execute("DELETE FROM memories WHERE id = ?", (r["id"],))
+        ctx.event("forgot", f"{r['kind']}: {r['text'][:120]}", ref=str(r["id"]))
+        return {"id": r["id"]}
+
+    return write
 
 
-def _tag(store: Store, body: dict, ctx) -> dict:
+def _tag(store: Store, body: dict):
     r = _get(store, int(body["id"]))
     tags = [t.strip() for t in body.get("tags", []) if t.strip()]
-    with ctx.commit() as conn:
-        for t in tags:
-            conn.execute("INSERT OR IGNORE INTO memory_tags(memory_id, tag) VALUES (?, ?)", (r["id"], t))
-        conn.execute("UPDATE memories SET updated_at = ? WHERE id = ?", (now_iso(), r["id"]))
-    ctx.event("tagged", f"{', '.join(tags)} on {r['text'][:80]}", ref=str(r["id"]))
-    return {"id": r["id"], "tags": _tags(store, r["id"])}
+
+    def write(ctx) -> dict:
+        with ctx.commit() as conn:
+            for t in tags:
+                conn.execute("INSERT OR IGNORE INTO memory_tags(memory_id, tag) VALUES (?, ?)", (r["id"], t))
+            conn.execute("UPDATE memories SET updated_at = ? WHERE id = ?", (now_iso(), r["id"]))
+        ctx.event("tagged", f"{', '.join(tags)} on {r['text'][:80]}", ref=str(r["id"]))
+        return {"id": r["id"], "tags": _tags(store, r["id"])}
+
+    return write
 
 
-def _untag(store: Store, body: dict, ctx) -> dict:
+def _untag(store: Store, body: dict):
     r = _get(store, int(body["id"]))
-    with ctx.commit() as conn:
-        conn.execute("DELETE FROM memory_tags WHERE memory_id = ? AND tag = ?", (r["id"], body.get("tag", "")))
-    return {"id": r["id"], "tags": _tags(store, r["id"])}
+
+    def write(ctx) -> dict:
+        with ctx.commit() as conn:
+            conn.execute("DELETE FROM memory_tags WHERE memory_id = ? AND tag = ?", (r["id"], body.get("tag", "")))
+        return {"id": r["id"], "tags": _tags(store, r["id"])}
+
+    return write
 
 
-def _done(store: Store, body: dict, ctx) -> dict:
+def _done(store: Store, body: dict):
     r = _get(store, int(body["id"]))
-    with ctx.commit() as conn:
-        conn.execute("UPDATE memories SET done_at = ?, updated_at = ? WHERE id = ?", (now_iso(), now_iso(), r["id"]))
-    ctx.event("completed", r["text"][:120], ref=str(r["id"]))
-    return {"id": r["id"]}
+
+    def write(ctx) -> dict:
+        with ctx.commit() as conn:
+            conn.execute("UPDATE memories SET done_at = ?, updated_at = ? WHERE id = ?", (now_iso(), now_iso(), r["id"]))
+        ctx.event("completed", r["text"][:120], ref=str(r["id"]))
+        return {"id": r["id"]}
+
+    return write
 
 
-def _suggestion(store: Store, body: dict, ctx) -> dict:
+def _suggestion(store: Store, body: dict):
     status = body.get("status")
     if status not in ("accepted", "dismissed"):
         raise HTTPException(400, "status must be accepted or dismissed")
-    with ctx.commit() as conn:
-        n = conn.execute("UPDATE memory_suggestions SET status = ? WHERE id = ?", (status, int(body["id"]))).rowcount
-    if n == 0:
+    sid = int(body["id"])
+    if store.one("SELECT id FROM memory_suggestions WHERE id = ?", (sid,)) is None:
         raise HTTPException(404, "no such suggestion")
-    ctx.event(status, f"suggestion {body['id']}", ref=str(body["id"]))
-    return {"id": int(body["id"]), "status": status}
+
+    def write(ctx) -> dict:
+        with ctx.commit() as conn:
+            conn.execute("UPDATE memory_suggestions SET status = ? WHERE id = ?", (status, sid))
+        ctx.event(status, f"suggestion {sid}", ref=str(sid))
+        return {"id": sid, "status": status}
+
+    return write
 
 
 ACTIONS = {"capture": _capture, "forget": _forget, "tag": _tag, "untag": _untag, "done": _done, "suggestion": _suggestion}

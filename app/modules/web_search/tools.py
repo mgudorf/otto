@@ -8,7 +8,7 @@ from app.store import Store
 COLUMNS = "id, topic_id, kind, title, url, summary, found_at, status, decided_at"
 
 
-def register(read, full, store: Store) -> None:
+def register(read, full, store: Store, config) -> None:
     def search_findings(query: str = "", status: str | None = None, limit: int = 20) -> list[dict]:
         """Findings by words in their title or summary. status narrows to open, agreed or disagreed. Newest first."""
         where, params = _search(query)

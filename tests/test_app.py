@@ -1,10 +1,12 @@
 """Routes through the real app: memory module end to end, and sessions with a fake CLI."""
 
 import json
+from pathlib import Path
 
 import httpx
 
 from app.daemon import build
+from app.modules import Manifest, Module
 from tests.conftest import fake_spawn, run
 
 INIT = json.dumps({"type": "system", "subtype": "init", "session_id": "s1", "tools": ["mcp__otto__memory_search"]})
@@ -29,6 +31,24 @@ async def settle(app):
             return
 
 
+def queue_module(pending: list[dict], todays: list[dict]) -> Module:
+    """A page module with both hooks, as web_search will have: a queue and today's rows."""
+    return Module(
+        manifest=Manifest(name="queued", title="Queued", hue="#d9915b", icon="", order=9),
+        path=Path(__file__).parent,
+        tasks={},
+        router=None,
+        schema=None,
+        numbers=None,
+        today=lambda store: list(todays),
+        queue=lambda store: list(pending),
+        item=None,
+        context=None,
+        register_tools=None,
+        prompt=None,
+    )
+
+
 def test_memory_end_to_end(config):
     async def main():
         app = build(config)
@@ -48,9 +68,9 @@ def test_memory_end_to_end(config):
             assert item["tags"] == ["reading"] and item["actions"][-1]["verb"] == "forget"
             assert (await c.post("/api/memory/action/tag", json={"id": mid, "tags": ["books"]})).json()["tags"] == ["books", "reading"]
             home = (await c.get("/api/home/left")).json()
-            assert home["groups"][0]["module"] == "memory" and home["groups"][0]["count"] == 2
+            assert next(g for g in home["groups"] if g["module"] == "memory")["count"] == 2
             numbers = (await c.get("/api/home/numbers")).json()
-            assert numbers[0]["value"] == 2
+            assert next(n for n in numbers if n["module"] == "memory")["value"] == 2
             assert (await c.post("/api/memory/action/forget", json={"id": mid})).status_code == 200
             assert (await c.get(f"/api/memory/item/{mid}")).status_code == 404
             ev = (await c.get("/api/events?module=memory")).json()
@@ -115,6 +135,116 @@ def test_failed_first_turn_retires_session(config):
             assert s["session"] is None
             rows = app.state.store.query("SELECT * FROM sessions")
             assert rows[0]["closed_at"] and rows[0]["title"] == "(failed to start)"
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())
+
+
+def test_home_review_group(config):
+    """A module with a queue hook leads Home with every waiting row; empty or disabled, it shows nothing."""
+    pending = [
+        {"id": 7, "module": "queued", "text": "a finding worth reading", "stamp": "2026-09-08T09:00:00+00:00"},
+        {"id": 8, "module": "queued", "text": "another finding", "stamp": "2026-09-08T08:00:00+00:00"},
+    ]
+    todays = [{"id": 9, "module": "queued", "text": "found this morning", "stamp": "2026-09-08T07:00:00+00:00"}]
+
+    async def main():
+        app = build(config)
+        await app.state.runner.start()
+        st = app.state
+        st.registry.modules["queued"] = queue_module(pending, todays)
+        st.store.set_setting("modules.queued.enabled", True)
+        home = st.registry.get("home")
+        async with client_for(app) as c:
+            await c.post("/api/memory/action/capture", json={"kind": "note", "text": "a note from today"})
+
+            groups = (await c.get("/api/home/left")).json()["groups"]
+            assert groups[0]["module"] == "queued" and groups[0]["label"] == "Review"
+            assert groups[0]["count"] == 2 and groups[0]["more"] == 0
+            assert [r["id"] for r in groups[0]["rows"]] == [7, 8]
+            assert [g["module"] for g in groups if g["label"] == "Review"] == ["queued"]
+            assert any(g["module"] == "memory" and g["label"] == "Memory" for g in groups)
+            # one module, two groups: the page keys them label:module, so the keys stay distinct
+            mine = [(g["label"], g["module"]) for g in groups if g["module"] == "queued"]
+            assert mine == [("Review", "queued"), ("Queued", "queued")]
+            assert len({f"{label}:{mod}" for label, mod in mine}) == 2
+            text = home.context(st.store, st.registry)
+            assert "Review: 2 waiting" in text
+            assert "  - (queued 7) a finding worth reading" in text and "  - (queued 8) another finding" in text
+
+            pending.clear()
+            groups = (await c.get("/api/home/left")).json()["groups"]
+            assert all(g["label"] != "Review" for g in groups)
+            assert "Review: nothing waiting" in home.context(st.store, st.registry)
+
+            pending.extend([{"id": 7, "module": "queued", "text": "back again", "stamp": "2026-09-08T09:00:00+00:00"}])
+            st.store.set_setting("modules.queued.enabled", False)
+            groups = (await c.get("/api/home/left")).json()["groups"]
+            assert all(g["label"] != "Review" for g in groups)
+            assert "(queued " not in home.context(st.store, st.registry)
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())
+
+
+FILED = json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": "s3", "result": json.dumps({
+    "kind": "bug", "title": "Forget leaves the inspector open", "summary": "Forgetting a memory should clear the inspector.",
+    "tags": ["memory", "bug", "inspector"], "ref": None, "draft": "# Forget leaves the inspector open\n\n- Where: memory item\n",
+})})
+NOT_JSON = json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": "s4", "result": "I could not classify this."})
+
+
+def test_feedback_end_to_end(config):
+    calls, procs = [], []
+
+    def spying(lines):
+        inner = fake_spawn(lines, calls)
+
+        async def spawn(args, cwd, env):
+            proc = await inner(args, cwd, env)
+            procs.append(proc)
+            return proc
+
+        return spawn
+
+    async def main():
+        app = build(config, spawn_fn=spying([FILED]))
+        await app.state.runner.start()
+        async with client_for(app) as c:
+            assert "feedback" not in {m["name"] for m in (await c.get("/api/shell")).json()["modules"]}
+            assert (await c.post("/api/feedback/action/add", json={"page": "memory", "text": "  "})).status_code == 400
+            r = await c.post("/api/feedback/action/add", json={"page": "memory", "text": "forget should also clear the inspector", "item": {"module": "memory", "id": 7, "text": "buy sqlite book"}})
+            assert r.status_code == 200, r.text
+            fid = r.json()["id"]
+            await settle(app)
+            recent = (await c.get("/api/feedback/recent")).json()
+            assert recent["pending"] == 0 and recent["rows"][0]["status"] == "filed" and recent["rows"][0]["kind"] == "bug"
+            row = (await c.get("/api/feedback/list")).json()[0]
+            assert row["id"] == fid and row["text"] == "forget should also clear the inspector" and row["item_id"] == "7" and row["tags"] == ["memory", "bug", "inspector"]
+            assert row["draft"].startswith("# Forget") and row["ref"] is None and row["job_id"]
+            args = calls[0]["args"]
+            assert "otto-read" in args[args.index("--mcp-config") + 1] and "--no-session-persistence" in args
+            assert args[args.index("--max-turns") + 1] == str(config.feedback.max_turns)
+            assert "mcp__otto-read__docs_read" in args[args.index("--allowedTools") + 1]
+            prompt = procs[0].stdin.data.decode("utf-8")
+            assert f"Feedback #{fid}" in prompt and "buy sqlite book" in prompt
+            assert app.state.store.one("SELECT budgeted FROM llm_runs WHERE module = 'feedback'")["budgeted"] == 0
+            ev = (await c.get("/api/events?module=memory")).json()["events"]
+            assert [e["verb"] for e in ev][:2] == ["filed", "feedback"]
+            # a reply that is not JSON fails the note; retry requeues it
+            app.state.claude.spawn = spying([NOT_JSON])
+            r = await c.post("/api/feedback/action/add", json={"page": "activity", "text": "show job durations"})
+            bad = r.json()["id"]
+            await settle(app)
+            recent = (await c.get("/api/feedback/recent")).json()
+            assert recent["pending"] == 1 and recent["rows"][0]["status"] == "failed" and "JSON" in recent["rows"][0]["error"]
+            assert (await c.post("/api/feedback/action/retry", json={"id": fid})).status_code == 409
+            app.state.claude.spawn = spying([FILED])
+            assert (await c.post("/api/feedback/action/retry", json={"id": bad})).status_code == 200
+            await settle(app)
+            assert (await c.get("/api/feedback/recent")).json()["pending"] == 0
         await app.state.runner.drain(1)
         app.state.store.close()
 
