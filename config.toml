@@ -49,6 +49,9 @@ token_file = "data/secrets/token.json"            # the owner's Gmail token, sco
 backfill_days = 90            # the first sync mirrors mail newer than this
 triage_batch = 40             # messages the nightly triage prioritizes per run
 
+[feedback]
+max_turns = 12             # per filing run: list docs, read a few, reply
+
 [ui]
 start_page = "home"
 refresh_seconds = 30

@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS question_parts (
   PRIMARY KEY (question_id, n)
 );
 
-CREATE TABLE IF NOT EXISTS feedback (
+CREATE TABLE IF NOT EXISTS education_feedback (
   id          INTEGER PRIMARY KEY,
   ts          TEXT NOT NULL,
   topic_id    INTEGER REFERENCES topics(id),

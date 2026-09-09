@@ -187,3 +187,65 @@ def test_home_review_group(config):
         app.state.store.close()
 
     run(main())
+
+
+FILED = json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": "s3", "result": json.dumps({
+    "kind": "bug", "title": "Forget leaves the inspector open", "summary": "Forgetting a memory should clear the inspector.",
+    "tags": ["memory", "bug", "inspector"], "ref": None, "draft": "# Forget leaves the inspector open\n\n- Where: memory item\n",
+})})
+NOT_JSON = json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": "s4", "result": "I could not classify this."})
+
+
+def test_feedback_end_to_end(config):
+    calls, procs = [], []
+
+    def spying(lines):
+        inner = fake_spawn(lines, calls)
+
+        async def spawn(args, cwd, env):
+            proc = await inner(args, cwd, env)
+            procs.append(proc)
+            return proc
+
+        return spawn
+
+    async def main():
+        app = build(config, spawn_fn=spying([FILED]))
+        await app.state.runner.start()
+        async with client_for(app) as c:
+            assert "feedback" not in {m["name"] for m in (await c.get("/api/shell")).json()["modules"]}
+            assert (await c.post("/api/feedback/action/add", json={"page": "memory", "text": "  "})).status_code == 400
+            r = await c.post("/api/feedback/action/add", json={"page": "memory", "text": "forget should also clear the inspector", "item": {"module": "memory", "id": 7, "text": "buy sqlite book"}})
+            assert r.status_code == 200, r.text
+            fid = r.json()["id"]
+            await settle(app)
+            recent = (await c.get("/api/feedback/recent")).json()
+            assert recent["pending"] == 0 and recent["rows"][0]["status"] == "filed" and recent["rows"][0]["kind"] == "bug"
+            row = (await c.get("/api/feedback/list")).json()[0]
+            assert row["id"] == fid and row["text"] == "forget should also clear the inspector" and row["item_id"] == "7" and row["tags"] == ["memory", "bug", "inspector"]
+            assert row["draft"].startswith("# Forget") and row["ref"] is None and row["job_id"]
+            args = calls[0]["args"]
+            assert "otto-read" in args[args.index("--mcp-config") + 1] and "--no-session-persistence" in args
+            assert args[args.index("--max-turns") + 1] == str(config.feedback.max_turns)
+            assert "mcp__otto-read__docs_read" in args[args.index("--allowedTools") + 1]
+            prompt = procs[0].stdin.data.decode("utf-8")
+            assert f"Feedback #{fid}" in prompt and "buy sqlite book" in prompt
+            assert app.state.store.one("SELECT budgeted FROM llm_runs WHERE module = 'feedback'")["budgeted"] == 0
+            ev = (await c.get("/api/events?module=memory")).json()["events"]
+            assert [e["verb"] for e in ev][:2] == ["filed", "feedback"]
+            # a reply that is not JSON fails the note; retry requeues it
+            app.state.claude.spawn = spying([NOT_JSON])
+            r = await c.post("/api/feedback/action/add", json={"page": "activity", "text": "show job durations"})
+            bad = r.json()["id"]
+            await settle(app)
+            recent = (await c.get("/api/feedback/recent")).json()
+            assert recent["pending"] == 1 and recent["rows"][0]["status"] == "failed" and "JSON" in recent["rows"][0]["error"]
+            assert (await c.post("/api/feedback/action/retry", json={"id": fid})).status_code == 409
+            app.state.claude.spawn = spying([FILED])
+            assert (await c.post("/api/feedback/action/retry", json={"id": bad})).status_code == 200
+            await settle(app)
+            assert (await c.get("/api/feedback/recent")).json()["pending"] == 0
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())

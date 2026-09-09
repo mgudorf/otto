@@ -144,7 +144,7 @@ def register(read, full, store: Store, config=None) -> None:
         """The owner's feedback lines, verbatim, newest first. topic_id narrows."""
         where, params = ("WHERE f.topic_id = ?", (topic_id,)) if topic_id is not None else ("", ())
         return store.query(
-            f"SELECT f.id, f.ts, f.topic_id, t.name AS topic, f.question_id, f.text FROM feedback f LEFT JOIN topics t ON t.id = f.topic_id {where} ORDER BY f.id DESC LIMIT 100",
+            f"SELECT f.id, f.ts, f.topic_id, t.name AS topic, f.question_id, f.text FROM education_feedback f LEFT JOIN topics t ON t.id = f.topic_id {where} ORDER BY f.id DESC LIMIT 100",
             params,
         )
 
@@ -193,7 +193,7 @@ def register(read, full, store: Store, config=None) -> None:
         if topic_id is not None and store.one("SELECT id FROM topics WHERE id = ?", (topic_id,)) is None:
             return {"error": f"no topic {topic_id}"}
         with store.tx() as conn:
-            cur = conn.execute("INSERT INTO feedback(ts, topic_id, question_id, text) VALUES (?, ?, ?, ?)", (now_iso(), topic_id, question_id, text))
+            cur = conn.execute("INSERT INTO education_feedback(ts, topic_id, question_id, text) VALUES (?, ?, ?, ?)", (now_iso(), topic_id, question_id, text))
         store.event("education", "feedback", text[:120], ref=str(cur.lastrowid))
         return {"id": cur.lastrowid}
 

@@ -67,7 +67,7 @@ def parts_of(store: Store, question_id: int) -> list[dict]:
 
 
 def feedback_of(store: Store, question_id: int) -> list[str]:
-    return [f["text"] for f in store.query("SELECT text FROM feedback WHERE question_id = ? ORDER BY id", (question_id,))]
+    return [f["text"] for f in store.query("SELECT text FROM education_feedback WHERE question_id = ? ORDER BY id", (question_id,))]
 
 
 def topic_rows(store: Store) -> list[dict]:
@@ -269,7 +269,7 @@ def context(store: Store, registry) -> str:
     last = store.query(f"{SELECT} WHERE q.graded_at IS NOT NULL ORDER BY q.graded_at DESC LIMIT ?", (RECENT,))
     if last:
         lines.append("Last graded: " + "; ".join(f"Q{q['id']} {q['title'][:60]} ({q['topic']}) {q['score']}" for q in last))
-    fb = store.query("SELECT f.text, t.name AS topic FROM feedback f LEFT JOIN topics t ON t.id = f.topic_id ORDER BY f.id DESC LIMIT ?", (RECENT,))
+    fb = store.query("SELECT f.text, t.name AS topic FROM education_feedback f LEFT JOIN topics t ON t.id = f.topic_id ORDER BY f.id DESC LIMIT ?", (RECENT,))
     if fb:
         lines.append("Owner feedback, verbatim: " + "; ".join(f"\"{f['text'][:160]}\"" + (f" ({f['topic']})" if f["topic"] else "") for f in fb))
     return "\n".join(lines)

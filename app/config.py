@@ -82,6 +82,11 @@ class Email:
 
 
 @dataclass(frozen=True)
+class Feedback:
+    max_turns: int
+
+
+@dataclass(frozen=True)
 class Ui:
     start_page: str
     refresh_seconds: int
@@ -102,6 +107,7 @@ class Config:
     education: Education
     database: Database
     email: Email
+    feedback: Feedback
     ui: Ui
 
     @property
@@ -126,5 +132,6 @@ def load(root: Path = ROOT) -> Config:
             client_file=root / raw["email"]["client_file"], token_file=root / raw["email"]["token_file"],
             backfill_days=raw["email"]["backfill_days"], triage_batch=raw["email"]["triage_batch"],
         ),
+        feedback=Feedback(**raw["feedback"]),
         ui=Ui(**raw["ui"]),
     )

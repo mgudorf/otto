@@ -85,3 +85,29 @@ def test_tasks_never_reach_interactive_claude():
 
 def test_read_builtins_exclude_writers():
     assert not {"Write", "Edit", "Bash", "NotebookEdit", "MultiEdit"} & set(READ_BUILTINS)
+
+
+def test_docs_tools_confined(store, config):
+    from app.modules.feedback import tools
+
+    class FakeServer:
+        def __init__(self):
+            self.tools = {}
+
+        def tool(self):
+            def deco(fn):
+                self.tools[fn.__name__] = fn
+                return fn
+
+            return deco
+
+    store.migrate((ROOT / "app" / "modules" / "feedback" / "schema.sql").read_text("utf-8"))
+    read, full = FakeServer(), FakeServer()
+    tools.register(read, full, store, config)
+    assert set(read.tools) == set(full.tools) == {"docs_list", "docs_read", "feedback_list"}
+    paths = {d["path"] for d in read.tools["docs_list"]()}
+    assert "docs/ARCHITECTURE.md" in paths and all(p.startswith("docs/") and p.endswith(".md") for p in paths)
+    assert read.tools["docs_read"]("docs/ARCHITECTURE.md")["text"].startswith("# Architecture")
+    for bad in ("config.toml", "../app/config.py", "docs/design/support.js", "docs/../app/claude.py"):
+        assert "error" in read.tools["docs_read"](bad), bad
+    assert read.tools["feedback_list"]() == []

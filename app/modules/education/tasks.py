@@ -40,7 +40,7 @@ def build_prompt(store, topics: list[dict]) -> str:
         "(1 = intuition in everyday words, 5 = subtle edge cases); never repeat a listed title or a close variant of it.",
         "",
     ]
-    general = store.query("SELECT text FROM feedback WHERE topic_id IS NULL ORDER BY id DESC LIMIT 5")
+    general = store.query("SELECT text FROM education_feedback WHERE topic_id IS NULL ORDER BY id DESC LIMIT 5")
     if general:
         lines += ["Owner feedback that applies everywhere, verbatim:", *[f"- \"{f['text'][:300]}\"" for f in general], ""]
     for t in topics:
@@ -56,7 +56,7 @@ def build_prompt(store, topics: list[dict]) -> str:
                 f"  Last graded, {last['score']}/100 on \"{last['title']}\": "
                 + "; ".join(f"part {p['n']} {p['score']}" + (f" ({p['note']})" if p["note"] else "") for p in notes)
             )
-        fb = store.query("SELECT text FROM feedback WHERE topic_id = ? ORDER BY id DESC LIMIT 5", (t["id"],))
+        fb = store.query("SELECT text FROM education_feedback WHERE topic_id = ? ORDER BY id DESC LIMIT 5", (t["id"],))
         if fb:
             lines.append("  Owner feedback, verbatim: " + "; ".join(f"\"{f['text'][:200]}\"" for f in fb))
         lines.append("")
