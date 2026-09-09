@@ -14,7 +14,7 @@ The nightly search, its table, its topics and the agree / disagree actions are `
 | `docs/ARCHITECTURE.md` › Module contract, UI frame contract | Hook shape, LEFT wire shape, rows and group headers |
 | `docs/design/Personal Dashboard App.dc.html` lines 49–75 | Home LEFT: a hue-coloured module header with icon and count, 36px rows, `+N` |
 | `app/modules/__init__.py` | `Module` fields and how hooks are picked up from `routes.py` |
-| `app/modules/home/routes.py`, `app/static/pages/home.js` | Home's `left`, `context`, the group renderer and the inspector's action posting |
+| `app/modules/homepage/routes.py`, `app/static/pages/home.js` | Home's `left`, `context`, the group renderer and the inspector's action posting |
 | `docs/roadmap/web_search/PLAN.md` | `search_findings.status`, `action/agree`, `action/disagree`, `item`, the row shape web_search already returns |
 
 ## Decisions
@@ -35,8 +35,8 @@ Rejected: Home reading `search_findings` directly (couples Home to one module's 
 | File | Change |
 |---|---|
 | `app/modules/__init__.py` | `Module.queue: Callable[[Any], list[dict]] \| None`; `_load_one` picks it up with `getattr(routes_mod, "queue", None)`; docstring names it |
-| `app/modules/home/routes.py` | `left_route` prepends the `Review` groups; `context` adds the queue lines |
-| `app/modules/home/agent.md` | one sentence: the Review lines are what still needs a decision; say which is worth opening, never decide |
+| `app/modules/homepage/routes.py` | `left_route` prepends the `Review` groups; `context` adds the queue lines |
+| `app/modules/homepage/agent.md` | one sentence: the Review lines are what still needs a decision; say which is worth opening, never decide |
 | `app/static/pages/home.js` | group key becomes `label:module` |
 | `docs/ARCHITECTURE.md` Module contract row for `routes.py` | add `queue(store) -> rows` (done by `/sync-architecture` after merge) |
 | `tests/test_app.py` | `test_home_review_group` |
@@ -67,7 +67,7 @@ Departures from the artboard: the artboard's Home LEFT has only today-per-module
 
 ## Data
 
-No table, cursor or client. Home reads through hooks and writes nothing; it has no tasks. The scheduled / user-action split is web_search's to prove; this item's test only asserts that Home never touches a module table (`app/modules/home/` imports no other module).
+No table, cursor or client. Home reads through hooks and writes nothing; it has no tasks. The scheduled / user-action split is web_search's to prove; this item's test only asserts that Home never touches a module table (`app/modules/homepage/` imports no other module).
 
 ## Phases
 
