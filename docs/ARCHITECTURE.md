@@ -16,9 +16,9 @@ Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps 
 | Store | one SQLite file `data/otto.db` in WAL mode, platform and module tables together, timestamps as UTC ISO strings |
 | LLM | the Claude Code CLI (2.1.263) headless under the owner's claude.ai Max login; no API key exists anywhere in the app |
 | Frontend | static ES modules, Preact + htm vendored, inline styles ported from the artboard; no build step, no Node |
-| Modules built | Home, Memory, System (tasks only, no page). The rail shows only modules whose package exists |
+| Modules built | Home, Email, Education, Memory, Finance, Business, Graph, Database have pages; System and Feedback have none. The rail shows only modules whose package exists |
 
-Run: `python -m app` checks the port and code revision, starts or restarts the daemon, then opens the window. `python -m app setup` registers the Windows Task Scheduler entry `Otto` that starts the daemon at logon. `python -m app status` prints health. Tests: `.venv/Scripts/python.exe -m pytest -q`, offline; the CLI is mocked at `app.claude.spawn` and a real invocation raises.
+Run: `python -m app` checks the port and code revision, starts or restarts the daemon, then opens the window. `python -m app setup` registers the Windows Task Scheduler entry `Otto` that starts the daemon at logon. `python -m app status` prints health. `python -m app.modules.email.gmail consent` runs the Gmail OAuth flow once and writes the token file. Tests: `.venv/Scripts/python.exe -m pytest -q`, offline; the CLI is mocked at `app.claude.spawn` and a real invocation raises.
 
 ```
 app/__main__.py   launcher: open | setup | status | daemon
@@ -31,7 +31,7 @@ app/runner.py     one queue, per-resource locks, worker count = cap, job rows an
 app/revision.py   sha256 of app/** and config.toml, served by /health
 app/claude.py     CLI spawn, event stream, read-only allowlist, nightly budget
 app/modules/      registry, agent_base.md, one package per module (contract under Daemon)
-app/static/       index.html, shell.js, session.js, rows.js, api.js, pages/<name>.js, vendor/
+app/static/       index.html, shell.js, session.js, rows.js, api.js, feedback.js, pages/<name>.js, vendor/
 data/             otto.db, daemon.log, secrets/, workspace/, backups/ (all gitignored)
 ```
 
@@ -88,6 +88,12 @@ The UI is a view of daemon state. Pages render from the store and poll or subscr
 | claude | binary, model (`default` keeps the CLI's own choice), sessions_kept_days |
 | data | db, workspace (working directory of every Claude run; file tools are confined to it) |
 | nightly | window (local time), max_sessions per day, max_turns and max_minutes per run |
+| business | leads_per_run |
+| memory | suggest_lookback_days, suggest_max |
+| education | queue_size, start_difficulty, flow_low, flow_high |
+| database | max_rows, max_seconds |
+| email | client_file, token_file, backfill_days, triage_batch |
+| feedback | max_turns |
 | ui | start_page, refresh_seconds, time_format (`24h` or `12h`), page_size |
 
 ### Claude
@@ -98,7 +104,7 @@ Every run is one CLI process with the prompt on stdin and `--output-format strea
 |---|---|---|---|
 | `run_task` | scheduled tasks via `ctx.run_task` | `otto-read` at `/mcp/read`: read tools only | `--max-turns <nightly.max_turns> --no-session-persistence`; raises `BudgetExceeded` outside the window or past `max_sessions` |
 | `session_turn` | session routes | `otto` at `/mcp/full`: read and write tools | `--session-id` on the first turn, `--resume` after |
-| `oneshot` | session close | `otto-read` | `--max-turns 2 --no-session-persistence`; not counted against the budget |
+| `oneshot` | session close, Feedback filing | `otto-read` | `--no-session-persistence`, the caller's `--max-turns` (2 for a close, `feedback.max_turns` for a filing) and only the tools the caller names; not counted against the budget |
 
 System prompt: `app/modules/agent_base.md` (shared rules) + the module's `agent.md` + a Current state block from the module's `context(store, registry)` hook, rendered fresh every turn.
 
@@ -114,11 +120,11 @@ A module is a package `app/modules/<name>/` plus `app/static/pages/<name>.js`. T
 
 | File | Obligation |
 |---|---|
-| `__init__.py` | `MANIFEST = Manifest(name, title, hue, icon (SVG inner markup, 20x20), order, schedules=(Schedule(task, every "60s|15m|24h", resource, llm),), agent=Agent(placeholder, skills, read_tools, write_tools), page=True)` |
+| `__init__.py` | `MANIFEST = Manifest(name, title, hue, icon (SVG inner markup, 20x20), order, schedules=(Schedule(task, every "60s\|15m\|24h", resource, llm),), agent=Agent(placeholder, skills, read_tools, write_tools), page=True)` |
 | `schema.sql` | the module's tables, applied at boot |
 | `tasks.py` | `async def <task>(ctx)` per schedule; `ctx.store` (read), `ctx.commit(cursor=...)` (the only write), `ctx.log`, `ctx.event`, `ctx.run_task(prompt, tools)`; return a string, or `Skipped("why")` |
-| `routes.py` | `router = APIRouter(prefix="/api/<name>")` with `GET left`, `GET item/{id}`, `POST action/{verb}` (through `runner.run_action`), plus hooks `numbers(store) -> {value, label}`, `today(store) -> rows`, `item(store, id)`, `context(store, registry) -> str`. Route handlers must not share a hook's name |
-| `tools.py` | `register(read, full, store)`: read tools on both servers, write tools on `full` |
+| `routes.py` | `router = APIRouter(prefix="/api/<name>")` with `GET left`, `GET item/{id}`, `POST action/{verb}` (through `runner.run_action`), plus hooks `numbers(store) -> {value, label}`, `today(store) -> rows`, `queue(store) -> rows` (everything still waiting on the owner; Home lists every one), `item(store, id)`, `context(store, registry) -> str`. Route handlers must not share a hook's name |
+| `tools.py` | `register(read, full, store, config)`: read tools on both servers, write tools on `full` |
 | `agent.md` | the agent's job in the owner's terms |
 | `pages/<name>.js` | `load(app)`, `meta(app)`, `Left({app, data, mod, fmt})`, `Middle({app, data, mod, fmt})` returning Preact nodes; the shell owns rail, header, tracks and the session pane |
 
@@ -138,7 +144,7 @@ Wire shape for LEFT: `{groups: [{label, count, rows: [{id, module, text, stamp, 
 | Google Chrome | found through the `App Paths\chrome.exe` registry key |
 | SQLite with FTS5 | 3.50.4, stdlib |
 | Vendored frontend | `app/static/vendor/`: preact.mjs, htm.mjs, Inter 400/500/600, JetBrains Mono 400/500, pinned by `SHA256SUMS` |
-| Google OAuth client and token | `data/secrets/google_client.json`, `data/secrets/token.json`; scopes unchecked until the Email module |
+| Google OAuth client and token | `data/secrets/google_client.json` (web client, redirect `http://localhost:8756/m/email/api/oauth/callback`), `data/secrets/token.json`, scope `gmail.modify`, refreshed in place |
 
 Not used: Node, APScheduler, pywebview, `claude-agent-sdk`, an Anthropic API key, paid search APIs, a graph database, Microsoft Edge.
 
@@ -149,7 +155,7 @@ Not used: Node, APScheduler, pywebview, `claude-agent-sdk`, an Anthropic API key
 1. Shows very high summaries
 2. Shows any web search items found via nightly search which are immediately relevant; adds to a queue and creates a record once agreed/disagreed with; i.e. nightly search could return 3 results; at the end of the week there are 21 items to review. 
 
-Built: `GET /api/home/numbers` (one number per enabled module with a `numbers` hook) and `GET /api/home/left` (each module's `today` rows, five per module with a `+N` link into the module). LEFT lists today per module; MIDDLE blank state is the number grid; selecting a row opens that module's item inspector. The Home agent has no tools and sees the same numbers and rows as its Current state block.
+Built: `GET /api/home/numbers` (one number per enabled module with a `numbers` hook) and `GET /api/home/left`, which puts a `Review` group per module with a `queue` hook first, every waiting row and no cut, then each module's `today` rows, five per module with a `+N` link into the module. Groups are keyed `label:module`, so one module can yield both. MIDDLE blank state is the number grid; selecting a row opens the owning module's item inspector and posts its verbs. The Home agent has no tools; its Current state block carries the same numbers, today rows and `Review: N waiting` lines.
 
 #### Nightly Process
 
@@ -162,7 +168,7 @@ Web search to gather data on anything that could potentially help me in my life;
 
 MUST BE CAPPED TO SOME REASONABLE DEGREE; I am using usage associated with CLAUDE MAX account, but do not want to incur any other api charges, nor do I want to use all of my weekly tokens in 2 days. 
 
-Not built. The `[nightly]` budget already applies to every scheduled LLM run.
+The `[nightly]` budget caps every scheduled LLM run.
 
 ### E-mail
 
@@ -170,6 +176,19 @@ Not built. The `[nightly]` budget already applies to every scheduled LLM run.
 2. Search bar/full ability to interact with inbox (Google chrome behaves very strangely when trying to do bulk deletes; I would like to resolve by explicitly using API here)
 3. Agent only performs triage&sorting, prioritization and flagging of relevant items
 4. Agent does NOT have the ability to write nor delete on its own. This needs to be a HARD CONSTRAINT determined by tooling or gmail api implementation. 
+
+Built:
+
+| Piece | Current state |
+|---|---|
+| Tables | `email_messages(id Gmail id, thread_id, from_name, from_addr, subject, snippet, internal_date, labels JSON, body_text)`, `email_triage(message_id, priority high\|normal\|low, reason, source)`, `email_fts` (FTS5, trigger-maintained) |
+| Routes | `left` (query, chips All/Unread/Flagged/Priority, page), `blank` (mailbox counts), `item/{id}` (fetches and stores the body on first open), `action/{archive\|trash\|read\|unread\|star\|unstar}` on one id or on every message matching the current query and chip |
+| Hooks | `numbers` (unread), `today` (inbox mail of the local day), `item`, `context` (counts, last sync, ten newest, high-priority with reasons) |
+| Tools | read: `email_search`, `email_get`, `email_triage`; write: `email_flag`, which writes Otto's triage row. No tool reaches Gmail |
+| Schedules | `email.sync` every 5m on resource `gmail`: first a `backfill_days` backfill committed in pages of 100 under a resumable cursor, then Gmail history from `email.history`. `email.triage` every 24h inside the nightly window prioritizes `triage_batch` untriaged inbox messages |
+| Gmail | `GmailRead` for tasks and body fetches; `GmailWrite` adds `batchModify` and is reachable only from action routes. A quota refusal pauses every call in flight together and retries |
+| Page | LEFT: search, chips, rows by day as `sender: subject`; MIDDLE blank: counts and the bulk bar over the current filter; MIDDLE selected: sender, body, priority and reason, `Archive`, `Trash`, read/unread, star/unstar, `Open in Gmail` |
+| Departures | `Priority` chip added; no `Reply` (no compose) and no `Snooze` (no API); the blank state is unspecified in the artboard |
 
 ### Education
 
@@ -204,6 +223,19 @@ Not built. The `[nightly]` budget already applies to every scheduled LLM run.
 4. Progress and score are tracked by domain, one per topic above.
 5. New tech (pick a new technology, see if I can understand how it works): a separate roadmap item, `docs/roadmap/new-tech/`.
 
+Built:
+
+| Piece | Current state |
+|---|---|
+| Tables | `topics(name, description, difficulty 1-5, retired_at)`, `questions(topic_id, title, premise, difficulty, source nightly\|session, started_at, graded_at, skipped_at, score)`, `question_parts(question_id, n, text, score 0-100, note)`, `education_feedback` (the owner's words, unchanged) |
+| Routes | `left` (the due queue, then history by day, search, page), `blank` (progress per topic, add-topic box), `item/{id}`, `action/{start\|skip\|add_topic\|retire_topic}` |
+| Hooks | `numbers` (due), `today` (the due queue), `item`, `context` (per topic: difficulty, graded/asked, average, recent scores; the started question with every part and its grade; recent feedback verbatim) |
+| Tools | read: `education_topics`, `education_questions`, `education_question`, `education_feedback`; write: `education_add_topic`, `education_add_question`, `education_grade`, `education_record_feedback` |
+| Schedule | `education.generate` every 24h inside the nightly window: tops the open queue up to `queue_size`, one question for each topic that has waited longest, rejecting a repeated title or a malformed part list |
+| Flow | a new topic starts at `start_difficulty`; a completed question averaging below `flow_low` drops its topic one step, above `flow_high` raises it, floor 1 and ceiling 5 |
+| Page | LEFT: search, the `due` group, then history by day with the score as a progress bar; MIDDLE blank: a row per topic with difficulty, graded/asked, average and recent scores, plus the add-topic box; MIDDLE selected: premise, numbered parts with score and note, the owner's feedback lines, `Start` or `Skip` |
+| Departures | `Reschedule` dropped (nothing is scheduled to a date); LEFT leads with `due` instead of grouping everything by date; the blank state is unspecified in the artboard |
+
 ### Memory
 
 1. General note taking/to-do list/journaling module
@@ -214,8 +246,8 @@ Built:
 
 | Piece | Current state |
 |---|---|
-| Tables | `memories(kind note|link|quote|fact|task, text, created_at, updated_at, done_at)`, `memory_tags`, `memory_suggestions(text unique, memory_ids, status open|accepted|dismissed)`, `memories_fts` (FTS5, trigger-maintained) |
-| Routes | `left` (query, chip All/Notes/Links/Quotes/Facts/Tasks, page), `blank` (kinds, counts, open suggestions), `item/{id}`, `action/{capture|forget|tag|untag|done|suggestion}` |
+| Tables | `memories(kind note\|link\|quote\|fact\|task, text, created_at, updated_at, done_at)`, `memory_tags`, `memory_suggestions(text unique, memory_ids, status open\|accepted\|dismissed)`, `memories_fts` (FTS5, trigger-maintained) |
+| Routes | `left` (query, chip All/Notes/Links/Quotes/Facts/Tasks, page), `blank` (kinds, counts, open suggestions), `item/{id}`, `action/{capture\|forget\|tag\|untag\|done\|suggestion}` |
 | Hooks | `numbers` (total), `today` (captures of the local day), `item`, `context` (counts, last ten, open suggestions) |
 | Tools | read: `memory_search`, `memory_get`, `memory_tags`, `memory_suggestions`; write: `memory_add`, `memory_tag`, `memory_suggest` (records a suggestion so it is never repeated) |
 | Schedule | `memory.suggest`, every 24h inside the nightly window, resource `memory`: proposes up to three action items from the last seven days as JSON, inserted with `INSERT OR IGNORE`, cursor `memory.suggest` |
@@ -232,10 +264,34 @@ Built:
 1. General place for me to organize important information regarding anything money related; budget/recurring subscriptions/payments, stock/investment info (not direct link to account, just a proxy with manual inputs)
 2. Agent should be able to be asked general questions regarding finances; i.e. natural language queries. 
 
+Built:
+
+| Piece | Current state |
+|---|---|
+| Tables | `finance_entries(kind account\|recurring\|holding\|budget, name, amount in cents, cadence monthly\|yearly\|weekly, note, ended_at)`, `finance_amounts` (every value the entry has held) |
+| Routes | `left` (query, chips All/Accounts/Recurring/Holdings/Budgets), `blank` (totals, kinds, cadences, counts), `item/{id}` with the amount history, `action/{capture\|update\|end\|forget}`, each validated before the job is queued |
+| Hooks | `numbers` (active records), `today` (entries touched in the local day), `item`, `context` (the four totals and every active entry) |
+| Tools | read only: `finance_list`, `finance_get`, `finance_totals`. The manifest declares no write tools |
+| Totals | recurring and budget amounts normalize to a month as yearly / 12 and weekly x 52 / 12; accounts and holdings sum as entered |
+| Page | LEFT: search, kind chips, one group per kind with the amount in the stamp slot and a dot for active; MIDDLE blank: the totals and the capture form; MIDDLE selected: the entry, its amount history, `Update`, `End`, `Forget` |
+| Departures | the artboard's Money page was a document list, now Business: chips are the four kinds, rows group by kind rather than day, item actions are `Update` / `End` / `Forget` |
+
 ### Business
 
 1. Houses business plans/networking (people, events, etc.)/documents
 2. Finds/Tracks items immediately relevant to current pursuits, recommendations based on career improvement, business plans, job openings that are realistic, automated; 
+
+Built:
+
+| Piece | Current state |
+|---|---|
+| Table | `business_items(kind plan\|person\|event\|document\|lead, text, ref, why, status open\|accepted\|dismissed)`, unique on `(kind, ref)`; `ref` is a URL for a lead and an absolute path for a document |
+| Routes | `left` (query, chips per kind), `blank` (counts and the open leads), `item/{id}`, `action/{capture\|forget\|lead\|open}` |
+| Hooks | `numbers` (open leads), `today` (items created in the local day), `item`, `context` (counts, every plan verbatim, open leads, document paths) |
+| Tools | read: `business_search`, `business_get`, `business_leads`; write: `business_add`, `business_lead` |
+| Schedules | `business.index_documents` every 15m mirrors the files in `data/workspace/business/` as `document` rows and drops rows whose file is gone. `business.scout` every 24h inside the nightly window searches the web against the owner's plans and queues up to `leads_per_run` new leads, never repeating a url |
+| Page | LEFT: search, chips, rows by day with the file extension as the leading slot for documents; MIDDLE blank: the capture box and the lead queue; MIDDLE selected: the item, its reason and url, `Accept` / `Dismiss` for a lead, `Open` for a document |
+| Departures | chips are the five kinds rather than the artboard's `Accounts, Plans, Documents` (accounts are Finance); `Summarize` and `Share` dropped; the blank state is unspecified in the artboard |
 
 ### Database
 
@@ -243,6 +299,17 @@ Built:
 2. Agent is natural language interface for creating queries
 3. Agent has in depth knowledge of database schema. 
 
+Built:
+
+| Piece | Current state |
+|---|---|
+| Table | `db_queries(name unique, sql)`: the queries the owner or the agent kept |
+| Reads | every statement runs on a second SQLite connection opened `mode=ro`, so a write fails inside SQLite and nothing parses SQL. At most `max_rows` rows come back and a statement past `max_seconds` is interrupted; an error comes back as text, not a failed job |
+| Routes | `left` (user tables with row counts, shadow tables of virtual tables hidden, then the saved queries), `blank` (store path and size), `action/{run\|explain\|save\|delete}` |
+| Hooks | `numbers` (store size), `context` (every table with its columns and row count) |
+| Tools | read: `db_schema`, `db_query`, `db_explain`; write: `db_save_query`, which only adds a row to `db_queries` |
+| Page | LEFT: tables with counts, then `saved`; MIDDLE: the SQL editor, `Run` / `Explain` / `Save`, the result grid with paging and the timing line |
+| Departures | `Export` is not built; grid columns come from the query rather than the artboard's fixed five; `Save` and a `prev` link are added for saved queries and paging |
 
 ### Graph
 
@@ -250,9 +317,26 @@ Built:
 2. Agent serves as natural language interface for graph data. 
 3. Agent has ability to query, clean/consolidate/delete nodes/edges from the graph; i.e. it is the graph architect  
 
+Built:
+
+| Piece | Current state |
+|---|---|
+| Sources | every tag on a memory and on a closed session, lowercased and stripped, so `GRADient` and `gradient` are one node. Graph never writes those tables |
+| Tables | `graph_nodes(tag, count, memories, sessions, last_seen)` and `graph_edges(a, b, kind cooccur\|link, weight)`, both replaced whole on each rebuild; the curation overlays `graph_merges`, `graph_pruned` and `graph_links` survive it |
+| Routes | `left` (tags by count, search, page), `graph` (the visible nodes, the edges among them, build time and totals) |
+| Hooks | `numbers` (nodes), `context` (totals, the ten largest tags, merges, prunes, curated link count) |
+| Tools | read: `graph_nodes`, `graph_neighbors`, `graph_items`; write: `graph_link`, `graph_unlink`, `graph_merge`, `graph_prune`, `graph_restore`, each rebuilding afterwards |
+| Schedule | `graph.rebuild` every 15m, plain SQL and no LLM: tags on the same item become a `cooccur` edge weighted by shared items, a curated link an edge of weight 1 |
+| Page | LEFT: search and tags by count; MIDDLE: a ring of nodes with their edges, selecting a tag lights its neighbours |
+| Departures | `extract-entities` chip dropped and `neighbors` added; ring radius comes from a hash of the tag so a node stays put when the list reorders; counts are live |
+
 ### System (no page)
 
 `system.heartbeat` every 60 s proves the clock runs; `system.prune_sessions` every 24 h deletes closed sessions older than `sessions_kept_days`.
+
+### Feedback (no page)
+
+A `feedback` control in the header of every page records a change the owner wants, together with the selected item when there is one. `POST /api/feedback/action/add` writes the row and queues a filing job on resource `feedback`; `retry` requeues a failed one. The filing job is a `oneshot` run with `feedback.max_turns` and the read tools `docs_list`, `docs_read` (markdown under `docs/` only) and `feedback_list`. The agent replies with one JSON object and the route writes it to the row: `kind` (bug, defect, gap or roadmap), `title`, `summary`, `tags`, `ref` (the existing `docs/` file it belongs in) and `draft` (the body ready for that file, with the owner's words quoted). A reply that is not that object marks the row `failed` with the error. `GET /api/feedback/recent` feeds the panel and `GET /api/feedback/list` gives every field to any agent. Nothing touches the repo; the row is the record.
 
 ### Activity and Settings (shell pages)
 
@@ -300,3 +384,4 @@ Item inspector: 16px hue glyph, kind and time in mono, `×` to clear, the body, 
 - Settings, Data: `Export` is not built.
 - Finance and Business are separate modules; the artboard had one `Money` entry.
 - The rail shows only built modules.
+- The `feedback` control in the header and its panel are not in the artboard; they reuse the header meta style, the panel surfaces, the composer textarea and compact rows.

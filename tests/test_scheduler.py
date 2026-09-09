@@ -15,7 +15,7 @@ def fake_registry(*modules):
 
         m = Manifest(name=name, title=name, hue="#fff", icon="", order=1, schedules=schedules)
         reg.modules[name] = Module(manifest=m, path=None, tasks={s.task: task for s in schedules}, router=None, schema=None,
-                                   numbers=None, today=None, item=None, context=None, register_tools=None, prompt=None)
+                                   numbers=None, today=None, queue=None, item=None, context=None, register_tools=None, prompt=None)
     return reg
 
 

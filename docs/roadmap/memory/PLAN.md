@@ -34,6 +34,7 @@ Version 0 is the proving build already on `main` plus what the Memory requiremen
 | 6 | Agent chips are recall, tag, add, suggest | Chips are display-only and name what the agent can do; `summarize` contradicts requirement 3 (literal, never reworded) and the artboard's `link` is tagging (decision 7), already named `tag` |
 | 7 | The artboard's `Link` action is the tag row already in the inspector; no separate action | The owner defines Link as tagging, which Graph picks up in consolidation; tags already live in `memory_tags` and Graph reads them |
 | 8 | Journaling gets no feature of its own; the day-grouped stream of captures is the journal | The owner calls it a qualitative name for a notepad of the mind, not a feature to build |
+| 9 | Actions validate before the job is queued; only the write runs inside it | Found by the phase 1 tests: a bad id or status raised inside the job marked it failed, wrote a `failed` event and answered 500 instead of 400 / 404 |
 
 Rejected: rebuilding Memory from scratch; a journal kind; a Settings-page section for the memory knobs; a memory-to-memory link table; a vector index for search (FTS5 is in the stdlib and answers the requirement).
 
@@ -44,9 +45,10 @@ Changed:
 - `app/config.py`: `Memory(suggest_lookback_days, suggest_max)` dataclass on `Config`, required like every other section.
 - `config.toml`: `[memory]` with both keys.
 - `app/modules/memory/tasks.py`: reads `ctx.config.memory`; the prior-suggestions query loses its `LIMIT`.
+- `app/modules/memory/routes.py`: each action becomes `prepare(store, body) -> write(ctx)` (decision 9).
 - `tests/test_memory.py`: new, see Tests.
 
-Unchanged, listed because the contract below describes them: `app/modules/memory/{__init__.py, schema.sql, routes.py, tools.py, agent.md}`, `app/static/pages/memory.js`.
+Unchanged, listed because the contract below describes them: `app/modules/memory/{__init__.py, schema.sql, tools.py, agent.md}`, `app/static/pages/memory.js`.
 
 ## Contract
 
@@ -106,7 +108,7 @@ External clients: none. Memory's only external system is Claude. The scheduled `
 | Phase | Builds | Usable result |
 |---|---|---|
 | 0 | proving build | built; see ARCHITECTURE.md |
-| 1 | `[memory]` config section, task reads it, uncapped prior-suggestion list, `tests/test_memory.py` | The owner changes lookback or the suggestion cap in `config.toml` and relaunches; the suite proves the task, the task-only actions and the tool split offline |
+| 1 | `[memory]` config section, task reads it, uncapped prior-suggestion list, actions validate before queueing, `tests/test_memory.py` | built on branch `memory`, 2026-09-08: the owner changes lookback or the suggestion cap in `config.toml` and relaunches; the suite proves the task, the task-only actions and the tool split offline |
 
 ## Tests
 

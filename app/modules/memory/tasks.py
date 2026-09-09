@@ -1,4 +1,4 @@
-"""Scheduled, read-only LLM work: propose action items from the last week of memories."""
+"""Scheduled, read-only LLM work: propose action items from the recent memories."""
 
 from __future__ import annotations
 
@@ -6,8 +6,6 @@ import json
 
 from app.runner import Skipped
 from app.store import days_ago_iso, now_iso
-
-LOOKBACK_DAYS = 7
 
 
 def _json_array(raw: str) -> list:
@@ -22,24 +20,27 @@ def _json_array(raw: str) -> list:
 
 
 async def suggest(ctx) -> str:
+    cfg = ctx.config.memory
     recent = ctx.store.query(
-        "SELECT id, kind, text FROM memories WHERE created_at >= ? AND done_at IS NULL ORDER BY created_at", (days_ago_iso(LOOKBACK_DAYS),)
+        "SELECT id, kind, text FROM memories WHERE created_at >= ? AND done_at IS NULL ORDER BY created_at",
+        (days_ago_iso(cfg.suggest_lookback_days),),
     )
     if not recent:
-        return Skipped(f"no memories in the last {LOOKBACK_DAYS} days")
-    existing = [r["text"] for r in ctx.store.query("SELECT text FROM memory_suggestions ORDER BY created_at DESC LIMIT 50")]
+        return Skipped(f"no memories in the last {cfg.suggest_lookback_days} days")
+    # Every prior suggestion, any status: a suggestion is made once, ever.
+    existing = [r["text"] for r in ctx.store.query("SELECT text FROM memory_suggestions ORDER BY created_at DESC")]
     prompt = "\n".join([
-        f"These are the owner's memories from the last {LOOKBACK_DAYS} days, as (id, kind, text):",
+        f"These are the owner's memories from the last {cfg.suggest_lookback_days} days, as (id, kind, text):",
         *[f"- ({r['id']}, {r['kind']}) {r['text'][:300]}" for r in recent],
         "",
         "Already suggested, never repeat these or close variants:",
         *([f"- {t}" for t in existing] or ["- none"]),
         "",
         "Reply with only a JSON array. Each element: {\"text\": one concrete action item in one sentence, \"memory_ids\": [ids it comes from]}.",
-        "Suggest at most 3, only when the memories clearly call for an action. An empty array is a fine answer.",
+        f"Suggest at most {cfg.suggest_max}, only when the memories clearly call for an action. An empty array is a fine answer.",
     ])
     raw = await ctx.run_task(prompt, tools=("memory_search", "memory_get"))
-    items = _json_array(raw)
+    items = _json_array(raw)[:cfg.suggest_max]
     added = 0
     with ctx.commit(cursor=("memory.suggest", now_iso())) as conn:
         for it in items:

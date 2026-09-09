@@ -9,9 +9,9 @@ from app.modules.science import notebook, state
 from app.store import Store
 
 
-def register(read, full, store: Store) -> None:
+def register(read, full, store: Store, config) -> None:
     def cap(text: str) -> str:
-        n = state.config.tool_output_chars
+        n = config.science.tool_output_chars
         return text if len(text) <= n else text[:n] + f"… [{len(text) - n} more chars]"
 
     def shaped(o: dict, full_text: bool) -> dict:

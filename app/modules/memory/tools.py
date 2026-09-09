@@ -8,7 +8,7 @@ from app.modules.memory.routes import KINDS, _fts, _tags
 from app.store import Store, now_iso
 
 
-def register(read, full, store: Store) -> None:
+def register(read, full, store: Store, config) -> None:
     def memory_search(query: str, kind: str | None = None, limit: int = 20) -> list[dict]:
         """Full-text search over memories. kind narrows to note, link, quote, fact or task. Newest first."""
         where, params = [], []

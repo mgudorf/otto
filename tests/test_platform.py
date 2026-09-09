@@ -37,7 +37,7 @@ def test_registry_loads_real_modules():
     import inspect
 
     for m in reg.modules.values():
-        for hook in (m.numbers, m.today, m.item, m.context):
+        for hook in (m.numbers, m.today, m.queue, m.item, m.context):
             if hook is not None:
                 assert "request" not in inspect.signature(hook).parameters, f"{m.name}: {hook.__name__} is a route, not a hook"
     assert reg.get("home").numbers is None and reg.get("home").context is not None
@@ -57,6 +57,24 @@ def test_registry_skips_broken_module(tmp_path: Path, monkeypatch):
     assert "broken on purpose" in reg.errors["bad"]
 
 
+def test_registry_picks_up_queue_hook(tmp_path: Path, monkeypatch):
+    """A routes.py that defines queue(store) reaches Module.queue; one that does not leaves it None."""
+    pkg = tmp_path / "pkgq"
+    (pkg / "withq").mkdir(parents=True)
+    (pkg / "without").mkdir()
+    (pkg / "__init__.py").write_text("")
+    manifest = "from app.modules import Manifest\nMANIFEST = Manifest(name='{n}', title='{n}', hue='#fff', icon='', order=1)\n"
+    (pkg / "withq" / "__init__.py").write_text(manifest.format(n="withq"))
+    (pkg / "withq" / "routes.py").write_text("def queue(store):\n    return [{'id': 1, 'text': 'waiting'}]\n")
+    (pkg / "without" / "__init__.py").write_text(manifest.format(n="without"))
+    monkeypatch.syspath_prepend(str(tmp_path))
+    reg = Registry()
+    reg.load("pkgq")
+    assert reg.errors == {}
+    assert reg.get("withq").queue(None) == [{"id": 1, "text": "waiting"}]
+    assert reg.get("without").queue is None
+
+
 def test_tasks_never_reach_interactive_claude():
     for tasks_py in (ROOT / "app" / "modules").glob("*/tasks.py"):
         names = {n.attr for n in ast.walk(ast.parse(tasks_py.read_text("utf-8"))) if isinstance(n, ast.Attribute)}
@@ -67,3 +85,29 @@ def test_tasks_never_reach_interactive_claude():
 
 def test_read_builtins_exclude_writers():
     assert not {"Write", "Edit", "Bash", "NotebookEdit", "MultiEdit"} & set(READ_BUILTINS)
+
+
+def test_docs_tools_confined(store, config):
+    from app.modules.feedback import tools
+
+    class FakeServer:
+        def __init__(self):
+            self.tools = {}
+
+        def tool(self):
+            def deco(fn):
+                self.tools[fn.__name__] = fn
+                return fn
+
+            return deco
+
+    store.migrate((ROOT / "app" / "modules" / "feedback" / "schema.sql").read_text("utf-8"))
+    read, full = FakeServer(), FakeServer()
+    tools.register(read, full, store, config)
+    assert set(read.tools) == set(full.tools) == {"docs_list", "docs_read", "feedback_list"}
+    paths = {d["path"] for d in read.tools["docs_list"]()}
+    assert "docs/ARCHITECTURE.md" in paths and all(p.startswith("docs/") and p.endswith(".md") for p in paths)
+    assert read.tools["docs_read"]("docs/ARCHITECTURE.md")["text"].startswith("# Architecture")
+    for bad in ("config.toml", "../app/config.py", "docs/design/support.js", "docs/../app/claude.py"):
+        assert "error" in read.tools["docs_read"](bad), bad
+    assert read.tools["feedback_list"]() == []

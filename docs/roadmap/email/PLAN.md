@@ -32,6 +32,7 @@ Email mirrors the Gmail inbox into Otto so the owner can search it, read it, and
 | 6 | Nightly triage writes priorities to a local table; the session agent gets read tools plus one local write tool `email_flag` | Requirement 3 and 4: triage, prioritize, flag; nothing the agent holds reaches Gmail |
 | 7 | Body text is fetched when a message is opened or when `email_get` asks, then cached | Backfill stays metadata plus snippet; triage works from sender, subject and snippet |
 | 8 | `python -m app.modules.email.gmail consent` runs the OAuth flow on the redirect already registered (`localhost:8756/m/email/api/oauth/callback`) | `token.json` carries `refresh_token_expires_in = 604799`: it was issued while the OAuth app was in Testing status, so it dies around 2026-09-12 even after the app is published. One re-consent is required after publishing (owner decided to publish, 2026-09-08), the tool that produced `token.json` is not in this repo, and the daemon's port 8765 is not a registered redirect |
+| 9 | On a quota refusal (429, or 403 naming the quota) every in-flight call pauses together for `QUOTA_WAIT` (61 s) and retries up to `RETRY_ATTEMPTS` (5); the backfill commits in pages of `PAGE` (100) under a pending cursor `email.backfill` and resumes from it | Found 2026-09-08 against the real mailbox: this project's Gmail quota allows about 370 message fetches per minute, so a 90-day backfill (2,119 messages) needs several windows. Per-request backoff failed the whole job and saved nothing; the shared pause plus paged commits finished it in 5 min 43 s with 11 refusals |
 
 Rejected: `google-api-python-client` (installed, unpinned, synchronous); full mail scope (re-consent and irreversible deletes); querying Gmail per page instead of mirroring; per-row checkboxes; an OAuth route inside the daemon (needs a console change first).
 
@@ -97,7 +98,7 @@ Departures from the artboard, each with its reason:
 | `email_triage` | `message_id TEXT PRIMARY KEY REFERENCES email_messages(id) ON DELETE CASCADE`, `priority TEXT CHECK (high, normal, low)`, `reason TEXT`, `ts TEXT`, `source TEXT` (`scheduled` or `session`) |
 | `email_fts` | FTS5 over `from_name, from_addr, subject, snippet`, `content='email_messages'`, `content_rowid='n'`, trigger-maintained. `n` exists so rowids survive Vacuum |
 
-Cursors: `email.history` = Gmail history id after the last committed sync; `email.triage` = timestamp of the last triage run. Sync reads the profile's history id before listing so nothing between list and commit is lost; a 404 on `history.list` (expired id) clears the cursor and backfills again. Every row change and the cursor land in one `ctx.commit`.
+Cursors: `email.history` = Gmail history id after the last committed sync; `email.backfill` = `<historyId>|<started>` while a backfill is in progress; `email.triage` = timestamp of the last triage run. A backfill reads the profile's history id first and records it in `email.backfill`, commits rows one page at a time, skips rows already stamped since `started` when resumed, and only at the end writes `email.history` and drops `email.backfill`, so a kill loses at most one page and history covers everything after the start. A 404 on `history.list` (expired id) backfills again. An incremental sync lands its row changes and the cursor in one `ctx.commit`.
 
 External clients:
 

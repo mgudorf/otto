@@ -54,11 +54,44 @@ class Business:
 
 
 @dataclass(frozen=True)
+class Memory:
+    suggest_lookback_days: int
+    suggest_max: int
+
+
+@dataclass(frozen=True)
 class Science:
     python: str
     root: Path
     idle_minutes: int
     tool_output_chars: int
+
+
+@dataclass(frozen=True)
+class Education:
+    queue_size: int
+    start_difficulty: int
+    flow_low: int
+    flow_high: int
+
+
+@dataclass(frozen=True)
+class Database:
+    max_rows: int      # rows a query returns at most
+    max_seconds: float  # a statement past this is interrupted
+
+
+@dataclass(frozen=True)
+class Email:
+    client_file: Path
+    token_file: Path
+    backfill_days: int
+    triage_batch: int
+
+
+@dataclass(frozen=True)
+class Feedback:
+    max_turns: int
 
 
 @dataclass(frozen=True)
@@ -78,7 +111,12 @@ class Config:
     data: Data
     nightly: Nightly
     business: Business
+    memory: Memory
     science: Science
+    education: Education
+    database: Database
+    email: Email
+    feedback: Feedback
     ui: Ui
 
     @property
@@ -96,6 +134,14 @@ def load(root: Path = ROOT) -> Config:
         data=Data(db=root / raw["data"]["db"], workspace=root / raw["data"]["workspace"]),
         nightly=Nightly(**raw["nightly"]),
         business=Business(**raw["business"]),
+        memory=Memory(**raw["memory"]),
         science=Science(**{**raw["science"], "root": root / raw["science"]["root"]}),
+        education=Education(**raw["education"]),
+        database=Database(**raw["database"]),
+        email=Email(
+            client_file=root / raw["email"]["client_file"], token_file=root / raw["email"]["token_file"],
+            backfill_days=raw["email"]["backfill_days"], triage_batch=raw["email"]["triage_batch"],
+        ),
+        feedback=Feedback(**raw["feedback"]),
         ui=Ui(**raw["ui"]),
     )
