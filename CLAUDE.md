@@ -18,6 +18,18 @@ Otto, a personification of the word "auto" is a PERSONALIZED dashboard applicati
    - Resolving: keep both sides in rail order. The contract docstring and shared tests take `main`'s side, then re-add anything only the branch had. Run the suite on `main` before committing the merge, then `/sync-architecture`.
 
 
+## Layout
+
+1. `app/` is the daemon. Platform files sit flat at the top: `__main__.py` launcher, `daemon.py` app factory and lifespan, `api.py` platform routes, `config.py` typed config from `config.toml`, `store.py` and `schema.sql` for SQLite and the platform tables, `scheduler.py` the clock, `runner.py` the job queue, `claude.py` the only path to the Claude CLI, `revision.py` the source hash the launcher compares.
+2. `app/modules/<name>/` is one package per module. The contract (manifest, `schema.sql`, `tasks.py`, `routes.py`, `tools.py`, `agent.md`) is the docstring in `app/modules/__init__.py`; `agent_base.md` is the prompt every module agent shares. System and Feedback have no page.
+3. `app/static/` is the browser side, no build step. `shell.js` is the frame and the `PAGES` map, `pages/<name>.js` one file per module page plus `activity.js` and `settings.js`, `rows.js` tokens and shared components, `session.js` the agent pane, `vendor/` pinned copies of Preact, htm, marked, KaTeX and the fonts.
+4. `tests/` is one file per module plus `test_app.py`, `test_platform.py`, `test_runner.py` and `test_scheduler.py` for the platform. `conftest.py` mocks the Claude and Gmail seams so the suite runs offline.
+5. `data/` is runtime state, gitignored: the SQLite file, the daemon log, `secrets/` for the Google OAuth files, `workspace/` as the working directory every Claude session is confined to.
+6. `.claude/skills/` and `.claude/agents/` are the repo's own workflows: roadmap items, architecture sync, worktree triage and vacuum, finding consolidation.
+
 ## Documentation
 
-1. ARCHITECTURE.md is periodically synced against the code base. This will TYPICALLY be up to date, but may be subject to changes from active worktrees. 
+1. `docs/ARCHITECTURE.md` is the one description of what `main` does today, periodically synced against the code base by `/sync-architecture`. This will TYPICALLY be up to date, but may be subject to changes from active worktrees.
+2. `docs/roadmap/<slug>/PLAN.md` is the plan for one unit of work, written by `/create-roadmap-item` before any code and built in its own worktree. One directory per item, forever; the sync retires a plan once `main` covers it. `patches/PLAN.md`, written by the consolidate-patches agent, is the fix list drawn from the findings below.
+3. `docs/bugs/`, `docs/defects/` and `docs/gaps/` hold one file per open finding, filed by the sync and sorted by what closes it: code, an owner decision, or a roadmap item or owner action.
+4. `docs/design/` is the imported Claude Design artboard and its runtime; open the html in a browser. It is the source for hues, icons and each page's LEFT and MIDDLE shape.

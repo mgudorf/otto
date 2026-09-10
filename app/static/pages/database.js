@@ -79,13 +79,17 @@ export function Middle({ app, data, mod }) {
   } else if (r && !r.error && r.columns.length > 0) {
     const start = ed.page * size;
     const rows = r.rows.slice(start, start + size);
+    // Header and rows are cells of one grid, so every row shares the same column tracks.
     const cols = `repeat(${r.columns.length}, minmax(96px, max-content))`;
-    const cell = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 360 };
-    body = html`<div style=${{ display: 'flex', flexDirection: 'column', ...mono13, overflowX: 'auto' }}>
-      <div style=${{ display: 'grid', gridTemplateColumns: cols, gap: 16, height: 28, alignItems: 'center', padding: '0 12px', color: T.muted }}>
-        ${r.columns.map((c, j) => html`<span key=${j} style=${cell}>${c}</span>`)}</div>
-      ${rows.map((row, i) => html`<div key=${start + i} class="trow" style=${{ display: 'grid', gridTemplateColumns: cols, gap: 16, height: 32, alignItems: 'center', padding: '0 12px', borderTop: `1px solid ${T.hair}` }}>
-        ${row.map((v, j) => html`<span key=${j} title=${v === null ? '' : String(v)} style=${{ ...cell, color: v === null ? T.dim : T.text }}>${v === null ? 'null' : String(v)}</span>`)}</div>`)}
+    const cell = { padding: '0 8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 360 };
+    body = html`<div style=${{ display: 'flex', flexDirection: 'column', ...mono13 }}>
+      <div style=${{ overflowX: 'auto' }}>
+        <div style=${{ display: 'grid', gridTemplateColumns: cols, gridTemplateRows: '28px', gridAutoRows: '32px', padding: '0 4px' }}>
+          ${r.columns.map((c, j) => html`<span key=${`h${j}`} style=${{ ...cell, lineHeight: '28px', color: T.muted }}>${c}</span>`)}
+          ${rows.map((row, i) => html`<div key=${start + i} class="crow" style=${{ display: 'contents' }}>
+            ${row.map((v, j) => html`<span key=${j} title=${v === null ? '' : String(v)} style=${{ ...cell, lineHeight: '32px', borderTop: `1px solid ${T.hair}`, color: v === null ? T.dim : T.text }}>${v === null ? 'null' : String(v)}</span>`)}</div>`)}
+        </div>
+      </div>
       <div style=${{ display: 'flex', alignItems: 'center', gap: 16, height: 32, padding: '0 12px', borderTop: `1px solid ${T.hair}`, color: T.dim }}>
         ${r.total === 0 ? 'no rows' : `${start + 1}–${Math.min(start + size, r.total)} / ${r.total.toLocaleString()}`}
         ${ed.page > 0 && pager('prev', () => { ed.page -= 1; app.forceUpdate(); })}
