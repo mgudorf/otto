@@ -70,24 +70,17 @@ async def action(request: Request, verb: str, body: dict = Body(default={})) -> 
         raise HTTPException(404, f"unknown action {verb}")
     file_id = str(body.get("id", ""))
     path = notebook.resolve(_root(), file_id)
-    if verb in KERNEL_ACTIONS:
+    if verb in KERNEL_ACTIONS:   # never queued: each must get past a running cell
         if state.kernels.get(path) is None:
             raise HTTPException(409, "no kernel")
-        if verb == "interrupt":   # never queued: it must get past a running cell
-            await state.kernels.interrupt(path)
-            st.store.event("science", "interrupted", path.name, ref=file_id)
-            return {"ok": True}
-    else:
-        if path.suffix != ".ipynb":
-            raise HTTPException(400, "only notebooks are edited here")
-        if "index" in body:   # reject a bad index here, as a 400, not inside the job
-            _cell_index(notebook.read(path), body)
-    fn = KERNEL_ACTIONS.get(verb) or EDIT_ACTIONS[verb]
-
-    async def run(ctx):
-        return await fn(st, path, file_id, body, ctx)
-
-    return await st.runner.run_action(f"science.{verb}", "science", f"kernel:{file_id}", run)
+        past, fn = KERNEL_ACTIONS[verb]
+        await fn(path)
+        st.store.event("science", past, path.name, ref=file_id)
+        return {"ok": True}
+    if path.suffix != ".ipynb":
+        raise HTTPException(400, "only notebooks are edited here")
+    # Direct, not queued: one read-modify-write with no await inside, so it never lands inside a run's output write.
+    return EDIT_ACTIONS[verb](st, path, file_id, body)
 
 
 def _run(st, body: dict) -> dict:
@@ -99,22 +92,24 @@ def _run(st, body: dict) -> dict:
     nb = notebook.read(path)
     if not 0 <= index < len(nb.cells) or nb.cells[index].cell_type != "code":
         raise HTTPException(400, "not a code cell")
+    cell_id = nb.cells[index].get("id")
     source = notebook.join(nb.cells[index].source)
 
     def publish(ev: dict) -> None:
-        st.broadcast.publish(KEY, {"path": file_id, "index": index, "ts": now_iso(), **ev})
+        st.broadcast.publish(KEY, {"path": file_id, "cell": cell_id, "index": index, "ts": now_iso(), **ev})
 
     async def job(ctx):
         publish({"event": "started"})
         try:
-            count, outputs = await state.kernels.execute(path, index, source, lambda o: publish({"event": "output", "output": notebook.shape_output(o)}))
+            count, outputs = await state.kernels.execute(path, cell_id, source, lambda o: publish({"event": "output", "output": notebook.shape_output(o)}))
         except Exception as e:
             publish({"event": "error", "text": str(e)})
             raise
         nb = notebook.read(path)
-        if index < len(nb.cells) and nb.cells[index].cell_type == "code":
-            nb.cells[index].outputs = [nbformat.from_dict(o) for o in outputs]
-            nb.cells[index].execution_count = count
+        cell = next((c for c in nb.cells if c.get("id") == cell_id and c.cell_type == "code"), None)   # by id: the owner may have moved it meanwhile
+        if cell is not None:
+            cell.outputs = [nbformat.from_dict(o) for o in outputs]
+            cell.execution_count = count
             notebook.write(path, nb)
         publish({"event": "done", "execution_count": count})
         ctx.event("ran", f"{path.name} [{count}]", ref=file_id)
@@ -124,19 +119,11 @@ def _run(st, body: dict) -> dict:
     return {"job": row.id}
 
 
-async def _restart(st, path, file_id, body, ctx) -> dict:
-    await state.kernels.restart(path)
-    ctx.event("restarted", path.name, ref=file_id)
-    return {"ok": True}
-
-
-async def _shutdown(st, path, file_id, body, ctx) -> dict:
-    await state.kernels.shutdown(path)
-    ctx.event("shut down", path.name, ref=file_id)
-    return {"ok": True}
-
-
-KERNEL_ACTIONS = {"interrupt": None, "restart": _restart, "shutdown": _shutdown}
+KERNEL_ACTIONS = {
+    "interrupt": ("interrupted", lambda path: state.kernels.interrupt(path)),
+    "restart": ("restarted", lambda path: state.kernels.restart(path)),
+    "shutdown": ("shut down", lambda path: state.kernels.shutdown(path)),
+}
 
 
 # ---- edits: the file on disk is the document; every edit is one atomic write -----------------
@@ -147,7 +134,7 @@ def _cell_index(nb, body: dict) -> int:
     return index
 
 
-async def _set_cell(st, path, file_id, body, ctx) -> dict:
+def _set_cell(st, path, file_id, body) -> dict:
     nb = notebook.read(path)
     index = _cell_index(nb, body)
     nb.cells[index].source = str(body.get("source", ""))
@@ -155,27 +142,51 @@ async def _set_cell(st, path, file_id, body, ctx) -> dict:
     return {"id": file_id, "index": index}
 
 
-async def _insert_cell(st, path, file_id, body, ctx) -> dict:
+def _set_cells(st, path, file_id, body) -> dict:
+    """Replace the cell list. A cell naming an existing id of the same type keeps its outputs; anything else is new."""
+    nb = notebook.read(path)
+    have = {c.get("id"): c for c in nb.cells}
+    cells = []
+    for spec in body.get("cells", []):
+        kind = spec.get("type", "code")
+        if kind not in notebook.TYPES:
+            raise HTTPException(400, f"no cell type {kind}")
+        source = str(spec.get("source", ""))
+        old = have.pop(spec.get("id"), None)
+        if old is not None and old.cell_type == kind:
+            old.source = source
+            cells.append(old)
+        else:
+            cells.append(notebook.new_cell(kind, source))
+    nb.cells = cells
+    notebook.write(path, nb)
+    for c in have.values():
+        st.store.event("science", "deleted", f"{path.name} cell: {notebook.join(c.source)[:80]}", ref=file_id)
+    return {"id": file_id, "cells": len(cells)}
+
+
+def _insert_cell(st, path, file_id, body) -> dict:
     nb = notebook.read(path)
     after = int(body.get("after", len(nb.cells) - 1))
     kind = body.get("type", "code")
-    cell = nbformat.v4.new_markdown_cell("") if kind == "markdown" else nbformat.v4.new_code_cell("")
+    if kind not in notebook.TYPES:
+        raise HTTPException(400, f"no cell type {kind}")
     index = max(0, min(after + 1, len(nb.cells)))
-    nb.cells.insert(index, cell)
+    nb.cells.insert(index, notebook.new_cell(kind))
     notebook.write(path, nb)
     return {"id": file_id, "index": index}
 
 
-async def _delete_cell(st, path, file_id, body, ctx) -> dict:
+def _delete_cell(st, path, file_id, body) -> dict:
     nb = notebook.read(path)
     index = _cell_index(nb, body)
     gone = nb.cells.pop(index)
     notebook.write(path, nb)
-    ctx.event("deleted", f"{path.name} cell {index}: {notebook.join(gone.source)[:80]}", ref=file_id)
+    st.store.event("science", "deleted", f"{path.name} cell {index}: {notebook.join(gone.source)[:80]}", ref=file_id)
     return {"id": file_id, "index": index}
 
 
-EDIT_ACTIONS = {"set_cell": _set_cell, "insert_cell": _insert_cell, "delete_cell": _delete_cell}
+EDIT_ACTIONS = {"set_cell": _set_cell, "set_cells": _set_cells, "insert_cell": _insert_cell, "delete_cell": _delete_cell}
 
 
 async def _new(st, body: dict) -> dict:

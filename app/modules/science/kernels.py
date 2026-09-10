@@ -42,7 +42,7 @@ class Kernel:
     started_at: str
     last_activity: datetime
     executions: int = 0
-    running: dict | None = None          # {"index": int, "outputs": [...]} while a cell executes
+    running: dict | None = None          # {"cell": id, "outputs": [...]} while a cell executes
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     @property
@@ -99,12 +99,12 @@ class Kernels:
         self._k[self._key(path)] = k
         return k
 
-    async def execute(self, path: Path, index: int, source: str, on_output: OnOutput | None = None) -> tuple[int | None, list[Output]]:
-        """Run source on the notebook's kernel, starting it if needed. Returns (execution_count, nbformat outputs)."""
+    async def execute(self, path: Path, cell: str, source: str, on_output: OnOutput | None = None) -> tuple[int | None, list[Output]]:
+        """Run source on the notebook's kernel, starting it if needed; `cell` is the id the outputs belong to. Returns (execution_count, nbformat outputs)."""
         k = await self.start(path)
         async with k.lock:
             client = k.client
-            k.running = {"index": index, "outputs": []}
+            k.running = {"cell": cell, "outputs": []}
             k.last_activity = now()
             try:
                 msg_id = client.execute(source)

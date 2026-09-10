@@ -1,4 +1,4 @@
-"""Science through the real app: the listing, a notebook's cells, a faked kernel run, and the reaper. No real kernel."""
+"""Science through the real app: the listing, a notebook's cells, a faked kernel run that lands by cell id, whole-list edits, and the reaper. No real kernel."""
 
 from __future__ import annotations
 
@@ -46,6 +46,7 @@ def test_science_lists_and_reads(sci):
             item = (await c.get("/api/science/item/analysis.ipynb")).json()
             assert item["kind"] == "ipynb" and item["kernel"] is None
             assert [x["type"] for x in item["cells"]] == ["code", "markdown"] and item["cells"][0]["source"] == "print(1)"
+            assert all(x["id"] for x in item["cells"])
             py = (await c.get("/api/science/item/etl.py")).json()
             assert py["kind"] == "py" and py["source"] == "x = 1\n"
             assert (await c.get("/api/science/item/missing.ipynb")).status_code == 404
@@ -70,9 +71,13 @@ def test_science_run_streams_and_saves(sci, monkeypatch):
             {"output_type": "stream", "name": "stdout", "text": "1\n"},
             {"output_type": "execute_result", "data": {"text/plain": "2"}, "metadata": {}, "execution_count": 3},
         ]
+        first = nbformat.read(str(sci.science.root / "analysis.ipynb"), as_version=4).cells[0].id
 
-        async def fake_execute(path, index, source, on_output=None):
-            assert source == "print(1)" and index == 0
+        async def fake_execute(path, cell, source, on_output=None):
+            assert source == "print(1)" and cell == first
+            nb = notebook.read(path)   # the owner inserts a cell above while this runs
+            nb.cells.insert(0, notebook.new_cell("markdown", "# above"))
+            notebook.write(path, nb)
             for o in outs:
                 on_output(o)
             return 3, outs
@@ -88,14 +93,16 @@ def test_science_run_streams_and_saves(sci, monkeypatch):
                 events.append(q.get_nowait())
             assert [e["event"] for e in events] == ["started", "output", "output", "done"]
             assert events[1]["output"] == {"kind": "stream", "name": "stdout", "text": "1\n"} and events[3]["execution_count"] == 3
-            cell = (await c.get("/api/science/item/analysis.ipynb")).json()["cells"][0]
-            assert cell["execution_count"] == 3 and [o["kind"] for o in cell["outputs"]] == ["stream", "text"]
+            assert all(e["cell"] == first for e in events)
+            cells = (await c.get("/api/science/item/analysis.ipynb")).json()["cells"]
+            assert cells[0]["source"] == "# above" and cells[1]["id"] == first
+            assert cells[1]["execution_count"] == 3 and [o["kind"] for o in cells[1]["outputs"]] == ["stream", "text"]
             nb = nbformat.read(str(sci.science.root / "analysis.ipynb"), as_version=4)
-            assert nb.cells[0].execution_count == 3 and len(nb.cells[0].outputs) == 2
+            assert nb.cells[1].execution_count == 3 and len(nb.cells[1].outputs) == 2
             assert not list(sci.science.root.glob("*.tmp"))
             job = (await c.get("/api/jobs")).json()[0]
             assert job["task"] == "science.run" and job["resource"] == "kernel:analysis.ipynb" and job["status"] == "done"
-            assert (await c.post("/api/science/action/run", json={"id": "analysis.ipynb", "index": 1})).status_code == 400
+            assert (await c.post("/api/science/action/run", json={"id": "analysis.ipynb", "index": 2})).status_code == 400
             assert (await c.post("/api/science/action/restart", json={"id": "analysis.ipynb"})).status_code == 409
             assert (await c.get("/api/events?module=science")).json()["events"][0]["verb"] == "ran"
         await app.state.runner.drain(1)
@@ -138,6 +145,43 @@ def test_science_edits_write_valid_notebooks(sci):
     run(main())
 
 
+def test_science_set_cells_keeps_outputs_by_id(sci):
+    async def main():
+        app = build(sci)
+        await app.state.runner.start()
+        root = sci.science.root
+        nb = nbformat.v4.new_notebook()   # a pre-4.5 file: no cell ids on disk
+        nb.cells = [nbformat.v4.new_code_cell("print(1)"), nbformat.v4.new_markdown_cell("# notes")]
+        nb.cells[0].outputs = [nbformat.v4.new_output("stream", name="stdout", text="1\n")]
+        nb.cells[0].execution_count = 3
+        for c in nb.cells:
+            del c["id"]
+        nb.nbformat_minor = 4
+        nbformat.write(nb, str(root / "old.ipynb"))
+        async with client_for(app) as c:
+            post = lambda cells, id="old.ipynb": c.post("/api/science/action/set_cells", json={"id": id, "cells": cells})
+            cells = (await c.get("/api/science/item/old.ipynb")).json()["cells"]
+            assert [x["id"] for x in cells] == ["c0", "c1"]
+            r = await post([{"type": "markdown", "source": "# top"}, {"id": "c0", "type": "code", "source": "print(2)"}, {"id": "c1", "type": "code", "source": "# notes"}])
+            assert r.json() == {"id": "old.ipynb", "cells": 3}, r.text
+            cells = (await c.get("/api/science/item/old.ipynb")).json()["cells"]
+            assert [(x["type"], x["source"]) for x in cells] == [("markdown", "# top"), ("code", "print(2)"), ("code", "# notes")]
+            assert cells[1]["id"] == "c0" and cells[1]["execution_count"] == 3 and [o["text"] for o in cells[1]["outputs"]] == ["1\n"]
+            assert cells[2]["id"] != "c1" and cells[2]["execution_count"] is None and cells[2]["outputs"] == []
+            assert cells[0]["id"] and cells[0]["outputs"] == []
+            assert (await post([{"id": cells[2]["id"], "type": "code", "source": "# notes"}])).json()["cells"] == 1
+            assert [e["verb"] for e in (await c.get("/api/events?module=science")).json()["events"]] == ["deleted", "deleted"]
+            assert (await post([{"type": "heading", "source": ""}])).status_code == 400
+            assert (await post([], id="etl.py")).status_code == 400
+        on_disk = nbformat.read(str(root / "old.ipynb"), as_version=4)
+        nbformat.validate(on_disk)
+        assert on_disk.nbformat_minor == 5 and len(on_disk.cells) == 1 and not list(root.glob("*.tmp"))
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())
+
+
 def test_science_read_tools_never_write(sci, monkeypatch):
     async def main():
         app = build(sci)
@@ -148,7 +192,7 @@ def test_science_read_tools_never_write(sci, monkeypatch):
         assert set(agent.write_tools) <= full_names and not set(agent.write_tools) & read_names
         assert set(agent.read_tools) <= full_names
 
-        async def fake_execute(path, index, source, on_output=None):
+        async def fake_execute(path, cell, source, on_output=None):
             assert source == "print(1)"
             return 7, [{"output_type": "stream", "name": "stdout", "text": "y" * (sci.science.tool_output_chars + 50)}]
 
@@ -184,7 +228,7 @@ def test_science_reap(sci):
             return Kernel(path=Path(name), manager=None, client=None, started_at="", last_activity=now() - timedelta(minutes=minutes), running=running)
 
         stale = kernel("a.ipynb", limit + 1)
-        busy = kernel("b.ipynb", limit * 10, running={"index": 0, "outputs": []})
+        busy = kernel("b.ipynb", limit * 10, running={"cell": "c0", "outputs": []})
         fresh = kernel("c.ipynb", 0)
         state.kernels._k = {str(k.path): k for k in (stale, busy, fresh)}
         gone = []

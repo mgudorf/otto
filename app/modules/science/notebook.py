@@ -13,6 +13,7 @@ from fastapi import HTTPException
 EXTS = (".ipynb", ".py")
 SKIP = {".ipynb_checkpoints", "__pycache__"}
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
+TYPES = ("code", "markdown", "raw")
 
 
 def mtime_iso(ts: float) -> str:
@@ -49,7 +50,13 @@ def resolve(root: Path, file_id: str) -> Path:
 
 
 def read(path: Path):
-    return nbformat.read(str(path), as_version=4)
+    """Every cell comes back with an id. A file older than nbformat 4.5 has none, so it gets positional ones that the next write keeps."""
+    nb = nbformat.read(str(path), as_version=4)
+    if nb.nbformat_minor < 5:
+        for i, c in enumerate(nb.cells):
+            c.setdefault("id", f"c{i}")
+        nb.nbformat_minor = 5
+    return nb
 
 
 def write(path: Path, nb) -> None:
@@ -62,9 +69,14 @@ def write(path: Path, nb) -> None:
 def new(path: Path) -> None:
     """A notebook with one empty code cell, marked for the python3 kernel like any Jupyter-made file."""
     nb = nbformat.v4.new_notebook()
-    nb.cells.append(nbformat.v4.new_code_cell(""))
+    nb.cells.append(new_cell("code"))
     nb.metadata["kernelspec"] = {"name": "python3", "display_name": "Python 3 (ipykernel)", "language": "python"}
     write(path, nb)
+
+
+def new_cell(kind: str, source: str = ""):
+    make = {"code": nbformat.v4.new_code_cell, "markdown": nbformat.v4.new_markdown_cell, "raw": nbformat.v4.new_raw_cell}
+    return make[kind](source)
 
 
 def join(v) -> str:
@@ -91,9 +103,10 @@ def cells(nb, running: dict | None = None) -> list[dict]:
     """Cells for the wire. While a cell runs, its in-flight outputs replace the saved ones."""
     out = []
     for i, c in enumerate(nb.cells):
-        live = running if running and running.get("index") == i else None
+        live = running if running and running.get("cell") == c.get("id") else None
         outputs = live["outputs"] if live else (c.get("outputs") or [])
         out.append({
+            "id": c.get("id"),
             "index": i,
             "type": c.cell_type,
             "source": join(c.source),

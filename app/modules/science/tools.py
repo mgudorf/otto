@@ -80,11 +80,13 @@ def register(read, full, store: Store, config) -> None:
         nb = notebook.read(path)
         if not 0 <= index < len(nb.cells) or nb.cells[index].cell_type != "code":
             return {"error": f"cell {index} is not a code cell"}
-        count, outputs = await state.kernels.execute(path, index, notebook.join(nb.cells[index].source))
+        cell_id = nb.cells[index].get("id")
+        count, outputs = await state.kernels.execute(path, cell_id, notebook.join(nb.cells[index].source))
         nb = notebook.read(path)
-        if index < len(nb.cells) and nb.cells[index].cell_type == "code":
-            nb.cells[index].outputs = [nbformat.from_dict(o) for o in outputs]
-            nb.cells[index].execution_count = count
+        cell = next((c for c in nb.cells if c.get("id") == cell_id and c.cell_type == "code"), None)   # by id: the owner may have moved it meanwhile
+        if cell is not None:
+            cell.outputs = [nbformat.from_dict(o) for o in outputs]
+            cell.execution_count = count
             notebook.write(path, nb)
         store.event("science", "ran", f"{path.name} [{count}] (agent)", ref=id)
         return {"id": id, "index": index, "execution_count": count, "outputs": [shaped(o, False) for o in outputs]}
