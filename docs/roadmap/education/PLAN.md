@@ -1,190 +1,177 @@
-# Education v0 Plan
+# Education Plan
 
-Status: planning, 2026-09-08.
+Status: planning, 2026-09-09. Version 1, on the built v0 base (2026-09-08).
 
-Education keeps a queue of conceptual questions on the owner's topics, grades the owner's answers in a back-and-forth with a tutor, and tunes difficulty per topic to keep the owner in flow. It is worked on demand, when the owner has time, with about three questions waiting each day. Without it the owner has no place where questions are waiting and no record, topic by topic, of what they understand.
+Education keeps a queue of questions on the owner's topics and grades the owner's answers. Version 1 brings
+back the question and answer format of the owner's previous project (`mylife`): one titled question with a
+shared setup written in markdown and LaTeX, lettered parts on one theme each with a hidden rubric, an answer
+box under every part, and a verdict with an explanation landing right where the answer was typed. The
+generator's rules come over with it. The tutor on the right stays the place for conversation. Without it the
+middle shows plain-text questions written to a one-line rule, and every answer has to be typed into the chat.
 
 ## Sources
 
 | Source | Governs |
 |---|---|
-| `docs/ARCHITECTURE.md` Education, Education Constraints | what the module must do, the fourteen topics, the on-demand rule, progress by domain |
-| `docs/ARCHITECTURE.md` Daemon requirements and Mechanisms | scheduled work reads, user actions write; kill-safe tasks; nightly budget |
-| `docs/ARCHITECTURE.md` Claude, Module contract, Config, UI frame contract | run paths, manifest and file obligations, knobs, tokens, hue `#7a9fd6`, rail order 2 |
-| `docs/design/Personal Dashboard App.dc.html` rail entry, `eduGroups`, `selInfo` for `ed`, `AGENTS.edu`, home `edu` tile | icon, LEFT rows with a 40px progress bar and date groups, inspector with a primary `Start` and secondary actions (see departures), tutor chips and placeholder, home number `due` |
-| `app/modules/__init__.py`, `app/daemon.py`, `app/runner.py`, `app/claude.py`, `app/scheduler.py`, `app/config.py` | registry, tool registration, job context, `run_task`, nightly window, typed config |
-| `app/modules/memory/*`, `app/static/pages/memory.js` | the reference implementation of the contract; `_json_array` and the suggest task are the nightly pattern |
-| `app/static/shell.js`, `rows.js`, `session.js`, `app/api.py` | page map, `Row` leading slots, `Inspector`, `sendToSession`, session context block |
-| `docs/bugs/budget-refusal-marks-job-failed.md`, `docs/gaps/logon-task-not-registered.md` | how the nightly task must handle a refusal; why it may never fire on this machine today |
-| `tests/*` | fixtures (`fake_spawn`, `config`), the AST guard over every `tasks.py`, hook signature rule |
+| The request (this session) | Bring the middle panel closer to the old module's functionality: question format, answer format, question content (the generator, never the old data); the session pane supersedes every agentic piece of the old project |
+| `C:\Users\gudo\Desktop\mylife\modules\education\prompts\generate_question.md` | the question shape, the title and tag specs, the fourteen rules |
+| `…\mylife\modules\education\prompts\grade_turn.md` | verdict, score in halves of two, explanation rules |
+| `…\mylife\modules\education\engine\generate.py`, `grade.py`, `db.py` | validation, the header-acronym check, the context blocks, what a graded part stores |
+| `…\mylife\modules\education\static\module.js`, `module.css` | the question view: chips, setup, part letter, answer box, answer-given block, explanation block, score pill; `renderMD` (marked + KaTeX) |
+| `…\mylife\modules\education\backend.py`, `module.json`, `docs\tasks\completed\education\v1_*.md`, `v2-*.md` | what the old module exposed and why the format is what it is; the pieces not ported |
+| `docs/ARCHITECTURE.md` Education (1, 6, 7, 8; constraints 1, 3, 4), Daemon, Claude (`oneshot`), Module contract, Config, UI frame contract | requirements, the read/write split, the user-triggered run, tokens, hue `#7a9fd6`, order 2 |
+| `docs/design/Personal Dashboard App.dc.html` `eduGroups`, `selInfo`, line 221 | LEFT rows (unchanged), inspector actions and frame |
+| `app/modules/education/*`, `app/static/pages/education.js`, `shell.js` (`Inspector`), `rows.js`, `api.js`, `app/claude.py`, `app/runner.py`, `app/daemon.py`, `app/store.py` | the built v0, the run paths, the build order (schemas, then `setup`) |
+| `app/modules/feedback/routes.py`, `app/modules/science/__init__.py` | `oneshot` from a route; `setup(config)` on a module package |
+| `docs/roadmap/education/PLAN.md` v0 | the decisions that stand (below) |
+| `data/otto.db`, read-only today | 14 topics at d3; 3 nightly questions in the v0 shape, none answered; `education.generate` ran 2026-09-09 02:00 local |
+| `tests/test_education.py`, `test_app.py`, `test_platform.py`, `conftest.py` | fixtures, the fake CLI, the AST guard over `tasks.py` |
 
 ## Decisions
 
 | # | Decision | Why |
 |---|---|---|
-| 1 | Grading happens in the tutor session, not in a form | Requirement 8 wants back-and-forth after each answer; the session pane already streams turns and carries write tools. A form would need an LLM call from a route, which the Claude contract does not offer |
-| 2 | `Start` marks one question started; the tutor learns it from the Current state block | `context(store, registry)` cannot see the page selection, so the started question must live in the store. Starting another question un-starts the previous one, so there is never more than one |
-| 3 | Each part is graded separately with `education_grade(question_id, part, score, note)`; the question is graded when its last part is | A part can be re-graded during the back-and-forth, an interrupted session loses nothing, and the LEFT bar can show progress inside a question |
-| 4 | Difficulty is an integer 1 to 5 stored per topic; when a question completes, a score above `flow_high` raises it one step, below `flow_low` lowers it one step | Requirement 4 in its literal form, parameter-free beyond the band, deterministic Python, visible in the progress table |
-| 5 | Nightly `generate` tops the due queue up to `queue_size`, one question per topic, topics ordered by least recently asked, skipping when the queue is full | Breadth over depth (constraint 1); a bounded backlog; no budget spent while the owner is away |
-| 6 | The prompt lists every prior title on the topic as "never repeat these or close variants" | Constraint 1: a question is asked once, even when answered badly. Skipped questions count as asked |
-| 7 | The tutor can write a question on demand with `education_add_question`, which starts it immediately | Day one has no nightly output yet; "quiz me on X now" is the natural tutor request. Same insert as the nightly path, `source = session` |
-| 8 | Owner feedback is stored verbatim in its own table, separate from the tutor's notes | Requirement 5 and agent_base: the owner's words are quoted literally; the generator reads both |
-| 9 | Education's tools take their knobs through `register(read, full, store, config=None)`, loading `config.toml` when the daemon passes nothing | `education_grade` needs the flow band and `education_add_topic` needs `start_difficulty`. The database worktree already changes the shared seam to pass config while finance, graph and web_search add three-argument registers, so touching the seam here would collide at merge; the optional argument works on both sides of that change |
-| 10 | Knobs in `config.toml` under `[education]`: `queue_size`, `start_difficulty`, `flow_low`, `flow_high` | Boot values like `[nightly]`; nothing hidden in code. `queue_size` is 3: the owner expects about three questions a day |
-| 11 | LEFT search uses `LIKE` over title and premise, no FTS table | A few questions a day; triggers and a virtual table buy nothing here |
-| 12 | Questions are worked on demand from the queue; nothing is scheduled to a date | The owner pursues Education when there is time. The nightly run keeps three waiting and the tutor writes more on request, so a free day is never short of questions and there is no calendar state to maintain |
-| 13 | The task catches `BudgetExceeded` and returns `Skipped` | The per-task fix named in `docs/bugs/budget-refusal-marks-job-failed.md`; a refusal must not read as a failure in Activity |
-| 14 | A topic is one of the owner's domains; progress is tracked per topic: difficulty, graded/asked, average, the last five scores, last asked. Each question keeps its score and per-part notes | Requirement 3 at the level the owner thinks in; per-question history keeps the finer grain without a second table |
+| 1 | The question shape is `mylife`'s: `title` (3 to 8 words, not a question), `topic_tag` (the facet, 2 to 5 words), a setup in markdown with math in LaTeX (`questions.premise` keeps its column), then lettered parts `(a)`, `(b)`, … each one ask with a hidden rubric | The format the owner liked |
+| 2 | One generator, `prompts/generate.md`: the old prompt's altitude paragraph and rules verbatim (define every variable and equation, no unexplained names, cross-field-expert basis, definitions in and explanations out, no leading, one ask per part, self-answer test, conceptual not computational, LaTeX, header acronyms bound in the body), plus Otto's topic context (difficulty 1 to 5, what the owner wants, every title asked, the last grades, the owner's feedback verbatim). It asks for one question per listed topic as a JSON array | The old altitude says what kind of question; the flow difficulty says how deep; they compose. One template, one parser, one validator on every path. An array keeps the nightly run one budgeted session for `queue_size` topics; a page press lists one topic |
+| 3 | A `Generate` button on the blank state: `POST action/generate` runs the generator through `oneshot` for the topic that has waited longest, awaited by the route, and the page selects the new question | The old module's one question per press; the only on-demand path through the generator rather than the tutor's hand. `oneshot` from a route is the Feedback precedent; unbudgeted |
+| 4 | Grading happens on the page. Submit stores the answer, starts the question, and runs `prompts/grade.md` (the old `grade_turn` reduced to one turn: verdict, score 0 to 2 in halves, explanation) through `oneshot`, awaited; the part then shows the answer, the explanation and a score pill in the verdict's colour | The answer format the owner liked. The exchange that followed in the old project (follow-ups, resolve) is the tutor's job now |
+| 5 | One graded answer per part on the page; the conversation about it continues in the session pane, where the tutor revises with `education_grade` | The right pane supersedes the old Socratic loop; the middle holds no exchange state |
+| 6 | Scores stay 0 to 100 in the store (the grader's halves times 50, the verdict stored beside it); question score, flow band, LEFT bars and the topic table are unchanged | Every reader keeps working; one conversion at one seam |
+| 7 | Rubrics never reach the page; the tutor sees a part's rubric only once that part is graded | Before an answer the rubric is the answer |
+| 8 | `questions.topic_tag` and `question_parts.rubric, answer, answered_at, verdict` are added by the module's `setup(config)` when the live table lacks them. No rename anywhere | `Store.migrate` only creates; `schema.sql` cannot add a column to a table that exists. The three v0 questions on disk stay answerable: no tag chip, and the grader is told there is no rubric |
+| 9 | Markdown and LaTeX render through vendored `marked` 18.0.12 and KaTeX 0.18.7: `app/static/md.js` exports one `Markdown` component; the KaTeX stylesheet and its woff2 fonts sit under `app/static/vendor/katex/`; `SHA256SUMS` grows | The old project loaded both from a CDN; Otto vendors everything and runs offline |
+| 10 | The education page draws its own question view (header line, title, chips, setup, parts, answer blocks, actions) in the inspector's frame conventions; Home keeps the generic inspector with the self-contained `text` | The generic inspector renders pre-wrapped text; this format needs markdown |
+| 11 | Verdict colours: correct `#7fb894`, partial `#d1a36a`, incorrect `#cf7b7b`, the palette's green, amber and red | The artboard names no verdict colours; a named departure |
+| 12 | The nightly `generate` passes no tools | The prompt carries every title already asked; a tool turn is a wasted turn against `max_turns` |
+| 13 | No retry on a rejected generation: the nightly rejects the element, a press answers 502 with the reason. An unbound header acronym is accepted with a warning in the event text and the response | A retry doubles a budgeted session; the old rule stands: a crude check never costs a failed press |
+| 14 | `education_add_question` keeps the tutor's hand-written path in the new shape; the difficulty is the topic's | "quiz me on X now" stays a sentence to the tutor; the same validator gates both writers |
+| 15 | Actions stay `Start` and `Skip`; a submitted answer starts its question by itself | Home's inspector and the tutor's Current state key on the started question; the old view had no start step |
+| 16 | Not ported: assessments, educator rules and their compression, curriculum proposals and coverage, FSRS scheduling and the concept graph, misconceptions, takeaways, per-part feedback chips, delete | The request names three things. Conversation and feedback live in the session pane (`education_record_feedback`); the curriculum is the topics table |
+| 17 | No limit on the number of parts. The generator is asked for one part per facet the setup genuinely opens, on one theme, and to stop rather than pad; the validator requires only that a question has at least one part with a prompt and a rubric; labels run past `(z)` as `(aa)` | Owner, 2026-09-09: a count makes the model invent adjacent questions to reach it, and the result reads as several topics. Supersedes the count in requirement 7; its cohesion clause is what the prompt enforces |
 
-Rejected: grading through a MIDDLE answer form with a one-shot LLM call; whole-question grading with one score list; a per-topic rolling average with a window knob; FTS5 for search; changing the shared registration seam in this branch; seeding topics in code.
+Standing from v0: 2, 3 (a part is graded on its own), 4 (difficulty per topic and the flow band), 5, 6, 8, 9, 10, 11, 12, 13, 14. Superseded: v0 decision 1 (grading in the session) by 4 and 5; v0 decision 7 keeps the tool but in the new shape (14).
+
+Rejected: grading in the tutor session with the page as a mirror (the middle would wait on a tool call it cannot see, and the explanation would show twice); multi-turn grading on the page (the session pane exists for that); CDN scripts; 0 to 2 scores in the store (every reader would change); a `migrate(store)` hook on the module contract (a shared seam every branch conflicts on, for one module's five columns); a per-topic Generate control (the breadth rule picks the topic); a takeaway line (a fourth LLM call for a line the owner did not ask for); any part count at all, 3 to 5 or the old 3 to 7 (decision 17).
 
 ## Layout
 
 | File | Change |
 |---|---|
-| `app/modules/education/__init__.py` | `MANIFEST` |
-| `app/modules/education/schema.sql` | `topics`, `questions`, `question_parts`, `feedback` |
-| `app/modules/education/tasks.py` | `generate(ctx)` |
-| `app/modules/education/routes.py` | `left`, `blank`, `item/{id}`, `action/{start\|skip\|add_topic\|retire_topic}`, hooks `numbers`, `today`, `item`, `context` |
-| `app/modules/education/tools.py` | `validate_question`, `insert_question`, `add_question`, `grade` as plain functions; `register(read, full, store, config=None)` wraps them and the read tools |
-| `app/modules/education/agent.md` | the tutor's job |
-| `app/static/pages/education.js` | `load`, `meta`, `Left`, `Middle` |
-| `app/static/shell.js` | import `pages/education.js`, add it to `PAGES` |
-| `app/config.py` | `Education` dataclass, `education` field on `Config`, one line in `load` |
-| `config.toml` | `[education]` section |
-| `tests/test_app.py` | the memory test finds its Home group and number by module name; Education now precedes Memory |
-| `tests/test_education.py` | the three tests below |
+| `app/modules/education/__init__.py` | `setup(config)` adds the five columns when a table lacks them |
+| `app/modules/education/schema.sql` | the columns on fresh databases, comments updated |
+| `app/modules/education/prompts/generate.md` | the generator, from `generate_question.md` |
+| `app/modules/education/prompts/grade.md` | the grader, from `grade_turn.md` |
+| `app/modules/education/questions.py` | new: the shared reads (moved from `routes.py`), `render`, `waiting_topics`, `generate_prompt`, `parse_array`, `validate_question`, `unbound_acronyms`, `insert_question`, `add_question` |
+| `app/modules/education/grading.py` | new: `grade_prompt`, `parse_grade`, `verdict_for`, `apply_grade`, `grade` (moved from `tools.py`) |
+| `app/modules/education/tasks.py` | `generate` renders the generator, passes no tools, validates each element |
+| `app/modules/education/routes.py` | `item` in the new shape; `POST action/answer`, `POST action/generate`; `context` in the new shape |
+| `app/modules/education/tools.py` | tools only; `education_add_question` new signature; `education_question` adds graded rubrics; `education_questions` adds `topic_tag` |
+| `app/modules/education/agent.md` | the tutor's job now |
+| `app/static/md.js` | new: `Markdown` (marked + KaTeX), the stylesheet link and the `.md` rules injected once |
+| `app/static/vendor/katex/{katex.mjs, katex.min.css, fonts/*.woff2}`, `app/static/vendor/marked.esm.js`, `SHA256SUMS` | the renderers |
+| `app/static/pages/education.js` | the question view with answer boxes; `Generate` on the blank state |
+| `tests/test_education.py` | rewritten, below |
+
+Untouched: `app/config.py`, `config.toml`, `app/static/shell.js`, `app/modules/__init__.py`, the other modules. No new knob: the format constants (the halves-to-percent scale, the label letters) are the format, not settings.
 
 ## Contract
 
-Manifest: `name="education"`, `title="Education"`, `hue="#7a9fd6"`, icon copied from the artboard rail entry (`M2 8l8-4 8 4-8 4-8-4Z`, `M6 10v4c0 1.2 2 2 4 2s4-.8 4-2v-4`, `M18 8v5`), `order=2`. Agent: placeholder `Ask the tutor…`, skills `question-gen`, `quiz`, `explain`, `plan` (the artboard's), read tools and write tools as below. Header meta: `<n> due`.
-
-| Schedule | every | resource | llm |
-|---|---|---|---|
-| `education.generate` | 24h | `education` | yes: runs inside the nightly window, one budgeted run |
+Manifest, schedule (`education.generate`, 24h, resource `education`, llm), hooks `numbers` and `today`, and the routes `left`, `blank`, `action/{start|skip|add_topic|retire_topic}` are unchanged.
 
 | Route | Wire shape |
 |---|---|
-| `GET /api/education/left?query=&page=` | `{groups, showing, more}`. First group `due`: open questions, started first then oldest first, `leading: {pct: graded parts / parts}`, stamp `created_at`. Then one group per day of `graded_at` or `skipped_at`, newest first, `leading: {pct: score}`, skipped rows `done: true`; `ui.page_size` pages the history. `query` filters title and premise |
-| `GET /api/education/blank` | `{due, topics: [{id, name, description, difficulty, asked, graded, average, recent, last_asked}]}`, active topics only; `recent` is the last five scores, newest first |
-| `GET /api/education/item/{id}` | `{id, module, kind: "<topic> · d<difficulty>", title, text: premise, created_at, status, score, parts: [{n, text, score, note}], feedback: [text], actions}`. Actions: open `Start` (primary) and `Skip`; started `Skip`; graded or skipped none |
-| `POST /api/education/action/start` `{id}` | sets `started_at`, clears it on any other open question; event `started` |
-| `POST /api/education/action/skip` `{id}` | sets `skipped_at`; event `skipped` |
-| `POST /api/education/action/add_topic` `{name, description?}` | inserts at `start_difficulty`; the description is optional, one line on what the owner wants from the topic; event `added topic` |
-| `POST /api/education/action/retire_topic` `{id}` | sets `retired_at`; its open questions stay answerable; event `retired topic` |
-
-Every action runs through `runner.run_action("education.<verb>", "education", "education", fn)`.
+| `GET /api/education/item/{id}` | `{id, module, kind: "<topic> · d<difficulty>[ · <score>]", title, topic, topic_id, topic_tag, text, setup, difficulty, source, status, score, created_at, parts: [{n, label, text, answer, answered_at, verdict, score, note, graded_at}], feedback, actions}`. `text` stays self-contained (title, setup, `(a) prompt` lines) for Home and the Feedback control. No rubric |
+| `POST /api/education/action/answer` `{id, n, answer}` | `{id, n, verdict, score}`. 400 empty; 404 no question or part; 409 question graded or skipped, or part graded. Writes `answer, answered_at`, sets `started_at` (un-starting any other), then runs `education.grade` on resource `education.llm` and awaits it: `oneshot` with `grade.md`, reply `{verdict, score, explanation}`, `apply_grade` in one commit; the last part completes the question and moves the topic's difficulty once (v0 rule). A failed run answers 502 with the reason; the answer stays, Submit is offered again |
+| `POST /api/education/action/generate` `{}` | `{id, warning?}`. 409 no active topic. `education.generate_now` on `education.llm`, awaited: `oneshot` with `generate.md` for the topic that has waited longest, the element validated, inserted with `source = session` (on the owner's demand, as the tutor's are) and not started; event `generated` carrying any acronym warning. 502 with the reason on a rejected reply |
 
 | Tool | Server | Does |
 |---|---|---|
-| `education_topics()` | read | active topics with difficulty, asked, graded, average and the last five scores |
-| `education_questions(topic_id=None, status=None, limit=50)` | read | titles, difficulty, score, dates; the no-repeat check |
-| `education_question(id)` | read | one question with parts, scores, notes and feedback |
-| `education_feedback(topic_id=None)` | read | the owner's feedback lines, verbatim |
-| `education_add_topic(name, description=None)` | full | inserts at `start_difficulty` |
-| `education_add_question(topic_id, title, premise, parts, difficulty)` | full | 3 to 5 parts or an error; unique title per topic; `source = session`; starts it |
-| `education_grade(question_id, part, score, note)` | full | scores one part 0 to 100 with a note; re-grading overwrites; on the last part sets `score` (mean) and `graded_at`, then moves the topic's difficulty by the flow rule once |
-| `education_record_feedback(text, topic_id=None, question_id=None)` | full | stores the owner's words unchanged |
+| `education_topics()`, `education_feedback(topic_id=None)` | read | unchanged |
+| `education_questions(topic_id=None, status=None, limit=50)` | read | unchanged plus `topic_tag` |
+| `education_question(id)` | read | the item shape plus `rubric` on graded parts only |
+| `education_add_topic`, `education_record_feedback` | full | unchanged |
+| `education_add_question(topic_id, title, topic_tag, setup, parts)` | full | `parts` is any number of `{prompt, rubric}`, at least one; validated as the generator's output is; difficulty from the topic; starts at once |
+| `education_grade(question_id, part, score, note)` | full | score 0 to 100, note is the explanation shown under the answer; verdict from the score (100 correct, 0 incorrect, else partial); completion and flow as before |
 
-Hooks: `numbers` is the open count labelled `due`; `today` is the due queue as LEFT rows (Home shows five and `+N`); `item` as above; `context` renders the active topics with difficulty, average and last five scores, the started question in full with any part scores, the due count, the last five graded titles with scores, and the latest feedback lines.
+`context(store, registry)`: the topic table; the due count; the started question in full (title, tag, setup, then each part with its prompt, the answer or "not answered", the verdict, score and explanation once graded, and the rubric once graded); the last five graded; the latest feedback verbatim.
 
-The tutor teaches concepts in plain language, never asks for algebra or derivations, and introduces every equation inside the premise. It grades the started question one part at a time, saying which part it is grading, and records each part with `education_grade` as soon as it has a score, revising on a good rebuttal. It writes the owner's feedback with `education_record_feedback` verbatim. On request it writes a question with `education_add_question` after checking `education_questions` for repeats: 3 to 5 parts, each intimately tied to the premise, at the topic's current difficulty. It adds topics with `education_add_topic` when asked and prefers breadth across topics over depth in one.
+The tutor: the owner answers on the page and each answer is graded there; the tutor discusses a graded part in plain language, revises with `education_grade` when the owner pushes back well, records the owner's words with `education_record_feedback`, writes a question on request in the full shape after checking `education_questions`, adds topics only when asked, and prefers breadth over depth.
 
-Page: LEFT is the search, then the groups above, then `showing` and `more`. MIDDLE selected is the `Inspector` with the premise as body, the numbered parts with score and note once graded, feedback lines, and the actions; `Start` also focuses the composer with `Q<id> part 1: `. MIDDLE blank is the progress table (name, `d<difficulty>`, graded/asked, average, last five scores, last asked, a retire control) and an add-topic box (name, optional one-line description, `Save`).
+Page. LEFT unchanged. MIDDLE selected: the inspector's header line (glyph in the hue, mono `kind · date time`, `×`), the title at 17px/600, two ringed chips (topic, tag), the setup as markdown, then each part: `(a)` in the hue and mono, the prompt as markdown, and under it either a raised 4-row textarea with `Submit` (Ctrl+Enter) showing `grading…` while the run is in flight, or the graded block: the answer in a raised box with a 3px left border in the verdict colour, the score in mono in that colour, then the explanation as markdown on a faint hue ground. A part of a graded or skipped question that was never answered reads `not answered`. The owner's feedback lines, then `Start`/`Skip` from `actions` and `Send to session`, which prefills `Q<id> "<title>": `. MIDDLE blank: `Generate` (primary, `generating…` while it runs) above the v0 topic table and add-topic box.
 
-Departures from the artboard:
-
-- The artboard's `Reschedule` action is dropped: questions are answered on demand, when the owner has time; nothing is scheduled to a date.
-- LEFT's first group is `due`, then history by day; the artboard groups everything by date range.
-- MIDDLE blank state (progress table and add-topic box) is not in the artboard, which left it unspecified.
-- The artboard's Database mock names `courses` and `lessons`; this module's nouns are topics and questions, per the requirements.
+Departures from the artboard: v0's stand (no `Reschedule`, LEFT leads with `due`, the blank state); the verdict colours; the `Generate` button; markdown in the middle where the artboard's inspector shows plain text.
 
 ## Data
 
 | Table | Columns |
 |---|---|
-| `topics` | `id, name UNIQUE, description (nullable), difficulty CHECK 1..5, created_at, retired_at` |
-| `questions` | `id, topic_id → topics, title, premise, difficulty CHECK 1..5, source CHECK nightly\|session, created_at, started_at, graded_at, skipped_at, score, UNIQUE(topic_id, title)`; index on `created_at` |
-| `question_parts` | `question_id → questions ON DELETE CASCADE, n, text, score CHECK 0..100, note, graded_at, PRIMARY KEY(question_id, n)` |
-| `feedback` | `id, ts, topic_id, question_id, text` |
+| `questions` | v0 plus `topic_tag TEXT` (NULL on v0 rows) |
+| `question_parts` | v0 plus `rubric TEXT`, `answer TEXT`, `answered_at TEXT`, `verdict TEXT CHECK (correct\|partial\|incorrect)`; `note` is now the explanation |
+| `topics`, `education_feedback` | unchanged |
 
-Status is derived: open when `graded_at` and `skipped_at` are null, started when also `started_at` is set. Last asked per topic is `MAX(questions.created_at)`; a topic's average and last five scores come from its graded questions.
-
-A topic is one of the owner's domains. The first fourteen, entered once through the page or the tutor after phase 1 lands, never seeded in code:
-
-1. Probability and statistics
-2. Agentic AI
-3. Deep learning
-4. Machine Learning
-5. Natural Language Model/Processing
-6. Reinforcement Learning
-7. Modern time series forecasting and foundational models
-8. Causal Inference
-9. Mathematics
-10. Optimization and decision science
-11. Physics
-12. Supply chain optimization
-13. Robotics
-14. Quantitative finance
-
-New tech (pick a new technology, see if the owner can understand how it works) is not a topic here; it is its own future item, `docs/roadmap/new-tech/`.
-
-| Cursor | Value |
-|---|---|
-| `education.generate` | timestamp of the last successful insert, written in the same `ctx.commit` as the questions |
+Migration: `setup(config)` opens `config.data.db`, reads `PRAGMA table_info` for the two tables and issues `ALTER TABLE … ADD COLUMN` for each missing column; a fresh database already has them from `schema.sql`, so it is a no-op there. Runs at every boot, idempotent. The v0 rows on disk keep working: the page omits the missing chip and the grader is told there is no rubric.
 
 | Path | Client | Writes |
 |---|---|---|
-| `generate` (scheduled) | `ctx.store` reads; `ctx.run_task` reaches Claude on the read server with `education_questions`, `education_question`; `ctx.commit` is its only write | its own `questions` and `question_parts` rows plus the cursor, one transaction |
-| tutor session | full server: the four read tools and the four write tools | grades, feedback, session questions, topics |
-| page actions | `run_action` on resource `education` | start, skip, topic add and retire |
+| `education.generate` (scheduled) | `ctx.run_task`, no tools, budgeted | its questions and parts plus the cursor, one `ctx.commit` |
+| `education.generate_now`, `education.grade` (actions on `education.llm`) | `st.claude.oneshot` on `otto-read`, unbudgeted | one question, or one part's grade, in one `ctx.commit` |
+| tutor session | full server | topics, session questions, re-grades, feedback |
+| page actions on `education` | `run_action` | start, skip, topic add and retire; `answer` writes the answer before its job |
 
-No external system is touched. The split is proved by `test_education_tool_split`: `asyncio.run(read.list_tools())` names no `education_add_*`, `education_grade` or `education_record_feedback`, and the full server names all eight; the existing AST guard `test_tasks_never_reach_interactive_claude` covers `tasks.py`.
+The split is proved by `test_education_tool_split` (unchanged), the AST guard over `tasks.py`, and `test_education_end_to_end` asserting that the grade run's spawn names `otto-read` and `--no-session-persistence`.
 
 ## Phases
 
 | Phase | Builds | Usable result |
 |---|---|---|
-| 1 | schema, manifest, `[education]` config and dataclass, routes and hooks, tools, `agent.md`, page, `shell.js` entry, `test_education_end_to_end`, `test_education_tool_split` | The owner enters the fourteen topics, asks the tutor for a question, answers it in the pane part by part, watches the score bar in LEFT and the topic's difficulty and recent scores move, and sees `N due` on Home |
-| 2 | `tasks.py generate`: queue top-up, topic rotation, no-repeat list, JSON parse, `BudgetExceeded` to `Skipped`, cursor; `test_generate_task` | Three questions wait each morning; Activity shows the run and its result |
+| 1 | columns and `setup`, `generate.md`, `questions.py`, `tasks.py`, `action/generate`, tools, the vendored renderers, `md.js`, the question view with parts read-only | Press `Generate`: a titled question with chips, a setup with rendered LaTeX and lettered parts appears in the middle; the nightly writes the same shape |
+| 2 | `grade.md`, `grading.py`, `action/answer`, the answer boxes and graded blocks, `context`, `agent.md` | Answer part (a) on the page and watch the verdict, score and explanation land under it; the LEFT bar and the topic table move; the tutor discusses the graded part and revises the score |
 
 ## Tests
 
-- `test_education_end_to_end` (`build(config)` + `httpx.ASGITransport`): add a topic, `add_question` with four parts, `left` shows it under `due` with `pct 0`, `start` sets it, `grade` four parts, the row moves to today's group with `pct` equal to the mean, `numbers` drops to zero, `blank` shows the topic as `1/1` graded with the score first in `recent`, the topic's difficulty rises when the score is above `flow_high`, `skip` works, a two-part question is refused.
-- `test_generate_task`: `fake_spawn` returning a result whose text is a JSON array of one question; `budget` monkeypatched to in-window with nothing used; the task inserts the question and the cursor; a full queue returns `Skipped`; a `BudgetExceeded` from a patched `run_task` also ends as `skipped`, not `failed`.
-- `test_education_tool_split`: as in Data.
-- Existing guards apply unchanged: `test_registry_loads_real_modules` (no import error, hooks without `request`), `test_tasks_never_reach_interactive_claude`, and the conftest fixture that makes a real CLI spawn raise.
+- `test_education_end_to_end`: a fake CLI answering in sequence (generate reply, grade replies, one non-JSON reply). Add a topic; `add_question` refuses an empty part list and a part without a rubric, and the validator accepts one, two or four parts; `item` carries labels and no rubric; `action/generate` inserts a question with rubrics and writes the event; `action/answer` grades part (a) to `correct` 100, starts the question, and the tutor's context shows the answer, the explanation and the rubric; a non-JSON reply answers 502 and keeps the answer, the retry grades it; 409 on a graded part, 400 empty, 404 bad part; `grade` completes the question, the topic's difficulty rises, LEFT shows the score, the spawn args of the grade run name `otto-read` and `--no-session-persistence`; search, skip, retire and return as in v0.
+- `test_generate_task`: reply array with one good element, a second for the same topic, a wrong topic, no parts, a part without a rubric: one inserted with rubrics and `source = nightly`, four rejected; cursor written; a budget refusal ends `skipped`; a full queue spends no run.
+- `test_setup_adds_columns`: a v0-shaped database gains the five columns after `setup(config)`; a second call is a no-op; the v0 question still serves through `item`.
+- `test_unbound_acronyms`: `Tokenization and BPE` with a setup that never binds it → `["BPE"]`; bound → `[]`. `test_labels_run_past_z`: `(aa)` follows `(z)`.
+- `test_education_tool_split` and the existing guards unchanged; the suite stays offline.
 
 ## Manifest
 
-Present:
+Present
 
 | Item | Version / location | Needed for |
 |---|---|---|
 | Python | 3.14.7, `.venv/Scripts/python.exe` | everything |
-| fastapi, uvicorn, mcp, httpx, pytest | 0.141.1, 0.52.4, 2.2.0, 0.28.1, 9.1.1 installed | routes, tool servers, tests |
-| SQLite | 3.50.4 via stdlib | tables; FTS5 available, unused |
-| Claude Code CLI | 2.1.263 at `C:/Users/gudo/.local/bin/claude.exe`, claude.ai login | tutor session, nightly generate |
-| `MCPServer.list_tools()` | returns tool objects with `.name`, checked 2026-09-07 | the split test |
-| Test suite | 16 passed 2026-09-07 | baseline |
+| fastapi, uvicorn, mcp, httpx, pytest | 0.141.1, 0.52.4, 2.2.0, 0.28.1, 9.1.1 | routes, tools, tests |
+| SQLite | 3.50.4 via stdlib; `ALTER TABLE ADD COLUMN` with a CHECK | the migration |
+| Claude Code CLI | 2.1.263 at `C:/Users/gudo/.local/bin/claude.exe` | `oneshot`, `run_task` |
+| `ClaudeRunner.oneshot(ctx, mod, prompt, tools=(), max_turns=2)` | `app/claude.py`, main `191715e` | the two page runs |
+| Test suite | 52 passed today in `../otto-education` at `191715e` | baseline |
+| `data/otto.db` | 14 topics, 3 v0 questions, 0 answers; last `education.generate` done 2026-09-09 02:00 local | the migration target |
+| jsdelivr and the npm registry | reachable today (`registry.npmjs.org`, `cdn.jsdelivr.net`) | fetching the renderers once |
 
-Missing: nothing; the item adds no package.
+Missing
 
-Needs you:
+| Package | Version | Needed for | Install target |
+|---|---|---|---|
+| katex (MIT) | 0.18.7 on npm: `dist/katex.mjs` 602,874 B, `dist/katex.min.css` 24,788 B, `dist/fonts/*.woff2` 20 files 259,792 B | LaTeX in setups, prompts and explanations | `app/static/vendor/katex/`, fetched from `https://cdn.jsdelivr.net/npm/katex@0.18.7/…`, sha256 into `SHA256SUMS` |
+| marked (MIT) | 18.0.12 on npm: `lib/marked.esm.js` 43,991 B | markdown in the same places | `app/static/vendor/marked.esm.js`, same way |
+
+Needs you
 
 | Item | How |
 |---|---|
-| Topics | Once phase 1 lands, enter the fourteen listed under Data on the page or by telling the tutor |
-| Daemon at night | `python -m app setup` once, then `Get-ScheduledTask -TaskName Otto`; without it the daemon is not running in the 02:00-05:00 window and `generate` never fires (`docs/gaps/logon-task-not-registered.md`) |
+| The merge | `main` moved under this branch during the build (the `web_search` merge, two plans). The branch has merged `main` and the suite is green there; what remains is `git merge education` on `main`, the suite on `main`, then `/sync-architecture` |
+| Daemon restart after the merge | `python -m app` restarts on the revision change; the columns land at boot |
+| The three v0 questions | answer or skip them; they render without a tag chip and grade without a rubric |
 
-Verify:
+Verify
 
 | Check | Command |
 |---|---|
-| A scheduled LLM run completes on this machine; `llm_runs` was empty on 2026-09-07 | after the first window: `.venv/Scripts/python.exe -c "import sqlite3; print(sqlite3.connect('data/otto.db').execute('select ts, module, task, status from llm_runs').fetchall())"` |
-| `generate` finishes inside `nightly.max_turns` with two read tools | `.venv/Scripts/python.exe -c "import sqlite3; print(sqlite3.connect('data/otto.db').execute(\"select status, result, error from jobs where task = 'education.generate' order by id desc limit 3\").fetchall())"` |
-| A refusal reads as `skipped` in Activity | same query on a night `max_sessions` is exhausted |
+| The columns exist after the restart | `.venv/Scripts/python.exe -c "import sqlite3; c=sqlite3.connect('data/otto.db'); print([r[1] for r in c.execute('pragma table_info(question_parts)')])"` |
+| A page grade was unbudgeted on `otto-read` | `.venv/Scripts/python.exe -c "import sqlite3; print(sqlite3.connect('data/otto.db').execute(\"select ts, task, status, budgeted from llm_runs where module='education' order by id desc limit 3\").fetchall())"` |
+| Rubrics never leave the server | `curl -s http://127.0.0.1:8765/api/education/item/1 \| findstr rubric` prints nothing |
 
 ## Worktree
 
@@ -192,8 +179,8 @@ Verify:
 git worktree add ../otto-education -b education
 ```
 
-Work there; when the branch is merged to `main`, run `/sync-architecture`.
+Exists; fast-forwarded to `main` at `191715e` today. Work there. When `education` is merged to `main`, run `/sync-architecture`.
 
 ## Pending decisions
 
-1. `[education]` values: `queue_size = 3` follows from three questions a day. Confirm `start_difficulty = 3`, `flow_low = 60`, `flow_high = 85`, or change them.
+None. The part count was settled on 2026-09-09: no limit, cohesion instead (decision 17).

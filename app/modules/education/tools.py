@@ -1,111 +1,19 @@
-"""MCP tools for the tutor. Read tools go on both servers; write tools on the full server only.
-
-`validate_question`, `insert_question`, `add_question` and `grade` are plain functions, shared with the nightly task and the tests.
-"""
+"""MCP tools for the tutor. Read tools go on both servers; write tools on the full server only."""
 
 from __future__ import annotations
 
 from app.config import load
-from app.modules.education.routes import SELECT, detail, question, status_of, topic_rows
+from app.modules.education.grading import grade
+from app.modules.education.questions import SELECT, add_question, parts_of, status_of, topic_rows
+from app.modules.education.routes import detail
 from app.store import Store, now_iso
 
-PARTS = (3, 5)                                                 # parts per question, requirement 7
 STATUS_SQL = {
     "open": "q.graded_at IS NULL AND q.skipped_at IS NULL AND q.started_at IS NULL",
     "started": "q.graded_at IS NULL AND q.skipped_at IS NULL AND q.started_at IS NOT NULL",
     "graded": "q.graded_at IS NOT NULL",
     "skipped": "q.skipped_at IS NOT NULL",
 }
-
-
-def _clean_parts(parts) -> list[str]:
-    return [str(p).strip() for p in (parts or []) if str(p).strip()]
-
-
-def validate_question(store: Store, topic_id, title, premise, parts, difficulty) -> str | None:
-    """The rules every new question meets, nightly or in session. Returns the problem, or None."""
-    if store.one("SELECT id FROM topics WHERE id = ? AND retired_at IS NULL", (topic_id,)) is None:
-        return f"no active topic {topic_id}"
-    if not isinstance(parts, (list, tuple)):
-        return "parts must be a list"
-    n = len(_clean_parts(parts))
-    if not PARTS[0] <= n <= PARTS[1]:
-        return f"a question has {PARTS[0]} to {PARTS[1]} parts, got {n}"
-    if not str(title or "").strip() or not str(premise or "").strip():
-        return "title and premise are required"
-    try:
-        d = int(difficulty)
-    except (TypeError, ValueError):
-        return "difficulty is 1 to 5"
-    if not 1 <= d <= 5:
-        return "difficulty is 1 to 5"
-    if store.one("SELECT id FROM questions WHERE topic_id = ? AND title = ?", (topic_id, str(title).strip())):
-        return f"a question titled {str(title).strip()!r} already exists on topic {topic_id}"
-    return None
-
-
-def insert_question(conn, topic_id, title, premise, parts, difficulty, source: str, start: bool) -> int:
-    """Write one validated question and its parts on an open connection. A started one un-starts any other."""
-    ts = now_iso()
-    if start:
-        conn.execute("UPDATE questions SET started_at = NULL WHERE started_at IS NOT NULL AND graded_at IS NULL AND skipped_at IS NULL")
-    cur = conn.execute(
-        "INSERT INTO questions(topic_id, title, premise, difficulty, source, created_at, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (topic_id, str(title).strip(), str(premise).strip(), int(difficulty), source, ts, ts if start else None),
-    )
-    for n, text in enumerate(_clean_parts(parts), 1):
-        conn.execute("INSERT INTO question_parts(question_id, n, text) VALUES (?, ?, ?)", (cur.lastrowid, n, text))
-    return cur.lastrowid
-
-
-def add_question(store: Store, topic_id, title, premise, parts, difficulty, source: str, start: bool) -> dict:
-    err = validate_question(store, topic_id, title, premise, parts, difficulty)
-    if err:
-        return {"error": err}
-    with store.tx() as conn:
-        qid = insert_question(conn, topic_id, title, premise, parts, difficulty, source, start)
-    return {"id": qid, "parts": len(_clean_parts(parts))}
-
-
-def grade(store: Store, config, question_id, part, score, note) -> dict:
-    """Score one part. The last part completes the question and moves the topic's difficulty by the flow band, once."""
-    q = question(store, int(question_id))
-    if q is None:
-        return {"error": f"no question {question_id}"}
-    if status_of(q) == "skipped":
-        return {"error": f"question {question_id} was skipped"}
-    if store.one("SELECT 1 FROM question_parts WHERE question_id = ? AND n = ?", (q["id"], int(part))) is None:
-        return {"error": f"question {question_id} has no part {part}"}
-    try:
-        s = int(score)
-    except (TypeError, ValueError):
-        return {"error": "score is 0 to 100"}
-    if not 0 <= s <= 100:
-        return {"error": "score is 0 to 100"}
-    band = config.education
-    ts = now_iso()
-    out: dict = {"question_id": q["id"], "part": int(part), "score": s}
-    with store.tx() as conn:
-        conn.execute(
-            "UPDATE question_parts SET score = ?, note = ?, graded_at = ? WHERE question_id = ? AND n = ?",
-            (s, (note or "").strip() or None, ts, q["id"], int(part)),
-        )
-        out["remaining"] = conn.execute("SELECT COUNT(*) FROM question_parts WHERE question_id = ? AND score IS NULL", (q["id"],)).fetchone()[0]
-        if out["remaining"] == 0:
-            mean = round(conn.execute("SELECT AVG(score) FROM question_parts WHERE question_id = ?", (q["id"],)).fetchone()[0])
-            conn.execute("UPDATE questions SET score = ? WHERE id = ?", (mean, q["id"]))
-            out["question_score"] = mean
-            if q["graded_at"] is None:
-                conn.execute("UPDATE questions SET graded_at = ? WHERE id = ?", (ts, q["id"]))
-                d = conn.execute("SELECT difficulty FROM topics WHERE id = ?", (q["topic_id"],)).fetchone()[0]
-                nd = min(5, d + 1) if mean > band.flow_high else max(1, d - 1) if mean < band.flow_low else d
-                if nd != d:
-                    conn.execute("UPDATE topics SET difficulty = ? WHERE id = ?", (nd, q["topic_id"]))
-                out["topic_difficulty"] = nd
-                out["completed"] = True
-    if out.get("completed"):
-        store.event("education", "graded", f"Q{q['id']} {q['title'][:100]}: {out['question_score']}", ref=str(q["id"]))
-    return out
 
 
 def register(read, full, store: Store, config=None) -> None:
@@ -116,7 +24,7 @@ def register(read, full, store: Store, config=None) -> None:
         return topic_rows(store)
 
     def education_questions(topic_id: int | None = None, status: str | None = None, limit: int = 50) -> list[dict]:
-        """Questions newest first: id, topic, title, difficulty, status (open, started, graded, skipped), score. Check here before writing a question so nothing repeats."""
+        """Questions newest first: id, topic, title, topic_tag, difficulty, status (open, started, graded, skipped), score. Check here before writing a question so nothing repeats."""
         where, params = [], []
         if topic_id is not None:
             where.append("q.topic_id = ?")
@@ -129,16 +37,23 @@ def register(read, full, store: Store, config=None) -> None:
         rows = store.query(f"{SELECT} {sql_where} ORDER BY q.created_at DESC LIMIT ?", (*params, max(1, min(limit, 200))))
         return [
             {
-                "id": q["id"], "topic_id": q["topic_id"], "topic": q["topic"], "title": q["title"], "difficulty": q["difficulty"],
-                "status": status_of(q), "score": q["score"], "source": q["source"], "created_at": q["created_at"], "graded_at": q["graded_at"],
+                "id": q["id"], "topic_id": q["topic_id"], "topic": q["topic"], "title": q["title"], "topic_tag": q["topic_tag"],
+                "difficulty": q["difficulty"], "status": status_of(q), "score": q["score"], "source": q["source"],
+                "created_at": q["created_at"], "graded_at": q["graded_at"],
             }
             for q in rows
         ]
 
     def education_question(id: int) -> dict:
-        """One question in full: premise, parts with any scores and notes, and the owner's feedback on it."""
+        """One question in full: the setup, each part with its prompt, the owner's answer, verdict, score and explanation, the rubric once a part is graded, and the owner's feedback on it."""
         d = detail(store, id)
-        return d if d else {"error": f"no question {id}"}
+        if not d:
+            return {"error": f"no question {id}"}
+        rubrics = {p["n"]: p["rubric"] for p in parts_of(store, id)}
+        for p in d["parts"]:
+            if p["graded_at"] and rubrics.get(p["n"]):
+                p["rubric"] = rubrics[p["n"]]
+        return d
 
     def education_feedback(topic_id: int | None = None) -> list[dict]:
         """The owner's feedback lines, verbatim, newest first. topic_id narrows."""
@@ -169,15 +84,15 @@ def register(read, full, store: Store, config=None) -> None:
         store.event("education", "added topic", f"(agent) {name}", ref=str(tid))
         return {"id": tid, "difficulty": config.education.start_difficulty if not existing else existing["difficulty"]}
 
-    def education_add_question(topic_id: int, title: str, premise: str, parts: list[str], difficulty: int) -> dict:
-        """Write a question the owner will answer now: a clear premise that introduces any equation, then 3 to 5 parts that each build on it. It starts at once."""
-        out = add_question(store, topic_id, title, premise, parts, difficulty, "session", True)
+    def education_add_question(topic_id: int, title: str, topic_tag: str, setup: str, parts: list[dict]) -> dict:
+        """Write a question the owner will answer now on the page. title: 3 to 8 words naming it, not a question. topic_tag: its facet, 2 to 5 words. setup: the shared basis in markdown, every symbol and equation defined before use, math in LaTeX, no answer given away. parts: {prompt, rubric} objects, one per facet the setup genuinely opens and no more (no target count), each prompt one ask answerable in a few sentences of reasoning (no computation), each rubric the expected answer, acceptable variations and common wrong answers, never shown to the owner. It starts at once."""
+        out = add_question(store, topic_id, title, topic_tag, setup, parts, "session", True)
         if "id" in out:
             store.event("education", "asked", f"(agent) {title.strip()[:120]}", ref=str(out["id"]))
         return out
 
     def education_grade(question_id: int, part: int, score: int, note: str) -> dict:
-        """Record the score (0 to 100) for one part with a one-line note on the answer. Grade a part again to revise it. The last part completes the question and tunes the topic's difficulty."""
+        """Revise the grade of one part: score 0 to 100 and the explanation the owner sees under their answer (LaTeX allowed). part is its number, (a) is 1. The last part completes the question and tunes the topic's difficulty."""
         return grade(store, config, question_id, part, score, note)
 
     def education_record_feedback(text: str, topic_id: int | None = None, question_id: int | None = None) -> dict:
