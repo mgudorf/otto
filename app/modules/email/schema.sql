@@ -9,10 +9,16 @@ CREATE TABLE IF NOT EXISTS email_messages (
   snippet       TEXT NOT NULL DEFAULT '',
   internal_date TEXT NOT NULL,                -- UTC ISO
   labels        TEXT NOT NULL DEFAULT '[]',   -- JSON list of Gmail label ids
-  body_text     TEXT,                         -- fetched on first open
   synced_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS email_messages_date ON email_messages(internal_date);
+
+CREATE TABLE IF NOT EXISTS email_bodies (      -- fetched on first open, through the read client
+  message_id  TEXT PRIMARY KEY REFERENCES email_messages(id) ON DELETE CASCADE,
+  text        TEXT NOT NULL,                  -- text/plain parts, else the html as text, else the snippet
+  html        TEXT,                           -- text/html parts through body.sanitize(); NULL when there are none
+  attachments TEXT NOT NULL DEFAULT '[]'      -- JSON list of filenames; the files themselves are never fetched
+);
 
 CREATE TABLE IF NOT EXISTS email_triage (
   message_id TEXT PRIMARY KEY REFERENCES email_messages(id) ON DELETE CASCADE,

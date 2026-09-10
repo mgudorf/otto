@@ -1,4 +1,4 @@
-"""Email module: the read/write client split, sync against a fake Gmail, and actions through the app."""
+"""Email module: the read/write client split, sync against a fake Gmail, actions through the app, and the body sanitizer."""
 
 import ast
 import base64
@@ -34,8 +34,12 @@ EMAIL_DIR = ROOT / "app" / "modules" / "email"
 FORBIDDEN = {"GmailWrite", "write_client", "modify", "batchModify", "trash", "delete"}
 
 
-def message(mid, sender, subject, labels, body="hello there", ms=1_757_239_200_000):
-    return {"id": mid, "from": sender, "subject": subject, "labels": list(labels), "snippet": body[:40], "body": body, "ms": ms}
+def message(mid, sender, subject, labels, body="hello there", ms=1_757_239_200_000, html=None):
+    return {"id": mid, "from": sender, "subject": subject, "labels": list(labels), "snippet": body[:40], "body": body, "html": html, "ms": ms}
+
+
+def b64(s):
+    return base64.urlsafe_b64encode(s.encode()).decode()
 
 
 def gmail_json(m, full):
@@ -44,8 +48,11 @@ def gmail_json(m, full):
         "payload": {"headers": [{"name": "From", "value": m["from"]}, {"name": "To", "value": "owner@example.com"}, {"name": "Subject", "value": m["subject"]}]},
     }
     if full:
-        out["payload"]["mimeType"] = "text/plain"
-        out["payload"]["body"] = {"data": base64.urlsafe_b64encode(m["body"].encode()).decode()}
+        plain = {"mimeType": "text/plain", "body": {"data": b64(m["body"])}}
+        if m["html"]:
+            out["payload"].update({"mimeType": "multipart/alternative", "parts": [plain, {"mimeType": "text/html", "body": {"data": b64(m["html"])}}]})
+        else:
+            out["payload"].update(plain)
     return out
 
 
@@ -108,7 +115,8 @@ def fake(monkeypatch):
     g = FakeGmail([
         message("m1", "Ann <ann@example.com>", "Invoice ready", ["INBOX"], ms=1_757_239_200_000),
         message("m2", "Bob <bob@example.com>", "Lunch?", ["INBOX", "UNREAD"], ms=1_757_242_800_000),
-        message("m3", "Cy <cy@example.com>", "Contract draft", ["INBOX", "UNREAD", "STARRED"], body="please sign the contract", ms=1_757_246_400_000),
+        message("m3", "Cy <cy@example.com>", "Contract draft", ["INBOX", "UNREAD", "STARRED"], body="please sign the contract", ms=1_757_246_400_000,
+                html="<p>please <b>sign</b> the contract <a href='https://docs.example/c'>here</a></p>"),
     ])
     monkeypatch.setattr(gmail, "TRANSPORT", httpx.MockTransport(g.handler))
     return g
@@ -248,6 +256,9 @@ def test_email_actions(email_config, fake):
 
             item = (await c.get("/api/email/item/m3")).json()
             assert item["text"] == "Contract draft\n\nplease sign the contract" and item["starred"] is True
+            assert item["body"] == "please sign the contract" and item["attachments"] == []
+            assert item["html"] == '<p>please <b>sign</b> the contract here <span class="url">https://docs.example/c</span></p>'
+            assert app.state.store.scalar("SELECT COUNT(*) FROM email_bodies") == 1
             assert [a["verb"] for a in item["actions"]] == ["archive", "trash", "read", "unstar", "open"]
             assert (await c.post("/api/email/action/read", json={"ids": ["m3"]})).json() == {"count": 1}
             assert (await c.get("/api/email/item/m3")).json()["unread"] is False
@@ -305,3 +316,86 @@ def test_email_triage(store, email_config, fake):
     high = next(f for f in read if f.__name__ == "email_triage")()
     assert [(h["id"], h["source"]) for h in high] == [("m3", "scheduled"), ("m1", "session")]
     assert store.one("SELECT verb FROM events WHERE module = 'email' ORDER BY id DESC")["verb"] == "flagged"
+
+
+HTML = """<!DOCTYPE html><html><head><title>page title</title><style>p{color:red}</style>
+<meta http-equiv="refresh" content="0;url=https://evil.example"><link rel="stylesheet" href="https://evil.example/x.css"></head>
+<body style="background:#fff"><!--[if mso]><table><tr><td>outlook only</td></tr></table><![endif]-->
+<div style="display:none;max-height:0">preheader text<p>mobile copy</div><span hidden>hidden span</span><i style="visibility: hidden">invisible</i>
+<script>alert(1)</script>
+<h1 style="font-size:40px" onclick="alert(2)">Big &amp; bold</h1>
+<p>Hello <b>there</b>, <a href="https://shop.example/x?y=1" target="_blank">buy now</a> or <a href="https://example.com/">https://example.com/</a>
+<a href="javascript:alert(3)">js</a> <a href="mailto:ann@example.com">write</a></p>
+<img src="https://evil.example/pixel.gif" width="1"><img src="cid:hero" alt="Autumn sale">
+<a href="https://share.example/icon"><img src="i.png"></a><a href="https://share.example/tw"><img src="t.png" alt="Twitter"></a>
+<table border="1"><tr><td colspan="2" width="600">left</td></tr></table>
+<form action="https://evil.example"><input name="q"><button>go</button></form>
+<svg><a href="https://evil.example">svg link</a></svg><iframe src="https://evil.example"></iframe>
+<ul><li>one<li>two</ul><pre>  code
+  block</pre>
+<div>unclosed <em>emphasis</div></body></html>"""
+
+
+def test_email_body(store, email_config, fake):
+    """The reader gets structure and text only; links become their raw URL; attachments are named, never read."""
+    import re
+
+    from app.modules.email.body import extract, sanitize
+
+    out = sanitize(HTML)
+    for bad in ("<a", "<img", "<script", "<style", "<meta", "<link", "<form", "<input", "<button", "<svg", "<iframe", "href=", "onclick",
+                "style=", "width=", "alert(", "outlook only", "page title", "pixel.gif", "cid:", "javascript:", "svg link", "color:red",
+                "preheader", "mobile copy", "hidden span", "invisible"):
+        assert bad not in out, bad
+    assert set(re.findall(r"<span[^>]*>", out)) == {'<span class="url">', '<span class="img">'}
+    assert "<h1>Big &amp; bold</h1>" in out
+    assert 'buy now <span class="url">https://shop.example/x?y=1</span>' in out
+    assert out.count("https://example.com/") == 1  # link text already is the url: written once
+    assert 'write <span class="url">mailto:ann@example.com</span>' in out and "\njs " in out
+    assert '<span class="img">[image: Autumn sale]</span>' in out
+    assert "share.example/icon" not in out  # an icon link with nothing to show shows no URL either
+    assert '<span class="img">[image: Twitter]</span> <span class="url">https://share.example/tw</span>' in out
+    assert '<td colspan="2">left</td>' in out
+    assert "<li>one" in out and "<li>two" in out and "<pre>  code\n  block</pre>" in out
+    assert "<div>unclosed <em>emphasis</em></div>" in out
+
+    full = {"id": "m9", "snippet": "snip", "payload": {"mimeType": "multipart/mixed", "parts": [
+        {"mimeType": "multipart/alternative", "parts": [
+            {"mimeType": "text/plain", "body": {"data": b64("plain text\r\nline two")}},
+            {"mimeType": "text/html", "body": {"data": b64(HTML)}},
+        ]},
+        {"mimeType": "text/plain", "filename": "notes.txt", "body": {"attachmentId": "a1", "data": b64("ATTACHED TEXT")}},
+        {"mimeType": "application/pdf", "filename": "invoice.pdf", "body": {"attachmentId": "a2", "size": 5000}},
+    ]}}
+    b = extract(full)
+    assert b["text"] == "plain text\nline two" and b["attachments"] == ["notes.txt", "invoice.pdf"]
+    assert "ATTACHED" not in b["text"] and "ATTACHED" not in b["html"] and "<h1>Big" in b["html"]
+    b = extract({"id": "m8", "snippet": "s", "payload": {"mimeType": "text/html", "body": {"data": b64("<p>Only <i>html</i><br>here</p>")}}})
+    assert b == {"text": "Only html\nhere", "html": "<p>Only <i>html</i><br>here</p>", "attachments": []}
+    b = extract({"id": "m7", "snippet": "just &amp; snippet", "payload": {"mimeType": "text/html", "body": {"data": b64("<div><img src='x'></div>")}}})
+    assert b == {"text": "just & snippet", "html": None, "attachments": []}
+
+    store.migrate((EMAIL_DIR / "schema.sql").read_text("utf-8"))
+
+    async def main():
+        r = Runner(store, email_config, registry=None, claude=None)
+        await r.start()
+        await r.submit("email.sync", "email", "gmail", "scheduled", sync).done
+        await r.drain(1)
+
+    run(main())
+    read = []
+
+    class Srv:
+        def __init__(self, names):
+            self.names = names
+
+        def tool(self):
+            return lambda f: (self.names.append(f), f)[1]
+
+    register(Srv(read), Srv([]), store, email_config)
+    email_get = next(f for f in read if f.__name__ == "email_get")
+    got = run(email_get("m3"))
+    assert got["body_text"] == "please sign the contract" and got["attachments"] == [] and "html" not in got and "error" not in got
+    assert store.scalar("SELECT html FROM email_bodies WHERE message_id = 'm3'").startswith("<p>please <b>sign</b>")
+    assert run(email_get("nope")) == {"error": "no message nope"}
