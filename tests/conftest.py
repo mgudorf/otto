@@ -54,18 +54,12 @@ def run(coro):
 
 class FakeStream:
     def __init__(self, lines: list[str]):
-        self._lines = [l.encode() + b"\n" for l in lines]
+        self._buf = b"".join(l.encode() + b"\n" for l in lines)
 
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        if not self._lines:
-            raise StopAsyncIteration
-        return self._lines.pop(0)
-
-    async def read(self):
-        return b""
+    async def read(self, n: int = -1):
+        take = len(self._buf) if n < 0 else n
+        out, self._buf = self._buf[:take], self._buf[take:]
+        return out
 
 
 class FakeStdin:

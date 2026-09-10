@@ -39,11 +39,10 @@ export class Feedback extends Component {
   }
 
   render({ page, hue, sel, recent }, { open, draft, error, busy }) {
-    const pending = recent ? recent.pending : 0;
     const rows = recent ? recent.rows : [];
     const context = sel ? `${page} · item ${sel.id}` : page;
     return html`<span style=${{ position: 'relative' }}>
-      <span class="ring" onClick=${() => this.setState({ open: !open })} style=${{ ...mono13, color: open ? T.text : T.muted, cursor: 'pointer', padding: '3px 8px', borderRadius: 6 }}>${pending > 0 ? `feedback · ${pending}` : 'feedback'}</span>
+      <span class="ring" onClick=${() => this.setState({ open: !open })} style=${{ ...mono13, color: open ? T.text : T.muted, cursor: 'pointer', padding: '3px 8px', borderRadius: 6 }}>feedback</span>
       ${open && html`<div style=${{ position: 'absolute', top: 30, right: 0, width: 360, zIndex: 10, display: 'flex', flexDirection: 'column', gap: 8, padding: 12, background: T.panel, borderRadius: 6, boxShadow: `inset 0 0 0 1px ${T.hair}`, '--hue': hue }}>
         <textarea ref=${(el) => (this.ta = el)} value=${draft} rows="3" placeholder="What should change here?" spellcheck="false"
           onInput=${(e) => this.setState({ draft: e.target.value })}

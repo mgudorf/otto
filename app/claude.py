@@ -21,6 +21,7 @@ from app.store import Store, iso, now, now_iso
 
 READ_BUILTINS = ("Read", "Grep", "Glob", "WebSearch", "WebFetch")
 SCRUB_PREFIXES = ("CLAUDECODE", "CLAUDE_CODE_", "ANTHROPIC_")
+CHUNK_BYTES = 1 << 16
 READ_SERVER = "otto-read"
 FULL_SERVER = "otto"
 
@@ -141,19 +142,25 @@ class ClaudeRunner:
         err_task = asyncio.create_task(proc.stderr.read())
 
         async def read() -> None:
-            async for raw in proc.stdout:
-                line = raw.decode("utf-8", "replace").strip()
-                if not line:
-                    continue
-                try:
-                    msg = json.loads(line)
-                except ValueError:
-                    continue
-                for ev in events_from(msg):
-                    if ev["role"] == "result":
-                        final.update(ev)
-                    if on_event:
-                        await on_event(ev)
+            # Split lines ourselves: one stream-json message carrying a large tool result
+            # is far longer than the stream reader's own line limit.
+            buf = b""
+            while chunk := await proc.stdout.read(CHUNK_BYTES):
+                buf += chunk
+                *lines, buf = buf.split(b"\n")
+                for raw in lines:
+                    line = raw.decode("utf-8", "replace").strip()
+                    if not line:
+                        continue
+                    try:
+                        msg = json.loads(line)
+                    except ValueError:
+                        continue
+                    for ev in events_from(msg):
+                        if ev["role"] == "result":
+                            final.update(ev)
+                        if on_event:
+                            await on_event(ev)
 
         try:
             await asyncio.wait_for(read(), timeout=timeout)

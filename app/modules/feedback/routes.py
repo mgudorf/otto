@@ -119,10 +119,7 @@ async def action(request: Request, verb: str, body: dict = Body(default={})) -> 
 @router.get("/recent")
 def recent(request: Request) -> dict:
     store: Store = request.app.state.store
-    return {
-        "pending": store.scalar("SELECT COUNT(*) FROM feedback WHERE status IN ('queued', 'failed')"),
-        "rows": store.query("SELECT id, created_at, page, status, kind, summary, error FROM feedback ORDER BY id DESC LIMIT ?", (RECENT,)),
-    }
+    return {"rows": store.query("SELECT id, created_at, page, status, kind, summary, error FROM feedback ORDER BY id DESC LIMIT ?", (RECENT,))}
 
 
 @router.get("/list")

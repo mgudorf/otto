@@ -58,7 +58,7 @@ Manifest: as above. `page=False` keeps the module out of `/api/shell`; its route
 |---|---|
 | `POST /api/feedback/action/add` | body `{page, text, item?: {module, id, text}}` → `{id}`; 400 empty text; inserts `queued`, writes `events(module=page, verb="feedback", text=<words>, ref=<id>)`, submits `feedback.file` |
 | `POST /api/feedback/action/retry` | body `{id}` → `{id}`; 404 unknown; 409 unless `failed`; resets to `queued` and resubmits |
-| `GET /api/feedback/recent` | `{pending: <queued + failed>, rows: [{id, created_at, page, status, kind, summary, error}]}`, last five |
+| `GET /api/feedback/recent` | `{rows: [{id, created_at, page, status, kind, summary, error}]}`, last five |
 | `GET /api/feedback/list?status=&limit=` | full rows, newest first; the record for triage and export |
 
 `feedback.file` job: prompt = the note (`#id`, page, item module and id with its text, the owner's words in a fenced block) and the reply format; `raw = await ctx.claude.oneshot(ctx, mod, prompt, tools, config.feedback.max_turns)`; parse the JSON object (tolerant, as Memory's parser); require `kind` in the four kinds and non-empty `title`, `summary`, `draft`; `ctx.commit()` sets `status='filed'` with the fields, `filed_at`, `job_id`; any failure sets `status='failed', error`, and the runner's `failed` event shows it in Activity. Returns `"<kind>: <title>"`.
@@ -73,7 +73,7 @@ Agent (`agent.md`): files one note at a time. First `docs_list`, then read what 
 
 `context(store, registry)`: the built modules by name, the roadmap slugs on disk, and counts of files per finding folder.
 
-`Feedback({page, hue, sel, item, recent, onSent})` in `feedback.js`: control span, mono 13px, `#8b8f98`, ring hover, label from `recent.pending`. Panel: top 44px, right 32px, width 360px, padding 12px, `#1a1c21`, ring `inset 0 0 0 1px rgba(230,231,234,.08)`, radius 6; textarea 3 rows on `#23262c`, placeholder `What should change here?`; context line `memory · item 12` or `memory`; `Send` primary in `hue`; then the recent rows at 28px in mono: `filing…` for `queued`, `<kind> · <summary>` for `filed`, `failed · <error>` with a `retry` span for `failed`. Enter sends, Shift+Enter breaks a line, Esc closes keeping the draft. Send posts `{page, text, item: sel ? {module, id, text: item.text.slice(0, 300)} : undefined}` and calls `onSent`.
+`Feedback({page, hue, sel, item, recent, onSent})` in `feedback.js`: control span, mono 13px, `#8b8f98`, ring hover, label always `feedback`. Panel: top 44px, right 32px, width 360px, padding 12px, `#1a1c21`, ring `inset 0 0 0 1px rgba(230,231,234,.08)`, radius 6; textarea 3 rows on `#23262c`, placeholder `What should change here?`; context line `memory · item 12` or `memory`; `Send` primary in `hue`; then the recent rows at 28px in mono: `filing…` for `queued`, `<kind> · <summary>` for `filed`, `failed · <error>` with a `retry` span for `failed`. Enter sends, Shift+Enter breaks a line, Esc closes keeping the draft. Send posts `{page, text, item: sel ? {module, id, text: item.text.slice(0, 300)} : undefined}` and calls `onSent`.
 
 Departures from the artboard: the header control and the panel are not in the artboard; they reuse the header's mono meta style, the panel and raised surfaces, the composer textarea, compact rows and the primary button. Events for `activity` and `settings` carry that page as `module` and show under Activity's `All` chip.
 
@@ -102,7 +102,7 @@ Cursors: none. Scheduled tasks: none. External systems: none.
 ## Tests
 
 - `test_docs_tools_confined` (`tests/test_platform.py`): register the tools on two `MCPServer`s with a `Store`; `docs_list()` includes `docs/ARCHITECTURE.md`; `docs_read("docs/ARCHITECTURE.md")` returns its text; `docs_read("config.toml")`, `docs_read("../app/config.py")` and `docs_read("docs/design/support.js")` return `{"error"}`.
-- `test_feedback_end_to_end` (`tests/test_app.py`): fake spawn whose result line is a JSON object with `kind: "bug"`; `POST action/add` with `page: "memory"` and an item → `{id}`; after `settle`, `GET recent` shows `filed`, `kind == "bug"`, `pending == 0`; the `llm_runs` row has `budgeted == 0`; the spawn args contain `otto-read`, `--no-session-persistence` and `--max-turns 12`; a second note whose fake reply is not JSON ends `failed` with `pending == 1`; `POST action/retry` requeues it; empty text → 400; `GET /api/events?module=memory` first verb is `feedback`; `GET list` returns the verbatim text.
+- `test_feedback_end_to_end` (`tests/test_app.py`): fake spawn whose result line is a JSON object with `kind: "bug"`; `POST action/add` with `page: "memory"` and an item → `{id}`; after `settle`, `GET recent` shows `filed`, `kind == "bug"`; the `llm_runs` row has `budgeted == 0`; the spawn args contain `otto-read`, `--no-session-persistence` and `--max-turns 12`; a second note whose fake reply is not JSON ends `failed`; `POST action/retry` requeues it; empty text → 400; `GET /api/events?module=memory` first verb is `feedback`; `GET list` returns the verbatim text.
 - Offline: `conftest.no_real_claude` plus the fake.
 
 ## Manifest

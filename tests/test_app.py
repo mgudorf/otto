@@ -146,6 +146,25 @@ def test_failed_first_turn_retires_session(config):
     run(main())
 
 
+def test_huge_stream_line_survives(config):
+    """One stream-json message can carry a whole file as a tool result; it must not truncate the run."""
+
+    async def main():
+        big = json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "y" * 400_000}]}})
+        app = build(config, spawn_fn=fake_spawn([INIT, TOOL, big, TEXT, RESULT]))
+        await app.state.runner.start()
+        async with client_for(app) as c:
+            await c.post("/api/session/memory/send", json={"text": "read the big one"})
+            await settle(app)
+            s = (await c.get("/api/session/memory")).json()
+            assert [t["role"] for t in s["turns"]] == ["user", "tool", "model"]
+            assert s["turns"][1]["status"] == "done" and s["busy"] is False
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())
+
+
 def test_home_review_group(config):
     """A module with a queue hook leads Home with every waiting row; empty or disabled, it shows nothing."""
     pending = [
@@ -225,7 +244,7 @@ def test_feedback_end_to_end(config):
             fid = r.json()["id"]
             await settle(app)
             recent = (await c.get("/api/feedback/recent")).json()
-            assert recent["pending"] == 0 and recent["rows"][0]["status"] == "filed" and recent["rows"][0]["kind"] == "bug"
+            assert recent["rows"][0]["status"] == "filed" and recent["rows"][0]["kind"] == "bug"
             row = (await c.get("/api/feedback/list")).json()[0]
             assert row["id"] == fid and row["text"] == "forget should also clear the inspector" and row["item_id"] == "7" and row["tags"] == ["memory", "bug", "inspector"]
             assert row["draft"].startswith("# Forget") and row["ref"] is None and row["job_id"]
@@ -244,12 +263,12 @@ def test_feedback_end_to_end(config):
             bad = r.json()["id"]
             await settle(app)
             recent = (await c.get("/api/feedback/recent")).json()
-            assert recent["pending"] == 1 and recent["rows"][0]["status"] == "failed" and "JSON" in recent["rows"][0]["error"]
+            assert recent["rows"][0]["status"] == "failed" and "JSON" in recent["rows"][0]["error"]
             assert (await c.post("/api/feedback/action/retry", json={"id": fid})).status_code == 409
             app.state.claude.spawn = spying([FILED])
             assert (await c.post("/api/feedback/action/retry", json={"id": bad})).status_code == 200
             await settle(app)
-            assert (await c.get("/api/feedback/recent")).json()["pending"] == 0
+            assert (await c.get("/api/feedback/recent")).json()["rows"][0]["status"] == "filed"
         await app.state.runner.drain(1)
         app.state.store.close()
 
