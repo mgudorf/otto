@@ -93,7 +93,7 @@ The external system is the public web, read-only by nature; this module has no w
 
 | Phase | Builds | Usable result |
 |---|---|---|
-| 1 | Module, schema, config knob, `nightly` task, routes, hooks, page, `shell.js` entry, agent with read tools | The owner types topics; the next nightly window produces up to `max_findings` findings on Home and Search; Agree / Disagree records each one |
+| 1 | built; see ARCHITECTURE.md | |
 | 2 | `follow_up_at` and `parent_id`; the prompt asks for a follow-up date when a finding is time-bound; agreed findings past their date are listed as "follow up on" in the next prompt and appear as kind `follow` | Scheduled follow-ups surface on their own |
 | 3 | Write tools `search_topic_add`, `search_decide` on the full server | Topics and decisions from the session pane |
 
