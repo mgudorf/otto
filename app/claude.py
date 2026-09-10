@@ -110,6 +110,7 @@ class ClaudeRunner:
         return {
             "used": used,
             "max": self.config.nightly.max_sessions,
+            "stagger_minutes": self.config.nightly.stagger_minutes,
             "window": self.config.nightly.window,
             "in_window": in_window(local.time(), start, end),
         }

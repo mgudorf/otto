@@ -1,6 +1,8 @@
 """The daemon owns the clock. Manifest schedules become rows in `tasks`; this loop submits the due ones.
 
-LLM tasks only become due inside the nightly window; everything else runs on its interval.
+LLM tasks only become due inside the nightly window, and go one at a time `stagger_minutes` apart so two
+nightly runs never overlap; everything else runs on its interval. A module the owner switched off on
+Settings holds every one of its tasks back; the rows stay due and go the tick after it is switched on.
 """
 
 from __future__ import annotations
@@ -67,13 +69,29 @@ class Scheduler:
             return iso(next_window_start(datetime.now().astimezone(), start))
         return iso(now() + timedelta(seconds=interval_seconds))
 
+    def _staggered(self) -> bool:
+        """True while a nightly run went in the last `stagger_minutes`: the next one waits its turn."""
+        cutoff = iso(now() - timedelta(minutes=self.config.nightly.stagger_minutes))
+        return bool(self.store.scalar(
+            "SELECT 1 FROM jobs j JOIN tasks t ON t.name = j.task WHERE t.llm = 1 AND j.kind = 'scheduled' AND j.queued_at >= ? LIMIT 1",
+            (cutoff,),
+        ))
+
+    def runs(self, module: str) -> bool:
+        """The owner's per-module switch on Settings. Nothing but the owner ever writes it."""
+        return self.store.setting(f"modules.{module}.scheduled") is not False
+
     def tick(self) -> list[str]:
         """Submit every enabled task whose next_run has passed. Returns the names submitted."""
         due = self.store.query(
-            "SELECT * FROM tasks WHERE enabled = 1 AND next_run IS NOT NULL AND next_run <= ? ORDER BY next_run", (now_iso(),)
+            "SELECT * FROM tasks WHERE enabled = 1 AND next_run IS NOT NULL AND next_run <= ? ORDER BY next_run, name", (now_iso(),)
         )
         submitted = []
         for row in due:
+            if not self.runs(row["module"]):
+                continue                     # switched off: the row stays due rather than skipping a turn
+            if row["llm"] and self._staggered():
+                continue                     # one nightly run per gap; the rest stay due for a later tick
             self.store.execute(
                 "UPDATE tasks SET next_run = ? WHERE name = ?", (self._next_run(bool(row["llm"]), row["interval_seconds"]), row["name"])
             )

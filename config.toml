@@ -22,9 +22,10 @@ workspace = "data/workspace"  # cwd for every Claude session; file tools are con
 
 [nightly]
 window = "02:00-05:00"        # local time; scheduled LLM tasks only run inside it
-max_sessions = 3              # headless runs per day, all tasks combined
+max_sessions = 5              # headless runs per day, all tasks combined; at least one per nightly LLM task
 max_turns = 20                # per run
 max_minutes = 15              # per run; the process is killed past this
+stagger_minutes = 15          # gap the scheduler leaves between one nightly LLM run and the next
 
 [business]
 leads_per_run = 3           # new leads the nightly scout may queue per run
@@ -40,7 +41,7 @@ idle_minutes = 60                # a kernel unused this long is shut down by sci
 tool_output_chars = 2000         # per-output cap in what the agent's tools return
 
 [education]
-queue_size = 3              # unanswered questions the nightly run keeps waiting
+per_night = 3               # new questions the nightly run writes, one for each topic that has waited longest
 start_difficulty = 3        # 1 to 5 for a new topic
 flow_low = 60               # a completed question below this lowers the topic's difficulty one step
 flow_high = 85              # above this raises it one step

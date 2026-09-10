@@ -63,6 +63,7 @@ def build(config: Config, spawn_fn=None) -> FastAPI:
         "ui.side_max": config.ui.side_max,
         "ui.middle_max": config.ui.middle_max,
         **{f"modules.{m.name}.enabled": True for m in registry.ordered() if m.manifest.page},
+        **{f"modules.{m.name}.scheduled": True for m in registry.ordered() if m.manifest.page and m.manifest.schedules},
     })
 
     read = MCPServer(READ_SERVER, instructions="Read-only tools over the owner's Otto data.")

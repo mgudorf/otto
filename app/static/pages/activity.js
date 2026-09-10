@@ -73,23 +73,24 @@ export function Middle({ app, data, fmt }) {
     </div>`;
   }
   const budget = app.state.shell.budget;
+  const held = new Set(app.state.shell.modules.filter((m) => m.tasks && !m.scheduled).map((m) => m.name));
   const cols = '1.4fr 0.8fr 0.7fr 0.9fr 0.9fr 1.6fr 40px';
   const cell = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
   return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 24 }}>
     <div style=${{ display: 'flex', flexDirection: 'column', ...mono13 }}>
       <div style=${{ display: 'grid', gridTemplateColumns: cols, gap: 16, height: 28, alignItems: 'center', padding: '0 12px', color: T.muted }}>
         <span>task</span><span>module</span><span>every</span><span>last run</span><span>next run</span><span>last result</span><span></span></div>
-      ${data.tasks.map((t) => html`<div key=${t.name} class="trow" style=${{ display: 'grid', gridTemplateColumns: cols, gap: 16, height: 32, alignItems: 'center', padding: '0 12px', borderTop: `1px solid ${T.hair}`, color: t.enabled ? T.text : T.dim }}>
+      ${data.tasks.map((t) => html`<div key=${t.name} class="trow" style=${{ display: 'grid', gridTemplateColumns: cols, gap: 16, height: 32, alignItems: 'center', padding: '0 12px', borderTop: `1px solid ${T.hair}`, color: t.enabled && !held.has(t.module) ? T.text : T.dim }}>
         <span style=${cell}>${t.name}${t.llm ? html`<span style=${{ color: T.dim }}> · llm</span>` : null}</span>
         <span style=${{ ...cell, color: T.muted }}>${t.module}</span>
         <span style=${{ ...cell, color: T.muted }}>${interval(t.interval_seconds)}</span>
         <span style=${{ ...cell, color: T.muted }}>${t.last_run ? stamp(t.last_run, fmt) : '—'}</span>
-        <span style=${{ ...cell, color: T.muted }}>${t.enabled && t.next_run ? stamp(t.next_run, fmt) : 'off'}</span>
+        <span style=${{ ...cell, color: T.muted }}>${!t.enabled ? 'off' : held.has(t.module) ? 'module off' : t.next_run ? stamp(t.next_run, fmt) : 'off'}</span>
         <span style=${{ ...cell, color: t.last_status === 'failed' ? '#cf7b7b' : T.muted }} title=${t.last_result || ''}>${t.last_status ? `${t.last_status}: ${t.last_result || ''}` : ''}</span>
         <${Toggle} on=${!!t.enabled} onFlip=${async () => { await post(`/api/tasks/${t.name}`, { enabled: !t.enabled }); app.refresh(); }} />
       </div>`)}
     </div>
-    <div style=${{ ...mono13, color: T.dim }}>nightly budget · ${budget.used} / ${budget.max} runs today · window ${budget.window}${budget.in_window ? ' · open now' : ''}</div>
+    <div style=${{ ...mono13, color: T.dim }}>nightly budget · ${budget.used} / ${budget.max} runs today · window ${budget.window} · one run per ${budget.stagger_minutes} min${budget.in_window ? ' · open now' : ''}</div>
     <div style=${{ display: 'flex', flexDirection: 'column', ...mono13 }}>
       <div style=${{ display: 'grid', gridTemplateColumns: '56px 1.6fr 0.7fr 0.7fr 0.9fr 2fr', gap: 16, height: 28, alignItems: 'center', padding: '0 12px', color: T.muted }}>
         <span>job</span><span>task</span><span>kind</span><span>status</span><span>queued</span><span>result</span></div>

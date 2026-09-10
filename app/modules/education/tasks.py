@@ -1,4 +1,7 @@
-"""Scheduled, read-only LLM work: top the due queue up with one new question per topic that has waited longest."""
+"""Scheduled, read-only LLM work: `per_night` new questions every night, one for each topic that has waited longest.
+
+The queue is never topped up to a size: a night that finds unanswered questions still writes its full count.
+"""
 
 from __future__ import annotations
 
@@ -7,16 +10,10 @@ from app.modules.education import questions
 from app.runner import Skipped
 from app.store import now_iso
 
-OPEN = "graded_at IS NULL AND skipped_at IS NULL"
-
 
 async def generate(ctx) -> str:
     store = ctx.store
-    open_n = store.scalar(f"SELECT COUNT(*) FROM questions WHERE {OPEN}")
-    need = ctx.config.education.queue_size - open_n
-    if need <= 0:
-        return Skipped(f"queue full: {open_n} due")
-    topics = questions.waiting_topics(store, need)
+    topics = questions.waiting_topics(store, ctx.config.education.per_night)
     if not topics:
         return Skipped("no topics")
     try:

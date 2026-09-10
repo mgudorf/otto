@@ -267,7 +267,7 @@ def test_email_actions(email_config, fake):
 
 def test_email_triage(store, email_config, fake):
     store.migrate((EMAIL_DIR / "schema.sql").read_text("utf-8"))
-    cfg = dataclasses.replace(email_config, nightly=Nightly(window="00:00-23:59", max_sessions=3, max_turns=5, max_minutes=1))
+    cfg = dataclasses.replace(email_config, nightly=Nightly(window="00:00-23:59", max_sessions=3, max_turns=5, max_minutes=1, stagger_minutes=15))
     calls = []
 
     async def main():

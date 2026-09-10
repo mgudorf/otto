@@ -67,9 +67,10 @@ The UI is a view of daemon state. Pages render from the store and poll or subscr
 |---|---|---|
 | Long-running, at logon, fixed port | `python -m app setup` registers a logon task running `pythonw -m app.daemon` with the repo as working directory, no time limit, restart on failure; `[server]` in `config.toml` | — |
 | One instance, restart on code change | `/health` returns `rev`, a sha256 of `app/**` and `config.toml`. The launcher compares it with the working tree; on mismatch it posts `/admin/restart`: the daemon drains running jobs up to `drain_seconds`, spawns a detached replacement, exits; the replacement waits for the port to free. Direct starts wait the same way and give up if the port stays busy | `test_revision_changes_with_content` |
-| Daemon owns the clock | `Scheduler.sync_tasks` turns manifest schedules into `tasks` rows and deletes rows no manifest declares; `tick` every `tick_seconds` submits enabled tasks whose `next_run` passed. LLM tasks become due only inside `[nightly] window` and are re-armed for the next window start | `test_sync_creates_rows_and_removes_orphans`, `test_tick_submits_due_and_advances`, `test_window_logic` |
+| Daemon owns the clock | `Scheduler.sync_tasks` turns manifest schedules into `tasks` rows and deletes rows no manifest declares; `tick` every `tick_seconds` submits enabled tasks whose `next_run` passed. LLM tasks become due only inside `[nightly] window` and are re-armed for the next window start; only one goes per `stagger_minutes`, the rest stay due for a later tick, so two nightly runs never overlap | `test_sync_creates_rows_and_removes_orphans`, `test_tick_submits_due_and_advances`, `test_window_logic`, `test_nightly_runs_are_staggered` |
 | One job runner | `Runner`: one queue, `max_concurrent` workers, one lock per `resource`, a `jobs` row per job (`scheduled`, `action`, `session`) with `job_logs`. Routes run user actions through `run_action` and await the result, or `submit` and return the job id when the page streams the outcome. Rows left `queued` or `running` by a crash are marked failed at start | `test_same_resource_serializes_and_different_overlap`, `test_cap_holds` |
-| Every scheduled task visible | `tasks(name, module, interval_seconds, resource, llm, enabled, last_run, next_run, last_status, last_result)`; Activity renders it with the toggle (`POST /api/tasks/{name}`) | `test_disabled_and_missing_module` |
+| Every scheduled task visible | `tasks(name, module, interval_seconds, resource, llm, enabled, last_run, next_run, last_status, last_result)`; Activity renders it with the toggle (`POST /api/tasks/{name}`), and shows `module off` where the module's own switch holds it | `test_disabled_and_missing_module` |
+| The owner decides what runs | `modules.<name>.scheduled`, one switch per module on Settings, held by `Scheduler.runs`: every task of a module switched off stays due and goes the tick after it is switched back on. Seeded true once at boot; nothing but the owner ever writes it | `test_module_switch_holds_every_task` |
 | Durable job records | SQLite WAL; jobs, logs, events, sessions survive restarts; nothing is replayed | `test_skipped_and_logs_and_commit` |
 | Resources in the daemon | tokens under `data/secrets/`, cursors in `cursors`, Claude runs as child processes of the daemon, Jupyter kernels as child processes held in Science's module state and shut down at lifespan exit; the page holds nothing | `test_science_reap` |
 | Idempotent, kill-safe tasks | a task's only write path is `ctx.commit(cursor=...)`: results and the new cursor in one transaction | `test_skipped_and_logs_and_commit` |
@@ -79,7 +80,7 @@ The UI is a view of daemon state. Pages render from the store and poll or subscr
 
 ### Config
 
-`config.toml` holds boot values; changing one means relaunching. Live settings are seeded from `[ui]` into the `settings` table on first start and edited on the Settings page afterwards (`PUT /api/settings`, keys `ui.*` and `modules.<name>.enabled`).
+`config.toml` holds boot values; changing one means relaunching. Live settings are seeded from `[ui]` into the `settings` table on first start and edited on the Settings page afterwards (`PUT /api/settings`, keys `ui.*` and `modules.<name>.enabled`; a value outside its range is a 400: refresh 5 to 3600 s, rows per page 10 to 200, `ui.side_max` 280 to 900 px, `ui.middle_max` 640 to 3000 px).
 
 | Section | Keys |
 |---|---|
@@ -87,11 +88,11 @@ The UI is a view of daemon state. Pages render from the store and poll or subscr
 | scheduler | tick_seconds, max_concurrent, drain_seconds |
 | claude | binary, model (`default` keeps the CLI's own choice), sessions_kept_days |
 | data | db, workspace (working directory of every Claude run; file tools are confined to it) |
-| nightly | window (local time), max_sessions per day, max_turns and max_minutes per run |
+| nightly | window (local time), max_sessions per day (at least one per nightly LLM task), max_turns and max_minutes per run, stagger_minutes between one nightly run and the next |
 | business | leads_per_run |
 | memory | suggest_lookback_days, suggest_max |
 | science | python (the interpreter every kernel runs on), root (notebooks and scripts, under the workspace, created at boot), idle_minutes, tool_output_chars |
-| education | queue_size, start_difficulty, flow_low, flow_high |
+| education | per_night, start_difficulty, flow_low, flow_high |
 | database | max_rows, max_seconds |
 | email | client_file, token_file, backfill_days, triage_batch |
 | web_search | max_findings |
@@ -185,11 +186,11 @@ Built:
 | Piece | Current state |
 |---|---|
 | Tables | `email_messages(id Gmail id, thread_id, from_name, from_addr, subject, snippet, internal_date, labels JSON, body_text)`, `email_triage(message_id, priority high\|normal\|low, reason, source)`, `email_fts` (FTS5, trigger-maintained) |
-| Routes | `left` (query, chips All/Unread/Flagged/Priority, page), `blank` (mailbox counts), `item/{id}` (fetches and stores the body on first open), `action/{archive\|trash\|read\|unread\|star\|unstar}` on one id or on every message matching the current query and chip |
+| Routes | `left` (query, chips All/Unread/Flagged/Priority over the inbox: `UNREAD`, `STARRED`, triage `high`; page), `blank` (mailbox counts), `item/{id}` (fetches and stores the body on first open), `action/{archive\|trash\|read\|unread\|star\|unstar}` on one id or on every message matching the current query and chip |
 | Hooks | `numbers` (unread), `today` (inbox mail of the local day), `item`, `context` (counts, last sync, ten newest, high-priority with reasons) |
 | Tools | read: `email_search`, `email_get`, `email_triage`; write: `email_flag`, which writes Otto's triage row. No tool reaches Gmail |
-| Schedules | `email.sync` every 5m on resource `gmail`: first a `backfill_days` backfill committed in pages of 100 under a resumable cursor, then Gmail history from `email.history`. `email.triage` every 24h inside the nightly window prioritizes `triage_batch` untriaged inbox messages |
-| Gmail | `GmailRead` for tasks and body fetches; `GmailWrite` adds `batchModify` and is reachable only from action routes. A quota refusal pauses every call in flight together and retries |
+| Schedules | `email.sync` every 5m on resource `gmail`: first a `backfill_days` backfill committed in pages of 100 under the cursor `email.backfill` (`<historyId>\|<started>`, resumed by the next run), then Gmail history from `email.history`; a 404 on that id (expired) backfills again. `email.triage` every 24h inside the nightly window prioritizes `triage_batch` untriaged inbox messages, cursor `email.triage` |
+| Gmail | `gmail.py`: the token, refreshed in place; `GmailRead` (profile, list, get, history) for tasks and body fetches; `GmailWrite` adds `batchModify` and is reachable only from action routes; the `consent` command. A quota refusal (429, or 403 naming the quota) pauses every call in flight together for 61 s and retries up to five times |
 | Page | LEFT: search, chips, rows by day as `sender: subject`; MIDDLE blank: counts and the bulk bar over the current filter; MIDDLE selected: sender, body, priority and reason, `Archive`, `Trash`, read/unread, star/unstar, `Open in Gmail` |
 | Departures | `Priority` chip added; no `Reply` (no compose) and no `Snooze` (no API); the blank state is unspecified in the artboard |
 
@@ -231,11 +232,12 @@ Built:
 | Piece | Current state |
 |---|---|
 | Tables | `topics(name, description, difficulty 1-5, retired_at)`, `questions(topic_id, title, topic_tag, premise (the setup: markdown, math in LaTeX), difficulty, source nightly\|session, started_at, graded_at, skipped_at, score)`, `question_parts(question_id, n, text, rubric, answer, answered_at, verdict correct\|partial\|incorrect, score 0-100, note (the explanation), graded_at)`, `education_feedback` (the owner's words, unchanged). The package's `setup` adds `topic_tag`, `rubric`, `answer`, `answered_at` and `verdict` to a database whose tables predate them |
+| Files | `questions.py` (the shared reads, the generator prompt from `prompts/generate.md`, the reply parser, `validate_question`, `unbound_acronyms`, inserts), `grading.py` (the grade prompt from `prompts/grade.md`, the parser, `apply_grade`, the tutor's `grade`) |
 | Format | one setup shared by lettered parts `(a)`, `(b)`, past `(z)` as `(aa)`; each part one ask with a hidden rubric; a rubric leaves the server only to the tutor and only once its part is graded |
-| Routes | `left` (the due queue, then history by day, search, page), `blank` (progress per topic, add-topic box), `item/{id}`, `action/answer` (stores the answer, starts its question, un-starting any other, then grades it through `oneshot` with `prompts/grade.md`, awaited; a bad reply answers 502 and keeps the answer), `action/generate` (one question for the topic that has waited longest through `oneshot` with `prompts/generate.md`, source `session`, not started), `action/{start\|skip\|add_topic\|retire_topic}`. The two LLM actions run on resource `education.llm`, the rest on `education` |
+| Routes | `left` (the due queue, then history by day, search, page), `blank` (progress per topic, add-topic box), `item/{id}`, `action/answer` (stores the answer, starts its question, un-starting any other, then grades it through `oneshot` with `prompts/grade.md`, awaited; a bad reply answers 502 and keeps the answer), `action/generate` (one question for the topic that has waited longest through `oneshot` with `prompts/generate.md`, source `session`, not started; 409 with no active topic, 502 on a rejected reply, a `warning` for a header acronym the body never binds), `action/{start\|skip\|add_topic\|retire_topic}`. The two LLM actions run on resource `education.llm`, the rest on `education` |
 | Hooks | `numbers` (due), `today` (the due queue), `item`, `context` (per topic: difficulty, graded/asked, average, recent scores; the started question with each part's prompt, answer, verdict, score, explanation and, once graded, rubric; the last five graded; recent feedback verbatim) |
 | Tools | read: `education_topics`, `education_questions`, `education_question` (rubrics on graded parts only), `education_feedback`; write: `education_add_topic`, `education_add_question(topic_id, title, topic_tag, setup, parts)` (validated like the generator's output, started at once), `education_grade(question_id, part, score 0-100, note)` (the verdict follows the score), `education_record_feedback` |
-| Schedule | `education.generate` every 24h inside the nightly window: tops the open queue up to `queue_size`, one question per topic that has waited longest, one budgeted run with `prompts/generate.md` and no tools; an element is rejected for a missing title, tag or setup, a part without a prompt and rubric, a topic not asked for, or a title already used on the topic; a header acronym the body never binds is logged and kept |
+| Schedule | `education.generate` every 24h inside the nightly window: `per_night` new questions whatever the queue already holds, one for each topic that has waited longest, one budgeted run with `prompts/generate.md` and no tools; an element is rejected for a missing title, tag or setup, a part without a prompt and rubric, a topic not asked for, or a title already used on the topic; a header acronym the body never binds is logged and kept |
 | Grading | the grader answers `{verdict, score 0-2 in halves, explanation}`; the score is stored as 0-100 with the verdict; the last part scored sets the question's mean and moves the topic's difficulty by the flow band once |
 | Flow | a new topic starts at `start_difficulty`; a completed question averaging below `flow_low` drops its topic one step, above `flow_high` raises it, floor 1 and ceiling 5 |
 | Page | LEFT: search, the `due` group, then history by day with the score as a progress bar; MIDDLE blank: `Generate` above a row per topic (difficulty, graded/asked, average, recent scores, last asked, retire) and the add-topic box; MIDDLE selected: title, topic and tag chips, the setup as markdown with LaTeX, each part with its prompt and either an answer box with `Submit` (Ctrl+Enter, `grading…` in flight) or the graded block (the answer, the score in the verdict colour, the explanation), the owner's feedback lines, `Start` or `Skip`, `Send to session` |
@@ -252,7 +254,7 @@ Built:
 | Piece | Current state |
 |---|---|
 | Tables | `memories(kind note\|link\|quote\|fact\|task, text, created_at, updated_at, done_at)`, `memory_tags`, `memory_suggestions(text unique, memory_ids, status open\|accepted\|dismissed)`, `memories_fts` (FTS5, trigger-maintained) |
-| Routes | `left` (query, chip All/Notes/Links/Quotes/Facts/Tasks, page), `blank` (kinds, counts, open suggestions), `item/{id}`, `action/{capture\|forget\|tag\|untag\|done\|suggestion}` |
+| Routes | `left` (query, chip All/Notes/Links/Quotes/Facts/Tasks, page), `blank` (kinds, counts, open suggestions), `item/{id}`, `action/{capture\|forget\|tag\|untag\|done\|suggestion}`, each validated before the job is queued |
 | Hooks | `numbers` (total), `today` (captures of the local day), `item`, `context` (counts, last ten, open suggestions) |
 | Tools | read: `memory_search`, `memory_get`, `memory_tags`, `memory_suggestions`; write: `memory_add`, `memory_tag`, `memory_suggest` (records a suggestion so it is never repeated) |
 | Schedule | `memory.suggest`, every 24h inside the nightly window, resource `memory`: proposes up to `suggest_max` action items from the last `suggest_lookback_days` days as JSON, every prior suggestion listed in the prompt, inserted with `INSERT OR IGNORE`, cursor `memory.suggest` |
@@ -269,8 +271,8 @@ Built:
 | Piece | Current state |
 |---|---|
 | Files | no tables; `science.root` is the index, walked at request time for `.ipynb` and `.py` (checkpoint and dot directories skipped), newest modification first. A file id is its posix path under the root; anything escaping the root is a 404 |
-| Kernels | one per notebook, started on the first run on `science.python` through an explicit KernelSpec (the daemon's venv cannot see the user-wide kernelspec), held in module state, shut down at daemon exit; `Restart` is a shutdown and a fresh start. `science.reap` every 5m on resource `science` shuts down kernels idle past `idle_minutes` and never touches a file |
-| Writes | the notebook on disk is the document: every edit and every finished run writes it whole (`.tmp` then replace); no save button, no dirty state |
+| Kernels | one per notebook, started on the first run on `science.python` through an explicit KernelSpec (the daemon's venv cannot see the user-wide kernelspec), held in `state.py` by the `Kernels` registry of `kernels.py` (start, execute, interrupt, restart, shutdown), shut down at daemon exit; `Restart` is a shutdown and a fresh start. `science.reap` every 5m on resource `science` shuts down kernels idle past `idle_minutes` and never touches a file |
+| Writes | the notebook on disk is the document: `notebook.py` reads it, shapes cells and outputs for the wire, and writes it whole after every edit and every finished run (`.tmp` then replace); no save button, no dirty state |
 | Routes | `left` (files by modification day, a hue dot when the kernel is live, name in mono), `blank` (kernel and file counts), `item/{id:path}` (cells with shaped outputs, the running cell's in-flight outputs replacing the saved ones; `.py` gives the source), `action/run` `{id, index}` (submitted on `kernel:<id>`, returns the job id; outputs stream over `GET /api/science/events`, then the cell's outputs and count are written to the file), `action/interrupt` (immediate, never queued), `action/{restart\|shutdown\|set_cell\|insert_cell\|delete_cell}` (queued on `kernel:<id>`), `action/new` (an empty notebook in the root, resource `science`) |
 | Hooks | `numbers` (live kernels), `today` (files modified in the local day), `item`, `context` (root, file count, each kernel's state, idle minutes and runs, the five newest files) |
 | Tools | read: `science_files`, `science_notebook` (outputs capped at `tool_output_chars`, images described), `science_cell` (uncapped), `science_kernels`; write: `science_run`, `science_set_cell`. Delete, new, interrupt, restart and shutdown are page actions only |
@@ -292,7 +294,7 @@ Built:
 | Hooks | `numbers` (active records), `today` (entries touched in the local day), `item`, `context` (the four totals and every active entry) |
 | Tools | read only: `finance_list`, `finance_get`, `finance_totals`. The manifest declares no write tools |
 | Totals | recurring and budget amounts normalize to a month as yearly / 12 and weekly x 52 / 12; accounts and holdings sum as entered |
-| Page | LEFT: search, kind chips, one group per kind with the amount in the stamp slot and a dot for active; MIDDLE blank: the totals and the capture form; MIDDLE selected: the entry, its amount history, `Update`, `End`, `Forget` |
+| Page | LEFT: search, kind chips, one group per kind with the amount in the stamp slot and a dot for active, ended entries last in their group and struck through; MIDDLE blank: the totals and the capture form; MIDDLE selected: the entry, its amount history, `Update`, `End`, `Forget` |
 | Departures | the artboard's Money page was a document list, now Business: chips are the four kinds, rows group by kind rather than day, item actions are `Update` / `End` / `Forget` |
 
 ### Business
@@ -308,7 +310,7 @@ Built:
 | Routes | `left` (query, chips per kind), `blank` (counts and the open leads), `item/{id}`, `action/{capture\|forget\|lead\|open}` |
 | Hooks | `numbers` (open leads), `today` (items created in the local day), `item`, `context` (counts, every plan verbatim, open leads, document paths) |
 | Tools | read: `business_search`, `business_get`, `business_leads`; write: `business_add`, `business_lead` |
-| Schedules | `business.index_documents` every 15m mirrors the files in `data/workspace/business/` as `document` rows and drops rows whose file is gone. `business.scout` every 24h inside the nightly window searches the web against the owner's plans and queues up to `leads_per_run` new leads, never repeating a url |
+| Schedules | `business.index_documents` every 15m mirrors the files in `data/workspace/business/` as `document` rows and drops rows whose file is gone. `business.scout` every 24h inside the nightly window searches the web against the owner's plans and queues up to `leads_per_run` new leads, never repeating a url, cursor `business.scout` |
 | Page | LEFT: search, chips, rows by day with the file extension as the leading slot for documents; MIDDLE blank: the capture box and the lead queue; MIDDLE selected: the item, its reason and url, `Accept` / `Dismiss` for a lead, `Open` for a document |
 | Departures | chips are the five kinds rather than the artboard's `Accounts, Plans, Documents` (accounts are Finance); `Summarize` and `Share` dropped; the blank state is unspecified in the artboard |
 
@@ -323,7 +325,7 @@ Built:
 | Piece | Current state |
 |---|---|
 | Table | `db_queries(name unique, sql)`: the queries the owner or the agent kept |
-| Reads | every statement runs on a second SQLite connection opened `mode=ro`, so a write fails inside SQLite and nothing parses SQL. At most `max_rows` rows come back and a statement past `max_seconds` is interrupted; an error comes back as text, not a failed job |
+| Reads | every statement runs through `query.py` (`tables`, `schema`, `run`, `explain`) on a second SQLite connection opened `mode=ro`, so a write fails inside SQLite and nothing parses SQL. At most `max_rows` rows come back and a statement past `max_seconds` is interrupted; an error comes back as text, not a failed job |
 | Routes | `left` (user tables with row counts, shadow tables of virtual tables hidden, then the saved queries), `blank` (store path and size), `action/{run\|explain\|save\|delete}` |
 | Hooks | `numbers` (store size), `context` (every table with its columns and row count) |
 | Tools | read: `db_schema`, `db_query`, `db_explain`; write: `db_save_query`, which only adds a row to `db_queries` |
@@ -345,7 +347,7 @@ Built:
 | Routes | `left` (tags by count, search, page), `graph` (the visible nodes, the edges among them, build time and totals) |
 | Hooks | `numbers` (nodes), `context` (totals, the ten largest tags, merges, prunes, curated link count) |
 | Tools | read: `graph_nodes`, `graph_neighbors`, `graph_items`; write: `graph_link`, `graph_unlink`, `graph_merge`, `graph_prune`, `graph_restore`, each rebuilding afterwards |
-| Schedule | `graph.rebuild` every 15m, plain SQL and no LLM: tags on the same item become a `cooccur` edge weighted by shared items, a curated link an edge of weight 1 |
+| Schedule | `graph.rebuild` every 15m, plain SQL and no LLM, `build.rebuild` shared with every write tool, the cursor `graph.rebuild` served as `built_at`: tags on the same item become a `cooccur` edge weighted by shared items, a curated link an edge of weight 1 |
 | Page | LEFT: search and tags by count; MIDDLE: a ring of nodes with their edges, selecting a tag lights its neighbours |
 | Departures | `extract-entities` chip dropped and `neighbors` added; ring radius comes from a hash of the tag so a node stays put when the list reorders; counts are live |
 
@@ -371,11 +373,11 @@ Built:
 
 ### Feedback (no page)
 
-A `feedback` control in the header of every page records a change the owner wants, together with the selected item when there is one. `POST /api/feedback/action/add` writes the row and queues a filing job on resource `feedback`; `retry` requeues a failed one. The filing job is a `oneshot` run with `feedback.max_turns` and the read tools `docs_list`, `docs_read` (markdown under `docs/` only) and `feedback_list`. The agent replies with one JSON object and the route writes it to the row: `kind` (bug, defect, gap or roadmap), `title`, `summary`, `tags`, `ref` (the existing `docs/` file it belongs in) and `draft` (the body ready for that file, with the owner's words quoted). A reply that is not that object marks the row `failed` with the error. `GET /api/feedback/recent` feeds the panel with the last five rows and `GET /api/feedback/list` gives every field to any agent. Nothing touches the repo; the row is the record.
+A `feedback` control in the header of every page records a change the owner wants, together with the selected item when there is one. `POST /api/feedback/action/add` writes the row and queues a filing job on resource `feedback`; `retry` requeues a failed one. The filing job is a `oneshot` run with `feedback.max_turns` and the read tools `docs_list`, `docs_read` (markdown under `docs/` only) and `feedback_list`. The agent replies with one JSON object and the route writes it to the row: `kind` (bug, defect, gap or roadmap), `title`, `summary`, `tags`, `ref` (the existing `docs/` file it belongs in) and `draft` (the body ready for that file, with the owner's words quoted). A reply that is not that object marks the row `failed` with the error. `GET /api/feedback/recent` feeds the panel with the last five rows and `GET /api/feedback/list` gives every field to any agent. Nothing touches the repo; the row is the record. Table `feedback(created_at, page, item_module, item_id, item_text, text (the owner's words, verbatim), status queued, filed or failed, kind, title, summary, tags JSON, ref, draft, filed_at, job_id, error)`. The manifest sets `page=False`, so there is no rail entry; the agent's Current state block names the built modules, the roadmap plans on disk and the count of files in each finding folder.
 
 ### Activity and Settings (shell pages)
 
-Activity: LEFT is the `events` log by day with a chip per module; MIDDLE blank state is the task table with its toggles, the nightly budget line, and the last fifty jobs; selecting an event shows its job's result, error and log. Settings: General (start page, refresh, time format, rows per page, side panel max, middle max), Modules (a toggle per module; a failed module shows its error), Claude (binary, model, agents dir, workspace, sessions kept, background jobs; read-only), Data (database path and size, last backup, `Back up now` through the SQLite backup API into `data/backups/`, `Vacuum`).
+Activity: LEFT is the `events` log by day with a chip per module; MIDDLE blank state is the task table with its toggles, the nightly budget line (runs used, window, the stagger gap), and the last fifty jobs; selecting an event shows its job's result, error and log. Settings: General (start page, refresh, time format, rows per page, side panel max, middle max), Modules (two toggles per module: `shown` in the rail and `runs` for its scheduled tasks, a dash where the module has none; a failed module shows its error), Claude (binary, model, agents dir, workspace, sessions kept, background jobs; read-only), Data (database path and size, last backup, `Back up now` through the SQLite backup API into `data/backups/`, `Vacuum`).
 
 ## UI
 

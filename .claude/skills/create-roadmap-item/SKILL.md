@@ -22,9 +22,11 @@ git worktree. Assumes `main` is checked out and clean, and that `docs/ARCHITECTU
    - The item is an existing module: `<slug>` is that module's directory name copied
      exactly, spelling and all — `home`, not `homepage`; `web_search` keeps its underscore.
    - A `docs/roadmap/` directory already covers this item under any spelling: write into
-     that directory and update the `PLAN.md` in it. Never a suffixed sibling
-     (`-v1`, `-v2`, `-new`, `-rev`), never a second plan for one item. A rewrite, a later
-     version and a course correction are all edits to the plan that is already there.
+     that directory. A `PLAN.md` already there is never edited: the new plan replaces it
+     whole (`git rm` the old one first, after the owner's yes), carrying forward only what
+     the owner still wants. Never a suffixed sibling (`-v1`, `-v2`, `-new`, `-rev`), never
+     two plans for one item. A rewrite, a later version and a course correction are all a
+     new plan.
    - Nothing matches and the item is not a module: a new kebab-case feature slug
      (`session-tabs`), `mkdir -p docs/roadmap/<slug>`, and say in the reply that the
      directory is new.

@@ -46,11 +46,19 @@ export function Middle({ app, data, fmt }) {
     </div>`;
   }
   if (section === 'Modules') {
+    // shown = the rail entry; runs = its scheduled tasks. Both are the owner's; nothing else writes them.
+    const cols = '1fr 52px 52px';
+    const dash = html`<span style=${{ ...mono13, color: T.dim, textAlign: 'right' }}>—</span>`;
     return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 2, maxWidth: 560 }}>
-      ${shell.modules.filter((m) => m.name !== 'home').map((m) => html`<div key=${m.name} class="trow" style=${{ display: 'flex', alignItems: 'center', gap: 10, height: 36, padding: '0 12px', borderRadius: 6 }}>
-        <span style=${{ width: 6, height: 6, borderRadius: 3, background: m.hue }} />${m.title}
-        ${m.error ? html`<span style=${{ ...mono13, color: '#cf7b7b', marginLeft: 'auto', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title=${m.error}>failed to load</span>`
-          : html`<${Toggle} on=${m.enabled} onFlip=${() => save({ [`modules.${m.name}.enabled`]: !m.enabled })} />`}
+      <div style=${{ display: 'grid', gridTemplateColumns: cols, gap: 8, alignItems: 'center', height: 28, padding: '0 12px', ...mono13, color: T.dim }}>
+        <span></span><span style=${{ textAlign: 'right' }}>shown</span><span style=${{ textAlign: 'right' }}>runs</span></div>
+      ${shell.modules.filter((m) => m.name !== 'home').map((m) => html`<div key=${m.name} class="trow" style=${{ display: 'grid', gridTemplateColumns: cols, gap: 8, alignItems: 'center', height: 36, padding: '0 12px', borderRadius: 6 }}>
+        <span style=${{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          <span style=${{ width: 6, height: 6, borderRadius: 3, background: m.hue, flex: '0 0 auto' }} />${m.title}
+          ${m.error && html`<span style=${{ ...mono13, color: '#cf7b7b', marginLeft: 'auto', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title=${m.error}>failed to load</span>`}
+        </span>
+        ${m.error ? dash : html`<span style=${{ display: 'flex' }}><${Toggle} on=${m.enabled} onFlip=${() => save({ [`modules.${m.name}.enabled`]: !m.enabled })} /></span>`}
+        ${m.error || !m.tasks ? dash : html`<span style=${{ display: 'flex' }}><${Toggle} on=${m.scheduled} onFlip=${() => save({ [`modules.${m.name}.scheduled`]: !m.scheduled })} /></span>`}
       </div>`)}
     </div>`;
   }

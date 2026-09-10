@@ -85,12 +85,13 @@ def shell(request: Request) -> dict:
         modules.append({
             "name": m.name, "title": m.manifest.title, "hue": m.manifest.hue, "icon": m.manifest.icon,
             "order": m.manifest.order, "enabled": settings.get(f"modules.{m.name}.enabled", True) is not False,
+            "scheduled": settings.get(f"modules.{m.name}.scheduled", True) is not False, "tasks": len(m.manifest.schedules),
             "agent": {"placeholder": a.placeholder, "skills": list(a.skills)} if a else None, "error": None,
         })
     for name, err in st.registry.errors.items():
         modules.append({
             "name": name, "title": name, "hue": "#5f636c", "icon": "", "order": 98, "enabled": False,
-            "agent": None, "error": err.strip().splitlines()[-1][:300],
+            "scheduled": False, "tasks": 0, "agent": None, "error": err.strip().splitlines()[-1][:300],
         })
     c = st.config
     return {
@@ -176,8 +177,8 @@ def settings_put(request: Request, body: dict = Body(...)) -> dict:
                 raise HTTPException(400, "time format must be 24h or 12h")
             if key == "ui.start_page" and value not in st.registry.modules and value not in ("activity", "settings"):
                 raise HTTPException(400, "unknown start page")
-        elif key.startswith("modules.") and key.endswith(".enabled"):
-            value = bool(value)
+        elif key.startswith("modules.") and key.rsplit(".", 1)[-1] in ("enabled", "scheduled"):
+            value = bool(value)   # .enabled = shown in the rail; .scheduled = its tasks run
         else:
             raise HTTPException(400, f"unknown setting {key}")
         store.set_setting(key, value)

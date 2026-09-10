@@ -197,11 +197,12 @@ def test_generate_task(config, monkeypatch):
         # a budget refusal ends as skipped, not failed
         monkeypatch.setattr(st.claude, "budget", lambda: {"used": 3, "max": 3, "window": "02:00-05:00", "in_window": True})
         assert "budget" in str(await run_once())
-        # a full queue never spends a run
-        for i in range(config.education.queue_size):
+        # unanswered questions never hold the night back: the run goes and writes anyway
+        monkeypatch.setattr(st.claude, "budget", lambda: {"used": 0, "max": 5, "window": "02:00-05:00", "in_window": True})
+        for i in range(config.education.per_night):
             add_question(store, 1, f"filler {i}", "tag", "p", PARTS, "nightly", False)
-        assert str(await run_once()).startswith("queue full")
-        assert [r["status"] for r in store.query("SELECT status FROM jobs ORDER BY id")] == ["skipped", "done", "skipped", "skipped"]
+        assert str(await run_once()).startswith("1 new question(s) for Physics")
+        assert [r["status"] for r in store.query("SELECT status FROM jobs ORDER BY id")] == ["skipped", "done", "skipped", "done"]
         assert store.scalar("SELECT COUNT(*) FROM events WHERE verb = 'failed'") == 0
         await st.runner.drain(1)
         store.close()

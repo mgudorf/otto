@@ -4,7 +4,7 @@
 - Found: 2026-09-07, sync-architecture
 - Status: open
 
-What happens: outside the nightly window or past `max_sessions`, `run_task` writes a `skipped` row to `llm_runs` and raises `BudgetExceeded`; the runner records the job as `failed` with a traceback and writes a `failed` event, so Activity shows a refusal as a failure. `app/modules/education/tasks.py` `generate` is the only task that catches it and returns `Skipped`; the other four do not. With five nightly LLM tasks against three runs a day, a refusal is due every night once `docs/bugs/budget-counts-finished-runs-only.md` is fixed.
+What happens: outside the nightly window or past `max_sessions`, `run_task` writes a `skipped` row to `llm_runs` and raises `BudgetExceeded`; the runner records the job as `failed` with a traceback and writes a `failed` event, so Activity shows a refusal as a failure. `app/modules/education/tasks.py` `generate` is the only task that catches it and returns `Skipped`; the other four do not. `[nightly] max_sessions` is now five, one per nightly LLM task, so a refusal is no longer due every night; it still reads as a failure whenever one happens.
 
 Expected: the job reads `skipped` with the reason and no `failed` event is written.
 

@@ -42,6 +42,7 @@ class Nightly:
     max_sessions: int
     max_turns: int
     max_minutes: int
+    stagger_minutes: int
 
     def bounds(self) -> tuple[time, time]:
         start, end = self.window.split("-")
@@ -69,7 +70,7 @@ class Science:
 
 @dataclass(frozen=True)
 class Education:
-    queue_size: int
+    per_night: int
     start_difficulty: int
     flow_low: int
     flow_high: int

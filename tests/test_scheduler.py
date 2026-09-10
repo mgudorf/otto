@@ -3,7 +3,7 @@ from datetime import datetime, time, timedelta
 from app.modules import Manifest, Module, Registry, Schedule
 from app.runner import Runner
 from app.scheduler import Scheduler, in_window, next_window_start
-from app.store import iso, now, parse
+from app.store import iso, now, now_iso, parse
 from tests.conftest import run
 
 
@@ -59,6 +59,40 @@ def test_tick_submits_due_and_advances(store, config):
     row = store.one("SELECT * FROM tasks WHERE name = 'a.t1'")
     assert parse(row["next_run"]) > now() + timedelta(seconds=50)
     assert store.one("SELECT * FROM jobs")["status"] == "queued"
+
+
+def test_nightly_runs_are_staggered(store, config):
+    """Two nightly tasks due at the same moment go one at a time; a plain task is never held up."""
+    reg = fake_registry(("a", (Schedule("t1", "24h", llm=True), Schedule("t2", "24h", llm=True), Schedule("plain", "60s"))))
+    runner = Runner(store, config, reg, None, 1)
+    sched = Scheduler(store, config, reg, runner)
+    sched.sync_tasks()
+    store.execute("UPDATE tasks SET next_run = ? WHERE llm = 1", (iso(now() - timedelta(minutes=1)),))
+
+    async def main():
+        assert sched.tick() == ["a.t1", "a.plain"]   # t2 is held, and stays due
+        assert sched.tick() == []
+        assert store.one("SELECT next_run FROM tasks WHERE name = 'a.t2'")["next_run"] < now_iso()
+        store.execute("UPDATE jobs SET queued_at = ?", (iso(now() - timedelta(minutes=config.nightly.stagger_minutes + 1)),))
+        assert sched.tick() == ["a.t2"]              # the gap has passed
+
+    run(main())
+
+
+def test_module_switch_holds_every_task(store, config):
+    """The owner's per-module switch on Settings holds the module back; its rows stay due for the tick after."""
+    reg = fake_registry(("a", (Schedule("t1", "60s"),)))
+    runner = Runner(store, config, reg, None, 1)
+    sched = Scheduler(store, config, reg, runner)
+    sched.sync_tasks()
+
+    async def main():
+        store.set_setting("modules.a.scheduled", False)
+        assert sched.tick() == []
+        store.set_setting("modules.a.scheduled", True)
+        assert sched.tick() == ["a.t1"]
+
+    run(main())
 
 
 def test_disabled_and_missing_module(store, config):
