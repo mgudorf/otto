@@ -25,7 +25,7 @@ Otto, a personification of the word "auto" is a PERSONALIZED dashboard applicati
 3. `app/static/` is the browser side, no build step. `shell.js` is the frame and the `PAGES` map, `pages/<name>.js` one file per module page plus `activity.js` and `settings.js`, `rows.js` tokens and shared components, `session.js` the agent pane, `vendor/` pinned copies of Preact, htm, marked, KaTeX and the fonts.
 4. `tests/` is one file per module plus `test_app.py`, `test_platform.py`, `test_runner.py` and `test_scheduler.py` for the platform. `conftest.py` mocks the Claude and Gmail seams so the suite runs offline.
 5. `data/` is runtime state, gitignored: the SQLite file, the daemon log, `secrets/` for the Google OAuth files, `workspace/` as the working directory every Claude session is confined to.
-6. `.claude/skills/` and `.claude/agents/` are the repo's own workflows: roadmap items, architecture sync, worktree triage and vacuum, finding consolidation.
+6. `.claude/skills/` and `.claude/agents/` are the repo's own workflows: roadmap items, architecture sync, worktree triage, merge order and vacuum, finding consolidation.
 
 ## Documentation
 
