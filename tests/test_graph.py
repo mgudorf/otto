@@ -28,7 +28,7 @@ class FakeServer:
 
 
 def seed(store):
-    """Three memories and two sessions; only s1 is closed. Tags vary in case and whitespace on purpose."""
+    """Three memories and three sessions: s1 closed and tagged, s2 a live pane (no tags yet), s3 a Chat conversation tagged while open."""
     store.migrate(MEMORY_SCHEMA)
     store.migrate(GRAPH_SCHEMA)
     ts = now_iso()
@@ -38,7 +38,8 @@ def seed(store):
         for mid, tag in [(1, "Python"), (1, "sqlite"), (2, "python "), (2, "SQLite"), (3, "ledger")]:
             conn.execute("INSERT INTO memory_tags(memory_id, tag) VALUES (?, ?)", (mid, tag))
         conn.execute("INSERT INTO sessions(id, module, opened_at, closed_at, title, tags) VALUES ('s1', 'memory', ?, ?, 'one', ?)", (ts, ts, json.dumps(["SQLITE", "tax"])))
-        conn.execute("INSERT INTO sessions(id, module, opened_at, tags) VALUES ('s2', 'memory', ?, ?)", (ts, json.dumps(["open"])))
+        conn.execute("INSERT INTO sessions(id, module, opened_at) VALUES ('s2', 'memory', ?)", (ts,))
+        conn.execute("INSERT INTO sessions(id, module, opened_at, title, tags) VALUES ('s3', 'chat', ?, 'three', ?)", (ts, json.dumps(["tax", "Chat"])))
 
 
 def nodes(store):
@@ -56,12 +57,12 @@ def snapshot(store):
 def test_rebuild_from_sources(store):
     seed(store)
     with store.tx() as conn:
-        assert build.rebuild(conn) == (4, 2)
+        assert build.rebuild(conn) == (5, 3)
     n = nodes(store)
-    assert set(n) == {"python", "sqlite", "ledger", "tax"}
+    assert set(n) == {"python", "sqlite", "ledger", "tax", "chat"}
     assert (n["sqlite"]["count"], n["sqlite"]["memories"], n["sqlite"]["sessions"]) == (3, 2, 1)
-    assert n["python"]["count"] == 2 and n["tax"]["sessions"] == 1
-    assert edges(store) == {("python", "sqlite", "cooccur"): 2, ("sqlite", "tax", "cooccur"): 1}
+    assert n["python"]["count"] == 2 and n["tax"]["sessions"] == 2 and n["chat"]["sessions"] == 1
+    assert edges(store) == {("python", "sqlite", "cooccur"): 2, ("sqlite", "tax", "cooccur"): 1, ("chat", "tax", "cooccur"): 1}
     before = (nodes(store), edges(store))
     with store.tx() as conn:
         build.rebuild(conn)
@@ -78,7 +79,7 @@ def test_overlays_and_sources_untouched(store, config):
     t = full.tools
     assert t["graph_merge"]("Ledger", "tax")["ok"]
     n = nodes(store)
-    assert "ledger" not in n and n["tax"]["count"] == 2 and n["tax"]["memories"] == 1
+    assert "ledger" not in n and n["tax"]["count"] == 3 and n["tax"]["memories"] == 1
     assert t["graph_prune"]("python")["ok"]
     assert "python" not in nodes(store) and ("python", "sqlite", "cooccur") not in edges(store)
     assert t["graph_link"]("tax", "sqlite", "same ledger work")["ok"]
@@ -89,7 +90,7 @@ def test_overlays_and_sources_untouched(store, config):
     assert "error" in t["graph_merge"]("tax", "ledger")  # would make a cycle
     assert t["graph_unlink"]("sqlite", "tax")["ok"] and ("sqlite", "tax", "link") not in edges(store)
     items = read.tools["graph_items"]("TAX")
-    assert [m["id"] for m in items["memories"]] == [3] and [s["id"] for s in items["sessions"]] == ["s1"]
+    assert [m["id"] for m in items["memories"]] == [3] and [s["id"] for s in items["sessions"]] == ["s1", "s3"]
     assert {e["neighbor"] for e in read.tools["graph_neighbors"]("sqlite")} == {"python", "tax"}
     assert snapshot(store) == sources_before
     assert [e["verb"] for e in store.query("SELECT verb FROM events ORDER BY id")] == ["merged", "pruned", "linked", "restored", "unlinked"]

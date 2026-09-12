@@ -104,7 +104,7 @@ def test_session_turn_and_clear(config):
             assert roles == [("user", None, None), ("tool", "memory_search", "done"), ("model", None, None)]
             assert s["session"]["cli_started"] == 1 and s["busy"] is False
             args = calls[0]["args"]
-            assert "--session-id" in args and "--restricted" in args and "--permission-prompts" in args
+            assert "--session-id" in args and "--restricted" in args and "--permission-prompts" in args and "--include-partial-messages" in args
             assert "--tools" in args and "Write" not in args[args.index("--tools") + 1]
             assert "mcp__otto__memory_add" in args[args.index("--allowedTools") + 1]
             assert not any(k.startswith("ANTHROPIC_") or k.startswith("CLAUDECODE") for k in calls[0]["env"])
@@ -207,6 +207,13 @@ def test_home_review_group(config):
             groups = (await c.get("/api/home/left")).json()["groups"]
             assert all(g["label"] != "Review" for g in groups)
             assert "(queued " not in home.context(st.store, st.registry)
+            # a module without a page still queues for the owner; its header cannot navigate
+            quiet = queue_module(pending, [])
+            quiet.manifest = Manifest(name="quiet", title="Quiet", hue="#d9915b", icon="", order=9, page=False)
+            st.registry.modules["quiet"] = quiet
+            groups = (await c.get("/api/home/left")).json()["groups"]
+            assert groups[0]["module"] == "quiet" and groups[0]["label"] == "Review" and groups[0]["page"] is False
+            assert next(g for g in groups if g["module"] == "memory")["page"] is True
         await app.state.runner.drain(1)
         app.state.store.close()
 
@@ -237,7 +244,8 @@ def test_feedback_end_to_end(config):
         app = build(config, spawn_fn=spying([FILED]))
         await app.state.runner.start()
         async with client_for(app) as c:
-            assert "feedback" not in {m["name"] for m in (await c.get("/api/shell")).json()["modules"]}
+            shell = (await c.get("/api/shell")).json()
+            assert next(m for m in shell["modules"] if m["name"] == "feedback")["page"] is False   # listed for hue and icon, kept off the rail
             assert (await c.post("/api/feedback/action/add", json={"page": "memory", "text": "  "})).status_code == 400
             r = await c.post("/api/feedback/action/add", json={"page": "memory", "text": "forget should also clear the inspector", "item": {"module": "memory", "id": 7, "text": "buy sqlite book"}})
             assert r.status_code == 200, r.text

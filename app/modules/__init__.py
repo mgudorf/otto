@@ -10,6 +10,7 @@ A module is a package under app/modules/<name>/ with:
   agent.md      system prompt for the module's Claude session (optional)
   setup(config) / async shutdown()   on the package, for modules that own process resources (optional)
 A module that fails to import or set up is recorded and skipped; the rest of the app keeps running.
+Its page, app/static/pages/<name>.js, exports load, meta, Left, Middle and optionally Right, which replaces the session pane.
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ class Agent:
     skills: tuple[str, ...] = ()       # chips shown in the session pane
     read_tools: tuple[str, ...] = ()   # MCP tool names on the read server
     write_tools: tuple[str, ...] = ()  # MCP tool names on the full server only
+    builtins: tuple[str, ...] = ()     # CLI built-ins beyond the read set (Write, Edit) on session turns; tasks never get them
     prompt: str = "agent.md"
 
 

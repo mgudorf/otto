@@ -35,7 +35,7 @@ export function Middle({ app, data, fmt }) {
   const pill = (label, on, onClick) => html`<span onClick=${onClick} style=${{ padding: '2px 8px', borderRadius: 6, fontSize: 13, cursor: 'pointer', background: on ? T.text : 'transparent', color: on ? T.ground : T.muted }}>${label}</span>`;
 
   if (section === 'General') {
-    const pages = [...shell.modules.filter((m) => !m.error && m.enabled).map((m) => m.name), 'activity', 'settings'];
+    const pages = [...shell.modules.filter((m) => !m.error && m.page && m.enabled).map((m) => m.name), 'activity', 'settings'];
     return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 2, maxWidth: 560 }}>
       ${row('Start page', html`<select value=${st['ui.start_page']} onChange=${(e) => save({ 'ui.start_page': e.target.value })}>${pages.map((p) => html`<option key=${p} value=${p}>${p}</option>`)}</select>`)}
       ${row('Refresh', html`${num('ui.refresh_seconds', 5, 3600)}<span style=${mono13}>s</span>`)}
@@ -57,7 +57,7 @@ export function Middle({ app, data, fmt }) {
           <span style=${{ width: 6, height: 6, borderRadius: 3, background: m.hue, flex: '0 0 auto' }} />${m.title}
           ${m.error && html`<span style=${{ ...mono13, color: '#cf7b7b', marginLeft: 'auto', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title=${m.error}>failed to load</span>`}
         </span>
-        ${m.error ? dash : html`<span style=${{ display: 'flex' }}><${Toggle} on=${m.enabled} onFlip=${() => save({ [`modules.${m.name}.enabled`]: !m.enabled })} /></span>`}
+        ${m.error || !m.page ? dash : html`<span style=${{ display: 'flex' }}><${Toggle} on=${m.enabled} onFlip=${() => save({ [`modules.${m.name}.enabled`]: !m.enabled })} /></span>`}
         ${m.error || !m.tasks ? dash : html`<span style=${{ display: 'flex' }}><${Toggle} on=${m.scheduled} onFlip=${() => save({ [`modules.${m.name}.scheduled`]: !m.scheduled })} /></span>`}
       </div>`)}
     </div>`;

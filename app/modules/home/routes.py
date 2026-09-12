@@ -11,20 +11,22 @@ REVIEW = "Review"
 
 
 def _enabled(store, registry) -> list:
+    """Every module with hooks, page or not: a queue waits on the owner whether or not it has a rail entry."""
     return [
         m for m in registry.ordered()
-        if m.manifest.page and m.name != "home" and store.setting(f"modules.{m.name}.enabled") is not False
+        if m.name != "home" and store.setting(f"modules.{m.name}.enabled") is not False
     ]
 
 
 def _group(m, label: str, rows: list[dict], shown: int | None) -> dict:
-    """One LEFT group. shown=None keeps every row, so a queue is never cut."""
+    """One LEFT group. shown=None keeps every row, so a queue is never cut. `page` says whether the header can navigate."""
     kept = rows if shown is None else rows[:shown]
     return {
         "module": m.name,
         "label": label,
         "hue": m.manifest.hue,
         "icon": m.manifest.icon,
+        "page": m.manifest.page,
         "count": len(rows),
         "rows": kept,
         "more": len(rows) - len(kept),
@@ -39,7 +41,7 @@ def numbers_route(request: Request) -> list[dict]:
         if m.numbers:
             n = m.numbers(st.store)
             if n:
-                out.append({"module": m.name, "hue": m.manifest.hue, "icon": m.manifest.icon, **n})
+                out.append({"module": m.name, "hue": m.manifest.hue, "icon": m.manifest.icon, "page": m.manifest.page, **n})
     return out
 
 

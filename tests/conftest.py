@@ -77,12 +77,12 @@ class FakeStdin:
 
 
 class FakeProc:
-    """Stands in for the claude CLI: emits canned stream-json lines."""
+    """Stands in for the claude CLI: emits canned stream-json lines, and stderr lines when given."""
 
-    def __init__(self, lines: list[str]):
+    def __init__(self, lines: list[str], stderr: list[str] = ()):
         self.stdin = FakeStdin()
         self.stdout = FakeStream(lines)
-        self.stderr = FakeStream([])
+        self.stderr = FakeStream(list(stderr))
         self.returncode = 0
 
     async def wait(self):
@@ -92,10 +92,10 @@ class FakeProc:
         self.returncode = -9
 
 
-def fake_spawn(lines: list[str], calls: list | None = None):
+def fake_spawn(lines: list[str], calls: list | None = None, stderr: list[str] = ()):
     async def spawn(args, cwd, env):
         if calls is not None:
             calls.append({"args": args, "cwd": cwd, "env": env})
-        return FakeProc(list(lines))
+        return FakeProc(list(lines), stderr)
 
     return spawn

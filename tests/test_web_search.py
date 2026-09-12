@@ -1,4 +1,4 @@
-"""Web Search module: topics and decisions end to end, and the capped, idempotent nightly run."""
+"""Web Search module: the topic tools, decisions from Home end to end, and the capped, idempotent nightly run."""
 
 import json
 from pathlib import Path
@@ -6,10 +6,22 @@ from pathlib import Path
 import pytest
 
 from app.daemon import build
-from app.modules.web_search import tasks
+from app.modules.web_search import tasks, tools
 from app.runner import Skipped
 from tests.conftest import run
 from tests.test_app import client_for
+
+
+class FakeServer:
+    def __init__(self):
+        self.tools = {}
+
+    def tool(self):
+        def deco(fn):
+            self.tools[fn.__name__] = fn
+            return fn
+
+        return deco
 
 
 def _seed_finding(store, i: int, ts: str) -> int:
@@ -20,7 +32,7 @@ def _seed_finding(store, i: int, ts: str) -> int:
     return cur.lastrowid
 
 
-def test_actions_write_status(config):
+def test_decisions_and_topic_tools(config):
     src = (Path(tasks.__file__).parent / "routes.py").read_text("utf-8")
     assert "claude" not in src
 
@@ -31,17 +43,22 @@ def test_actions_write_status(config):
         async with client_for(app) as c:
             shell = (await c.get("/api/shell")).json()
             ws = next(m for m in shell["modules"] if m["name"] == "web_search")
-            assert ws["hue"] == "#d9915b" and ws["agent"]["skills"] == ["findings", "topics"]
-            r = await c.post("/api/web_search/action/topic_add", json={"kind": "work", "text": "time series foundation models"})
-            assert r.status_code == 200, r.text
-            tid = r.json()["id"]
-            assert (await c.post("/api/web_search/action/topic_add", json={"kind": "work", "text": "time series foundation models"})).status_code == 409
-            assert (await c.post("/api/web_search/action/topic_add", json={"kind": "other", "text": "x"})).status_code == 400
+            assert ws["page"] is False and ws["agent"] is None and ws["hue"] == "#d9915b" and ws["tasks"] == 1
+            # topics are the Chat agent's tools; the page and its routes are gone
+            read, full = FakeServer(), FakeServer()
+            tools.register(read, full, store, config)
+            assert set(read.tools) == {"search_findings", "search_topics"}
+            assert set(full.tools) == {"search_findings", "search_topics", "search_topic_add", "search_topic_remove"}
+            tid = full.tools["search_topic_add"]("work", "time series foundation models")["id"]
+            assert "error" in full.tools["search_topic_add"]("work", "time series foundation models")
+            assert "error" in full.tools["search_topic_add"]("other", "x") and "error" in full.tools["search_topic_add"]("work", "  ")
+            assert [t["id"] for t in read.tools["search_topics"]()] == [tid]
+            for gone in ("/api/web_search/left", "/api/web_search/blank"):
+                assert (await c.get(gone)).status_code == 404
+            assert (await c.post("/api/web_search/action/topic_add", json={"kind": "work", "text": "y"})).status_code == 404
             from app.store import now_iso
 
             f1, f2 = _seed_finding(store, 1, now_iso()), _seed_finding(store, 2, now_iso())
-            blank = (await c.get("/api/web_search/blank")).json()
-            assert [t["id"] for t in blank["topics"]] == [tid] and [f["id"] for f in blank["queue"]] == [f2, f1]
             item = (await c.get(f"/api/web_search/item/{f1}")).json()
             assert [a["verb"] for a in item["actions"]] == ["agree", "disagree", "link"] and item["actions"][-1]["href"] == "https://x.example/1"
             r = await c.post("/api/web_search/action/agree", json={"id": f1})
@@ -49,21 +66,22 @@ def test_actions_write_status(config):
             assert (await c.post("/api/web_search/action/disagree", json={"id": f1})).status_code == 409
             row = store.one("SELECT status, decided_at FROM search_findings WHERE id = ?", (f1,))
             assert row["status"] == "agreed" and row["decided_at"]
-            left = (await c.get("/api/web_search/left?chip=Agreed")).json()
-            assert [r["id"] for r in left["groups"][0]["rows"]] == [f1] and left["showing"] == "1 / 1"
-            left = (await c.get("/api/web_search/left?query=finding 2")).json()
-            assert [r["id"] for r in left["groups"][0]["rows"]] == [f2]
             assert [a["verb"] for a in (await c.get(f"/api/web_search/item/{f1}")).json()["actions"]] == ["link"]
+            assert [f["id"] for f in read.tools["search_findings"]("finding 2")] == [f2]
+            assert [f["id"] for f in read.tools["search_findings"]("", status="agreed")] == [f1]
+            # Home still carries the module without a page: the Review group and the number, neither able to navigate
             home = (await c.get("/api/home/left")).json()
+            review = next(g for g in home["groups"] if g["module"] == "web_search" and g["label"] == "Review")
+            assert review["count"] == 1 and review["page"] is False and [r["id"] for r in review["rows"]] == [f2]
             assert {g["module"]: g["count"] for g in home["groups"]}["web_search"] == 2
             numbers = (await c.get("/api/home/numbers")).json()
             n = next(n for n in numbers if n["module"] == "web_search")
-            assert n["value"] == 1 and n["label"] == "to review"
+            assert n["value"] == 1 and n["label"] == "to review" and n["page"] is False
             from app.modules.web_search.routes import queue
 
             assert [r["id"] for r in queue(store)] == [f2]
-            assert (await c.post("/api/web_search/action/topic_remove", json={"id": tid})).status_code == 200
-            assert (await c.get("/api/web_search/blank")).json()["topics"] == []
+            assert full.tools["search_topic_remove"](tid) == {"id": tid} and "error" in full.tools["search_topic_remove"](tid)
+            assert read.tools["search_topics"]() == []
             ev = (await c.get("/api/events?module=web_search")).json()
             assert [e["verb"] for e in ev["events"]][:3] == ["topic removed", "agreed", "topic added"]
         await app.state.runner.drain(1)
