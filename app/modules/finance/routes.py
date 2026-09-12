@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from calendar import monthrange
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from fastapi import APIRouter, Body, HTTPException, Request
@@ -18,6 +19,8 @@ CHIPS = {"All": None, "Accounts": "account", "Recurring": "recurring", "Holdings
 LABELS = dict(zip(KINDS, ("Accounts", "Recurring", "Holdings", "Budgets")))
 SUFFIX = {"monthly": "/mo", "yearly": "/yr", "weekly": "/wk"}
 PER_MONTH = {"monthly": Decimal(1), "yearly": Decimal(1) / 12, "weekly": Decimal(52) / 12}
+PERIOD_MONTHS = {"monthly": 1, "yearly": 12}
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 RESOURCE = "finance"
 HUE = MANIFEST.hue
 
@@ -34,6 +37,23 @@ def fmt(cents: int) -> str:
     return f"{Decimal(cents) / 100:,.2f}"
 
 
+def to_date(value) -> str | None:
+    """An anchor date as YYYY-MM-DD, or None for blank. Anything else is a 400."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        raise HTTPException(400, "due date must be YYYY-MM-DD")
+
+
+def day_label(iso_date: str) -> str:
+    """05 Oct, the stamp format the rest of the UI uses."""
+    d = date.fromisoformat(iso_date)
+    return f"{d.day:02d} {MONTHS[d.month - 1]}"
+
+
 def amount_text(r: dict) -> str:
     return fmt(r["amount"]) + (f" {SUFFIX[r['cadence']]}" if r["cadence"] else "")
 
@@ -43,23 +63,49 @@ def monthly(r: dict) -> int:
     return int((Decimal(r["amount"]) * PER_MONTH[r["cadence"]]).to_integral_value(ROUND_HALF_UP))
 
 
-def _row(r: dict) -> dict:
+def _month_step(anchor: date, months: int) -> date:
+    """The anchor's day that many months on, clamped to the target month's last day."""
+    year, month = anchor.year + (anchor.month - 1 + months) // 12, (anchor.month - 1 + months) % 12 + 1
+    return date(year, month, min(anchor.day, monthrange(year, month)[1]))
+
+
+def next_due(r: dict, today: date) -> str | None:
+    """The first occurrence on or after today. Every step is measured from the anchor, so a short month
+    clamps once instead of shifting the entry for good."""
+    anchor, cadence = r["due_on"], r["cadence"]
+    if not anchor or not cadence or r["ended_at"]:
+        return None
+    a = date.fromisoformat(anchor)
+    if cadence == "weekly":
+        return (a + timedelta(weeks=max(0, -((a - today).days // 7)))).isoformat()
+    step = PERIOD_MONTHS[cadence]
+    months = (today.year - a.year) * 12 + today.month - a.month
+    periods = max(0, -(-months // step))       # whole periods from the anchor to today's month
+    d = _month_step(a, periods * step)
+    return (d if d >= today else _month_step(a, (periods + 1) * step)).isoformat()
+
+
+def _row(r: dict, today: date) -> dict:
+    """Row.stampText wins over Row.stamp, so the next occurrence rides with the amount in that one slot."""
+    nxt = next_due(r, today)
     return {
         "id": r["id"],
         "module": "finance",
         "text": r["name"],
         "stamp": r["updated_at"],
-        "stampText": amount_text(r),
+        "stampText": amount_text(r) + (f" · {day_label(nxt)}" if nxt else ""),
         "leading": {"dot": "transparent" if r["ended_at"] else HUE},
         "done": bool(r["ended_at"]),
     }
 
 
-def _group_by_kind(rows: list[dict]) -> list[dict]:
-    groups = {k: {"label": LABELS[k], "count": 0, "rows": []} for k in KINDS}
+def _group_by_kind(rows: list[dict], today: date) -> list[dict]:
+    """Recurring reads as what is due soonest; undated entries follow, ended ones stay last everywhere."""
+    by_kind: dict[str, list[dict]] = {k: [] for k in KINDS}
     for r in rows:
-        groups[r["kind"]]["rows"].append(_row(r))
-        groups[r["kind"]]["count"] += 1
+        by_kind[r["kind"]].append(r)
+    by_kind["recurring"].sort(key=lambda r: (bool(r["ended_at"]), next_due(r, today) or "9999", r["name"]))
+    groups = {k: {"label": LABELS[k], "count": len(v), "rows": [_row(r, today) for r in v]} for k, v in by_kind.items()}
     return [g for g in groups.values() if g["rows"]]
 
 
@@ -103,7 +149,7 @@ def left(request: Request, query: str = "", chip: str = "All") -> dict:
         params.append(kind)
     sql_where = ("WHERE " + " AND ".join(where)) if where else ""
     rows = store.query(f"SELECT * FROM finance_entries {sql_where} ORDER BY ended_at IS NOT NULL, name", tuple(params))
-    return {"groups": _group_by_kind(rows), "chips": list(CHIPS), "chip": chip if chip in CHIPS else "All"}
+    return {"groups": _group_by_kind(rows, date.today()), "chips": list(CHIPS), "chip": chip if chip in CHIPS else "All"}
 
 
 @router.get("/blank")
@@ -121,12 +167,15 @@ def item_route(request: Request, entry_id: int) -> dict:
 def item(store: Store, entry_id: str) -> dict:
     r = _get(store, int(entry_id))
     history = store.query("SELECT ts, amount FROM finance_amounts WHERE entry_id = ? ORDER BY ts DESC", (r["id"],))
+    nxt = next_due(r, date.today())
     actions = [{"verb": "update", "label": "Update", "primary": True}]
+    if r["kind"] == "recurring":
+        actions.append({"verb": "due", "label": "Set date"})
     if not r["ended_at"]:
         actions.append({"verb": "end", "label": "End"})
     actions.append({"verb": "forget", "label": "Forget", "confirm": "Forget this entry and its history?"})
-    text = "\n".join(p for p in (r["name"], amount_text(r), r["note"]) if p)
-    return {**r, "module": "finance", "text": text, "history": history, "actions": actions}
+    text = "\n".join(p for p in (r["name"], amount_text(r), f"next {day_label(nxt)}" if nxt else None, r["note"]) if p)
+    return {**r, "module": "finance", "text": text, "next_due": nxt, "history": history, "actions": actions}
 
 
 @router.post("/action/{verb}")
@@ -154,7 +203,11 @@ def _check_capture(store: Store, body: dict) -> dict:
         raise HTTPException(400, "empty name")
     if kind in ("recurring", "budget") and cadence not in CADENCES:
         raise HTTPException(400, "cadence must be monthly, yearly or weekly")
-    return {"kind": kind, "name": name, "cadence": cadence, "note": (body.get("note") or "").strip() or None, "amount": to_cents(body.get("amount", ""))}
+    return {
+        "kind": kind, "name": name, "cadence": cadence, "amount": to_cents(body.get("amount", "")),
+        "note": (body.get("note") or "").strip() or None,
+        "due_on": to_date(body.get("due_on")) if kind == "recurring" else None,
+    }
 
 
 def _check_update(store: Store, body: dict) -> dict:
@@ -167,12 +220,19 @@ def _check_id(store: Store, body: dict) -> dict:
     return {"row": _get(store, int(body["id"]))}
 
 
+def _check_due(store: Store, body: dict) -> dict:
+    r = _get(store, int(body["id"]))
+    if r["kind"] != "recurring":
+        raise HTTPException(400, "only a recurring payment has a due date")
+    return {"row": r, "due_on": to_date(body.get("due_on"))}
+
+
 def _capture(f: dict, ctx) -> dict:
     ts = now_iso()
     with ctx.commit() as conn:
         cur = conn.execute(
-            "INSERT INTO finance_entries(kind, name, amount, cadence, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (f["kind"], f["name"], f["amount"], f["cadence"], f["note"], ts, ts),
+            "INSERT INTO finance_entries(kind, name, amount, cadence, note, due_on, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (f["kind"], f["name"], f["amount"], f["cadence"], f["note"], f["due_on"], ts, ts),
         )
         conn.execute("INSERT INTO finance_amounts(entry_id, ts, amount) VALUES (?, ?, ?)", (cur.lastrowid, ts, f["amount"]))
     ctx.event("captured", f"{f['kind']}: {f['name']} {fmt(f['amount'])}", ref=str(cur.lastrowid))
@@ -187,6 +247,16 @@ def _update(f: dict, ctx) -> dict:
         conn.execute("INSERT INTO finance_amounts(entry_id, ts, amount) VALUES (?, ?, ?)", (r["id"], ts, amount))
     ctx.event("updated", f"{r['name']}: {fmt(r['amount'])} -> {fmt(amount)}", ref=str(r["id"]))
     return {"id": r["id"], "amount": amount}
+
+
+def _due(f: dict, ctx) -> dict:
+    """The anchor only. No amount is changing, so finance_amounts is left alone."""
+    r, due_on = f["row"], f["due_on"]
+    ts = now_iso()
+    with ctx.commit() as conn:
+        conn.execute("UPDATE finance_entries SET due_on = ?, updated_at = ? WHERE id = ?", (due_on, ts, r["id"]))
+    ctx.event("dated", f"{r['name']}: " + (f"due {due_on}" if due_on else "date cleared"), ref=str(r["id"]))
+    return {"id": r["id"], "due_on": due_on, "next_due": next_due({**r, "due_on": due_on}, date.today())}
 
 
 def _end(f: dict, ctx) -> dict:
@@ -206,8 +276,8 @@ def _forget(f: dict, ctx) -> dict:
     return {"id": r["id"]}
 
 
-CHECKS = {"capture": _check_capture, "update": _check_update, "end": _check_id, "forget": _check_id}
-ACTIONS = {"capture": _capture, "update": _update, "end": _end, "forget": _forget}
+CHECKS = {"capture": _check_capture, "update": _check_update, "due": _check_due, "end": _check_id, "forget": _check_id}
+ACTIONS = {"capture": _capture, "update": _update, "due": _due, "end": _end, "forget": _forget}
 
 
 # ---- shell hooks ---------------------------------------------------------------------------
@@ -218,7 +288,16 @@ def numbers(store: Store) -> dict:
 def today(store: Store) -> list[dict]:
     start = iso(datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0))
     rows = store.query("SELECT * FROM finance_entries WHERE updated_at >= ? ORDER BY updated_at DESC", (start,))
-    return [_row(r) for r in rows]
+    return [_row(r, date.today()) for r in rows]
+
+
+def _context_line(r: dict, today: date) -> str:
+    nxt = next_due(r, today)
+    return (
+        f"  {r['id']} {r['kind']} {r['name']}: {amount_text(r)}"
+        + (f" next {nxt}" if nxt else "")
+        + (f" ({r['note']})" if r["note"] else "")
+    )
 
 
 def context(store: Store, registry) -> str:
@@ -226,10 +305,10 @@ def context(store: Store, registry) -> str:
     lines = [
         f"Totals: accounts {fmt(t['accounts'])}; holdings {fmt(t['holdings'])}; "
         f"recurring {fmt(t['monthly_recurring'])} /mo; budgets {fmt(t['monthly_budget'])} /mo",
-        "Active entries (id kind name amount cadence):",
+        "Active entries (id kind name amount cadence, next due where the owner gave a date):",
     ]
-    active = _active(store)
-    lines += [f"  {r['id']} {r['kind']} {r['name']}: {amount_text(r)}" + (f" ({r['note']})" if r["note"] else "") for r in active] or ["  none"]
+    today = date.today()
+    lines += [_context_line(r, today) for r in _active(store)] or ["  none"]
     ended = store.query("SELECT name FROM finance_entries WHERE ended_at IS NOT NULL ORDER BY name")
     if ended:
         lines.append("Ended: " + ", ".join(r["name"] for r in ended))

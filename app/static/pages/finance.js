@@ -36,8 +36,9 @@ export function Left({ app, data, mod, fmt }) {
   </div>`;
 }
 
-const capture = { kind: 'account', name: '', amount: '', cadence: 'monthly', note: '' };
+const capture = { kind: 'account', name: '', amount: '', cadence: 'monthly', note: '', due_on: '' };
 let amountDraft = '';
+let dueDraft = { id: null, from: '', value: '' };   // follows the entry and the date it was synced from, so a write lands back in the box
 
 const input = (hue, extra = {}) => ({ height: 30, padding: '0 10px', border: 0, borderRadius: 6, background: T.panel, color: T.text, fontSize: 13, '--hue': hue, ...extra });
 
@@ -45,11 +46,15 @@ export function Middle({ app, data, mod, fmt }) {
   const hue = mod.hue;
   if (app.state.sel) {
     const item = app.state.item;
+    const stored = (item && item.due_on) || '';
+    if (item && (dueDraft.id !== item.id || dueDraft.from !== stored)) dueDraft = { id: item.id, from: stored, value: stored };
     const act = async (a) => {
       if (a.verb === 'update') {
         if (!amountDraft.trim()) return;
         await post('/api/finance/action/update', { id: item.id, amount: amountDraft.trim() });
         amountDraft = '';
+      } else if (a.verb === 'due') {
+        await post('/api/finance/action/due', { id: item.id, due_on: dueDraft.value.trim() });
       } else {
         if (a.confirm && !window.confirm(a.confirm)) return;
         await post(`/api/finance/action/${a.verb}`, { id: item.id });
@@ -65,6 +70,13 @@ export function Middle({ app, data, mod, fmt }) {
           style=${input(hue, { width: 140, fontFamily: T.mono })} />
         ${item.ended_at && html`<span style=${{ color: T.dim }}>ended ${stamp(item.ended_at, fmt)}</span>`}
       </div>
+      ${item.kind === 'recurring' && html`<div style=${{ display: 'flex', alignItems: 'center', gap: 8, ...mono13, color: T.muted }}>
+        <span>due date</span>
+        <input placeholder="YYYY-MM-DD" value=${dueDraft.value} onInput=${(e) => { dueDraft = { id: item.id, from: stored, value: e.target.value }; }}
+          onKeyDown=${(e) => { if (e.key === 'Enter') act({ verb: 'due' }); }}
+          style=${input(hue, { width: 140, fontFamily: T.mono })} />
+        <span style=${{ color: T.dim }}>one date it bills; blank clears it</span>
+      </div>`}
       <div style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         <${GroupHeader} label="history" count=${item.history.length} />
         ${item.history.map((h) => html`<div key=${h.ts} style=${{ display: 'flex', alignItems: 'center', gap: 12, height: 32, padding: '0 12px', ...mono13 }}>
@@ -78,8 +90,8 @@ export function Middle({ app, data, mod, fmt }) {
   const needsCadence = capture.kind === 'recurring' || capture.kind === 'budget';
   const save = async () => {
     if (!capture.name.trim() || !capture.amount.trim()) return;
-    await post('/api/finance/action/capture', { kind: capture.kind, name: capture.name.trim(), amount: capture.amount.trim(), cadence: capture.cadence, note: capture.note.trim() });
-    capture.name = ''; capture.amount = ''; capture.note = '';
+    await post('/api/finance/action/capture', { kind: capture.kind, name: capture.name.trim(), amount: capture.amount.trim(), cadence: capture.cadence, note: capture.note.trim(), due_on: capture.due_on.trim() });
+    capture.name = ''; capture.amount = ''; capture.note = ''; capture.due_on = '';
     app.refresh();
   };
   const onKey = (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); } };
@@ -106,6 +118,11 @@ export function Middle({ app, data, mod, fmt }) {
       ${needsCadence && html`<div style=${{ display: 'flex', alignItems: 'center', gap: 8 }}>
         ${b.cadences.map((c) => html`<span key=${c} class="ring" onClick=${() => { capture.cadence = c; app.forceUpdate(); }} style=${{ padding: '3px 9px', borderRadius: 6, fontSize: 13, cursor: 'pointer', background: capture.cadence === c ? hue : 'transparent', color: capture.cadence === c ? T.ground : T.muted }}>${c}</span>`)}
         <span style=${{ ...mono13, color: T.dim }}>${SUFFIX[capture.cadence]}</span>
+        ${capture.kind === 'recurring' && html`<div style=${{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+          <span style=${{ ...mono13, color: T.muted }}>due date</span>
+          <input placeholder="YYYY-MM-DD" value=${capture.due_on} onInput=${(e) => { capture.due_on = e.target.value; }} onKeyDown=${onKey}
+            style=${input(hue, { width: 140, fontFamily: T.mono })} />
+        </div>`}
       </div>`}
       <input placeholder="note" value=${capture.note} onInput=${(e) => { capture.note = e.target.value; }} onKeyDown=${onKey} style=${input(hue)} />
       <div style=${{ display: 'flex', alignItems: 'center', gap: 8 }}>
