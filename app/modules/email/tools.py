@@ -7,8 +7,7 @@ from __future__ import annotations
 
 import json
 
-from app.modules.email.gmail import read_client
-from app.modules.email.routes import CHIPS, HAS, PRIORITIES, _where
+from app.modules.email.routes import CHIPS, HAS, PRIORITIES, _where, body_of
 from app.store import Store, now_iso
 
 
@@ -24,21 +23,18 @@ def register(read, full, store: Store, config) -> None:
         return [{**r, "labels": json.loads(r["labels"])} for r in rows]
 
     async def email_get(id: str) -> dict:
-        """One message with its full text, fetched from Gmail on first use and cached."""
-        r = store.one("SELECT * FROM email_messages WHERE id = ?", (id,))
+        """One message with its full text and attachment names, fetched from Gmail on first use and cached. Attachments are never fetched."""
+        r = store.one(
+            "SELECT id, thread_id, from_name, from_addr, to_addr, subject, snippet, internal_date, labels FROM email_messages WHERE id = ?", (id,)
+        )
         if r is None:
             return {"error": f"no message {id}"}
-        body = r["body_text"]
-        if body is None:
-            gm = read_client(config)
-            try:
-                body = await gm.body(id)
-                store.execute("UPDATE email_messages SET body_text = ? WHERE id = ?", (body, id))
-            except Exception as e:
-                return {**r, "labels": json.loads(r["labels"]), "body_text": r["snippet"], "error": f"body unavailable: {e!r}"[:200]}
-            finally:
-                await gm.aclose()
-        return {**r, "labels": json.loads(r["labels"]), "body_text": body}
+        out = {**r, "labels": json.loads(r["labels"])}
+        try:
+            b = await body_of(store, config, id)
+        except Exception as e:
+            return {**out, "body_text": r["snippet"], "attachments": [], "error": f"body unavailable: {e!r}"[:200]}
+        return {**out, "body_text": b["text"], "attachments": b["attachments"]}
 
     def email_triage(priority: str = "high") -> list[dict]:
         """Inbox messages the triage marked with this priority (high, normal or low), newest first, with the reason."""

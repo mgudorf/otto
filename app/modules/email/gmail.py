@@ -7,10 +7,8 @@ and writes the token file. TRANSPORT is the seam tests replace with an httpx.Moc
 from __future__ import annotations
 
 import asyncio
-import base64
 import html
 import json
-import re
 import sys
 import time
 import webbrowser
@@ -22,6 +20,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
+from app.modules.email.body import extract
 from app.store import iso, now
 
 API = "https://gmail.googleapis.com/gmail/v1/users/me"
@@ -123,8 +122,9 @@ class GmailRead:
         params = [("format", "metadata"), ("metadataHeaders", "From"), ("metadataHeaders", "To"), ("metadataHeaders", "Subject")]
         return parse_metadata(await self._call("GET", f"messages/{message_id}", params=params))
 
-    async def body(self, message_id: str) -> str:
-        return extract_text(await self._call("GET", f"messages/{message_id}", params={"format": "full"}))
+    async def body(self, message_id: str) -> dict:
+        """{text, html, attachments} of one message; see body.extract."""
+        return extract(await self._call("GET", f"messages/{message_id}", params={"format": "full"}))
 
     async def history(self, start_history_id: str) -> dict:
         """Every history record since start_history_id, plus the newest history id. 404 means the id expired."""
@@ -176,32 +176,6 @@ def parse_metadata(msg: dict) -> dict:
         "internal_date": iso(stamp),
         "labels": json.dumps(msg.get("labelIds", [])),
     }
-
-
-def extract_text(msg: dict) -> str:
-    """text/plain parts joined; failing that, text/html with the tags stripped; failing that, the snippet."""
-    plain, rich = [], []
-
-    def walk(part: dict) -> None:
-        data = part.get("body", {}).get("data")
-        if data:
-            text = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4)).decode("utf-8", "replace")
-            if part.get("mimeType") == "text/plain":
-                plain.append(text)
-            elif part.get("mimeType") == "text/html":
-                rich.append(text)
-        for p in part.get("parts", []):
-            walk(p)
-
-    walk(msg.get("payload", {}))
-    if plain:
-        return "\n".join(plain).replace("\r\n", "\n").strip()
-    if rich:
-        text = re.sub(r"(?is)<(script|style).*?</\1>", "", "\n".join(rich))
-        text = re.sub(r"(?i)<br\s*/?>|</p>|</div>|</tr>", "\n", text)
-        text = html.unescape(re.sub(r"<[^>]+>", "", text))
-        return re.sub(r"\n\s*\n+", "\n\n", text).strip()
-    return html.unescape(msg.get("snippet", ""))
 
 
 # ---- consent ---------------------------------------------------------------------------------

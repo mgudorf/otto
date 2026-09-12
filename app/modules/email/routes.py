@@ -118,17 +118,29 @@ def blank(request: Request) -> dict:
 @router.get("/item/{message_id}")
 async def item_route(request: Request, message_id: str) -> dict:
     st = request.app.state
-    r = _get(st.store, message_id)
-    if r["body_text"] is None:
-        gm = read_client(st.config)
+    _get(st.store, message_id)
+    try:
+        await body_of(st.store, st.config, message_id)
+    except Exception as e:  # the snippet stands in and the fetch is retried on the next open
+        st.store.event("email", "failed", f"body of {message_id}: {e!r}"[:200], ref=message_id)
+    return item(st.store, message_id)
+
+
+async def body_of(store: Store, config, message_id: str) -> dict:
+    """The message's email_bodies row, fetched through the read client on first use. Shared with email_get."""
+    row = store.one("SELECT text, html, attachments FROM email_bodies WHERE message_id = ?", (message_id,))
+    if row is None:
+        gm = read_client(config)
         try:
-            body = await gm.body(message_id)
-            st.store.execute("UPDATE email_messages SET body_text = ? WHERE id = ?", (body, message_id))
-        except Exception as e:  # the snippet stands in and the fetch is retried on the next open
-            st.store.event("email", "failed", f"body of {message_id}: {e!r}"[:200], ref=message_id)
+            b = await gm.body(message_id)
         finally:
             await gm.aclose()
-    return item(st.store, message_id)
+        row = {"text": b["text"], "html": b["html"], "attachments": json.dumps(b["attachments"])}
+        store.execute(
+            "INSERT OR REPLACE INTO email_bodies(message_id, text, html, attachments) VALUES (?, ?, ?, ?)",
+            (message_id, row["text"], row["html"], row["attachments"]),
+        )
+    return {**row, "attachments": json.loads(row["attachments"])}
 
 
 def item(store: Store, message_id: str) -> dict:
@@ -142,12 +154,14 @@ def item(store: Store, message_id: str) -> dict:
     actions.append({"verb": "read", "label": "Mark read"} if unread else {"verb": "unread", "label": "Mark unread"})
     actions.append({"verb": "unstar", "label": "Unstar"} if starred else {"verb": "star", "label": "Star"})
     actions.append({"verb": "open", "label": "Open in Gmail", "href": f"https://mail.google.com/mail/u/0/#all/{message_id}"})
-    body = r["body_text"] if r["body_text"] is not None else r["snippet"]
+    b = store.one("SELECT text, html, attachments FROM email_bodies WHERE message_id = ?", (message_id,))
+    body = b["text"] if b else r["snippet"]
     tri = store.one("SELECT priority, reason FROM email_triage WHERE message_id = ?", (message_id,))
     return {
         "id": r["id"], "module": "email", "kind": "email",
         "subject": r["subject"], "from_name": r["from_name"], "from_addr": r["from_addr"], "to_addr": r["to_addr"],
         "created_at": r["internal_date"], "text": f"{r['subject']}\n\n{body}",
+        "body": body, "html": b["html"] if b else None, "attachments": json.loads(b["attachments"]) if b else [],
         "unread": unread, "starred": starred, "in_inbox": in_inbox,
         "priority": tri["priority"] if tri else None, "reason": tri["reason"] if tri else None,
         "actions": actions,
