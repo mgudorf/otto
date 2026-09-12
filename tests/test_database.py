@@ -1,4 +1,4 @@
-"""Database module: the read-only connection, run/explain/save through the app, and the tool split."""
+"""Database module: both executors, run/explain/save through the app, and the tool split."""
 
 import dataclasses
 import sqlite3
@@ -16,18 +16,46 @@ def client_for(app):
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
 
-def test_read_only_refuses_writes(store):
+ENDLESS = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT COUNT(*) FROM c"
+
+
+def test_read_refuses_writes(store):
     conn = store.read_only()
     assert conn.execute("SELECT 1").fetchone() == (1,)
     with pytest.raises(sqlite3.OperationalError, match="readonly"):
         conn.execute("INSERT INTO cursors(key, value) VALUES ('k', 'v')")
-    assert "readonly" in query.run(store, "INSERT INTO cursors(key, value) VALUES ('k', 'v')", 10, 1)["error"]
+    assert "readonly" in query.read(store, "INSERT INTO cursors(key, value) VALUES ('k', 'v')", 10, 1)["error"]
     assert store.scalar("SELECT COUNT(*) FROM cursors") == 0
-    endless = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT COUNT(*) FROM c"
-    assert query.run(store, endless, 10, 0.1)["error"].startswith("interrupted")
-    assert query.run(store, "SELECT 1; SELECT 2", 10, 1)["error"]
-    assert query.run(store, "   ", 10, 1)["error"] == "empty statement"
+    assert query.read(store, ENDLESS, 10, 0.1)["error"].startswith("interrupted")
+    assert query.read(store, "   ", 10, 1)["error"] == "empty statement"
+    assert query.read(store, "SELECT 1; SELECT 2", 10, 1)["rows"] == [[2]]  # the last statement that returned rows
     assert conn.execute("SELECT 1").fetchone() == (1,)  # still usable after an interruption
+
+
+def test_statements_split_on_real_ends():
+    assert query.statements("select ';'; select 2") == ["select ';';", "select 2"]
+    assert query.statements("  \n ") == []
+
+
+def test_execute_writes(store):
+    r = query.execute(store, "insert into cursors(key, value) values ('a', '1'), ('b', '2')", 10, 5)
+    assert r["changed"] == 2 and r["ddl"] is False and r["columns"] == []
+    r = query.execute(store, "update cursors set value = '9'; select key, value from cursors order by key", 10, 5)
+    assert r["changed"] == 2 and r["statements"] == 2 and r["rows"] == [["a", "9"], ["b", "9"]]
+    r = query.execute(store, "create table t(x); drop table t", 10, 5)
+    assert r["ddl"] is True and r["changed"] == 0
+    # a failure stops the script where it broke and names the statement; what already ran stays
+    r = query.execute(store, "delete from cursors where key = 'a'; select nope from nothing", 10, 5)
+    assert r["error"].startswith("statement 2:") and r["changed"] == 1
+    assert store.scalar("SELECT COUNT(*) FROM cursors") == 1
+    # the owner's own transaction is the way to make a script all-or-nothing
+    r = query.execute(store, "begin; delete from cursors; select nope from nothing; commit", 10, 5)
+    assert "error" in r
+    query.execute(store, "rollback", 10, 5)
+    assert store.scalar("SELECT COUNT(*) FROM cursors") == 1
+    assert query.execute(store, ENDLESS, 10, 0.1)["error"].startswith("interrupted")
+    assert query.execute(store, "  ", 10, 5)["error"] == "empty statement"
+    assert store.scalar("SELECT value FROM cursors WHERE key = 'b'") == "9"  # connection still usable
 
 
 def test_database_run_explain_save(config):
@@ -41,14 +69,14 @@ def test_database_run_explain_save(config):
                 await c.post("/api/memory/action/capture", json={"kind": "note", "text": text})
             r = (await c.post("/api/database/action/run", json={"sql": "select id, text from memories order by id"})).json()
             assert r["columns"] == ["id", "text"] and r["total"] == 2 and r["truncated"] is True and r["rows"][0][1] == "a"
-            r = (await c.post("/api/database/action/run", json={"sql": "delete from memories"})).json()
-            assert "readonly" in r["error"]
-            assert app.state.store.scalar("SELECT COUNT(*) FROM memories") == 3
+            r = (await c.post("/api/database/action/run", json={"sql": "delete from memories where text = 'c'"})).json()
+            assert r["changed"] == 1 and r["columns"] == []
+            assert app.state.store.scalar("SELECT COUNT(*) FROM memories") == 2
             r = (await c.post("/api/database/action/explain", json={"sql": "select * from memories where id = 1;"})).json()
             assert r["lines"] and "memories" in r["lines"][0]
             left = (await c.get("/api/database/left")).json()
             tables = {x["text"]: x["stampText"] for x in left["groups"][0]["rows"]}
-            assert tables["memories"] == "3" and "memories_fts" in tables and "memories_fts_data" not in tables and "sqlite_sequence" not in tables
+            assert tables["memories"] == "2" and "memories_fts" in tables and "memories_fts_data" not in tables and "sqlite_sequence" not in tables
             qid = (await c.post("/api/database/action/save", json={"name": "recent", "sql": "select * from memories"})).json()["id"]
             saved = (await c.get("/api/database/left")).json()["groups"][1]
             assert saved["count"] == 1 and saved["rows"][0]["text"] == "recent" and saved["rows"][0]["query_id"] == qid and saved["rows"][0]["sql"].startswith("select")
@@ -61,8 +89,9 @@ def test_database_run_explain_save(config):
             db = next(n for n in (await c.get("/api/home/numbers")).json() if n["module"] == "database")
             assert db["label"] == "database" and db["value"].endswith("B")
             ev = (await c.get("/api/events?module=database")).json()
-            assert [e["verb"] for e in ev["events"]][:3] == ["deleted", "saved", "saved"]
-            assert "memories (3): id, kind, text" in app.state.registry.get("database").context(app.state.store, app.state.registry)
+            assert [e["verb"] for e in ev["events"]][:4] == ["deleted", "saved", "saved", "wrote"]
+            assert "1 rows: delete from memories" in next(e["text"] for e in ev["events"] if e["verb"] == "wrote")
+            assert "memories (2): id, kind, text" in app.state.registry.get("database").context(app.state.store, app.state.registry)
         await app.state.runner.drain(1)
         app.state.store.close()
 
@@ -74,8 +103,9 @@ def test_database_tools_split(config):
         app = build(config)
         read = {t.name for t in await app.state.mcp_read.list_tools()}
         full = {t.name for t in await app.state.mcp_full.list_tools()}
+        # The agent drafts and saves; only the owner's editor reaches query.execute.
+        assert {t for t in full if t.startswith("db_")} == {"db_schema", "db_query", "db_explain", "db_save_query"}
         assert {"db_schema", "db_query", "db_explain"} <= read and "db_save_query" not in read
-        assert {"db_schema", "db_query", "db_explain", "db_save_query"} <= full
         app.state.store.close()
 
     run(main())

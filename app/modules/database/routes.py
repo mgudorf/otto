@@ -1,4 +1,4 @@
-"""Database: look at every table, run read-only SQL, keep the queries worth keeping."""
+"""Database: look at every table, run any SQL against the store, keep the queries worth keeping."""
 
 from __future__ import annotations
 
@@ -64,7 +64,10 @@ def _run(st, body: dict):
     d, sql = st.config.database, body.get("sql") or ""
 
     async def job(ctx):
-        return await asyncio.to_thread(query.run, st.store, sql, d.max_rows, d.max_seconds)
+        r = await asyncio.to_thread(query.execute, st.store, sql, d.max_rows, d.max_seconds)
+        if r.get("changed") or r.get("ddl"):
+            ctx.event("wrote", f"{r['changed']:,} rows: {' '.join(sql.split())[:120]}")
+        return r
 
     return job
 

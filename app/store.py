@@ -51,6 +51,12 @@ class Store:
             self._ro.execute("PRAGMA busy_timeout=5000")
         return self._ro
 
+    @contextmanager
+    def raw(self) -> Iterator[sqlite3.Connection]:
+        """The read-write connection with the lock held, for callers that drive the cursor themselves."""
+        with self._lock:
+            yield self._conn
+
     def migrate(self, sql: str) -> None:
         with self._lock:
             self._conn.executescript(sql)

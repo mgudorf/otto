@@ -1,4 +1,5 @@
 // Database: LEFT = tables with counts, saved queries · MIDDLE = editor, Run / Explain / Save, result grid.
+// Run sends whatever is typed straight to SQLite: selects, writes and DDL all land, with no undo.
 import { html, T, mono13, GroupHeader, Button, Empty, bytes, stamp } from '../rows.js';
 import { get, post } from '../api.js';
 
@@ -48,7 +49,8 @@ export function Middle({ app, data, mod }) {
     if (!ed.sql.trim()) return;
     ed.result = await post(`/api/database/action/${verb}`, { sql: ed.sql });
     ed.mode = mode; ed.page = 0;
-    app.forceUpdate();
+    // A write moves the row counts and can add or drop a table, so the rail is reloaded, not just redrawn.
+    if (ed.result.changed || ed.result.ddl) app.refresh(); else app.forceUpdate();
   };
   const save = async () => {
     const name = window.prompt('Name for this query', ed.saved ? ed.saved.name : '');
@@ -66,10 +68,12 @@ export function Middle({ app, data, mod }) {
   const pager = (label, onClick) => html`<span class="ring" onClick=${onClick} style=${{ cursor: 'pointer', color: T.muted, padding: '3px 8px', borderRadius: 6 }}>${label}</span>`;
 
   const r = ed.result;
+  const wrote = r && (r.changed || r.ddl) ? `${r.changed.toLocaleString()} row${r.changed === 1 ? '' : 's'} written · ` : '';
   let line = '';
-  if (r && r.error) line = r.error;
+  if (r && r.error) line = wrote + r.error;
   else if (r && ed.mode === 'explain') line = `${r.lines.length} step${r.lines.length === 1 ? '' : 's'} · ${r.ms} ms`;
-  else if (r) line = `${r.total.toLocaleString()}${r.truncated ? '+' : ''} rows · ${r.ms} ms`;
+  else if (r && r.columns.length) line = `${wrote}${r.total.toLocaleString()}${r.truncated ? '+' : ''} rows · ${r.ms} ms`;
+  else if (r) line = `${wrote || 'no rows · '}${r.ms} ms`;
 
   let body = null;
   if (r && !r.error && ed.mode === 'explain') {

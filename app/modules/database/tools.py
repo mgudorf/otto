@@ -1,4 +1,5 @@
-"""MCP tools for the Database agent. Reads on both servers; the one write (a saved query) on the full server only."""
+"""MCP tools for the Database agent. Reads on both servers; the one write (a saved query) on the full
+server only. The agent has no path to owner SQL: it drafts and saves, the owner runs."""
 
 from __future__ import annotations
 
@@ -15,8 +16,8 @@ def register(read, full, store: Store, config) -> None:
         return query.schema(store)
 
     def db_query(sql: str, limit: int = 100) -> dict:
-        """Run one read-only SQL statement. Returns columns and up to `limit` rows; a write fails."""
-        return query.run(store, sql, max(1, min(limit, d.max_rows)), d.max_seconds)
+        """Run read-only SQL. Returns columns and up to `limit` rows of the last statement; a write fails."""
+        return query.read(store, sql, max(1, min(limit, d.max_rows)), d.max_seconds)
 
     def db_explain(sql: str) -> dict:
         """The query plan (EXPLAIN QUERY PLAN) for one statement."""
