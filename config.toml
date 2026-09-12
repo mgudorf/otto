@@ -27,6 +27,10 @@ max_turns = 20                # per run
 max_minutes = 15              # per run; the process is killed past this
 stagger_minutes = 15          # gap the scheduler leaves between one nightly LLM run and the next
 
+[chat]
+upload_max_mb = 50            # an attachment larger than this is refused
+replay_chars = 20000          # characters of the stored transcript replayed when the CLI has lost a conversation
+
 [business]
 leads_per_run = 3           # new leads the nightly scout may queue per run
 

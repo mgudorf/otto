@@ -2,7 +2,7 @@
 
 Two entry points:
   run_task     scheduled, read-only, budgeted; the only one a task context can reach
-  session_turn interactive; carries the module's write tools; reachable from routes only
+  session_turn interactive; carries the module's write tools and its extra built-ins; reachable from routes only
 `spawn` is the seam tests mock. No API key is ever passed; the CLI's environment is scrubbed.
 """
 
@@ -24,12 +24,19 @@ SCRUB_PREFIXES = ("CLAUDECODE", "CLAUDE_CODE_", "ANTHROPIC_")
 CHUNK_BYTES = 1 << 16
 READ_SERVER = "otto-read"
 FULL_SERVER = "otto"
+LOST_TRANSCRIPT = "No conversation found with session ID"   # the CLI's stderr when --resume names a transcript it no longer has
 
 OnEvent = Callable[[dict], Awaitable[None]]
 
 
 class ClaudeError(Exception):
-    pass
+    def __init__(self, message: str, subtype: str | None = None, num_turns: int | None = None, stderr: str = ""):
+        super().__init__(message)
+        self.subtype, self.num_turns, self.stderr = subtype, num_turns, stderr
+
+    @property
+    def lost_transcript(self) -> bool:
+        return LOST_TRANSCRIPT in self.stderr
 
 
 class BudgetExceeded(ClaudeError):
@@ -74,6 +81,11 @@ def events_from(msg: dict) -> list[dict]:
         for block in msg.get("message", {}).get("content", []) if isinstance(msg.get("message", {}).get("content"), list) else []:
             if block.get("type") == "tool_result":
                 out.append({"role": "tool_result", "id": block.get("tool_use_id"), "status": "error" if block.get("is_error") else "done"})
+    elif t == "stream_event":
+        # --include-partial-messages: the text of a model turn as it is written; the whole turn still follows as `model`
+        ev = msg.get("event", {})
+        if ev.get("type") == "content_block_delta" and ev.get("delta", {}).get("type") == "text_delta":
+            out.append({"role": "delta", "text": ev["delta"].get("text", "")})
     elif t == "result":
         out.append({
             "role": "result",
@@ -81,6 +93,7 @@ def events_from(msg: dict) -> list[dict]:
             "is_error": bool(msg.get("is_error")),
             "session_id": msg.get("session_id"),
             "subtype": msg.get("subtype"),
+            "num_turns": msg.get("num_turns"),
         })
     elif t == "system" and msg.get("subtype") == "init":
         out.append({"role": "init", "tools": msg.get("tools", []), "session_id": msg.get("session_id")})
@@ -116,7 +129,7 @@ class ClaudeRunner:
         }
 
     # ---- argument building --------------------------------------------------------------
-    def _args(self, system_prompt: str, server: str, allowed: list[str], extra: list[str]) -> list[str]:
+    def _args(self, system_prompt: str, server: str, allowed: list[str], extra: list[str], builtins: tuple[str, ...] = READ_BUILTINS) -> list[str]:
         mcp = {"mcpServers": {server: {"type": "http", "url": f"{self.mcp_url}/mcp/{'read' if server == READ_SERVER else 'full'}"}}}
         args = [
             self.config.claude.binary, "-p",
@@ -124,8 +137,8 @@ class ClaudeRunner:
             "--setting-sources", "",
             "--restricted",
             "--strict-mcp-config", "--mcp-config", json.dumps(mcp),
-            "--tools", ",".join(READ_BUILTINS),
-            "--allowedTools", ",".join(list(READ_BUILTINS) + allowed),
+            "--tools", ",".join(builtins),
+            "--allowedTools", ",".join(list(builtins) + allowed),
             "--permission-prompts", "none",
             "--system-prompt", system_prompt,
         ]
@@ -172,9 +185,10 @@ class ClaudeRunner:
             raise ClaudeError(f"claude killed after {timeout:.0f}s")
         stderr = (await err_task).decode("utf-8", "replace").strip()
         if not final:
-            raise ClaudeError(f"claude exited {proc.returncode} without a result: {stderr[-800:]}")
+            raise ClaudeError(f"claude exited {proc.returncode} without a result: {stderr[-800:]}", stderr=stderr)
         if final.get("is_error"):
-            raise ClaudeError(f"claude error ({final.get('subtype')}): {final.get('text', '')[:800]}")
+            detail = final.get("text") or stderr[-800:]
+            raise ClaudeError(f"claude error ({final.get('subtype')}): {detail[:800]}", subtype=final.get("subtype"), num_turns=final.get("num_turns"), stderr=stderr)
         return final
 
     # ---- scheduled, read-only --------------------------------------------------------------
@@ -208,7 +222,7 @@ class ClaudeRunner:
         )
 
     async def oneshot(self, ctx, mod, prompt: str, tools: tuple[str, ...] = (), max_turns: int = 2) -> str:
-        """User-triggered, read-only, unbudgeted single answer (session close tagging, feedback filing)."""
+        """User-triggered, read-only, unbudgeted single answer (session tagging, feedback filing)."""
         allowed = [f"mcp__{READ_SERVER}__{t}" for t in tools]
         args = self._args(self._system_prompt(mod, scheduled=True), READ_SERVER, allowed, ["--max-turns", str(max_turns), "--no-session-persistence"])
         started = now()
@@ -225,8 +239,9 @@ class ClaudeRunner:
         agent = mod.manifest.agent
         tools = list(agent.read_tools) + list(agent.write_tools)
         allowed = [f"mcp__{FULL_SERVER}__{t}" for t in tools]
-        extra = ["--session-id", session_id] if is_new else ["--resume", session_id]
-        args = self._args(self._system_prompt(mod, scheduled=False), FULL_SERVER, allowed, extra)
+        extra = (["--session-id", session_id] if is_new else ["--resume", session_id]) + ["--include-partial-messages"]
+        builtins = READ_BUILTINS + tuple(agent.builtins)
+        args = self._args(self._system_prompt(mod, scheduled=False), FULL_SERVER, allowed, extra, builtins)
         return await self._stream(args, text, self.config.nightly.max_minutes * 60, on_event)
 
     # ---- prompts ---------------------------------------------------------------------------

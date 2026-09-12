@@ -5,6 +5,7 @@ import { get, inflight } from './api.js';
 import { Session } from './session.js';
 import { Feedback } from './feedback.js';
 import * as home from './pages/home.js';
+import * as chat from './pages/chat.js';
 import * as email from './pages/email.js';
 import * as education from './pages/education.js';
 import * as memory from './pages/memory.js';
@@ -13,11 +14,10 @@ import * as database from './pages/database.js';
 import * as business from './pages/business.js';
 import * as finance from './pages/finance.js';
 import * as graph from './pages/graph.js';
-import * as web_search from './pages/web_search.js';
 import * as activity from './pages/activity.js';
 import * as settings from './pages/settings.js';
 
-const PAGES = { home, email, education, memory, science, business, finance, graph, database, web_search, activity, settings };
+const PAGES = { home, chat, email, education, memory, science, business, finance, graph, database, activity, settings };
 const FOOT = [
   { name: 'activity', title: 'Activity', hue: '#e6e7ea', icon: '<path d="M3 12h4l2-6 3 10 2-6h3"></path>' },
   { name: 'settings', title: 'Settings', hue: '#e6e7ea', icon: '<circle cx="10" cy="10" r="6.5"></circle><circle cx="10" cy="10" r="2"></circle>' },
@@ -112,7 +112,7 @@ class App extends Component {
     const middleMax = s.shell.settings['ui.middle_max'] || 1400;
     const mod = this.module(s.page);
     const impl = PAGES[s.page];
-    const rail = s.shell.modules.filter((m) => m.enabled || m.error);
+    const rail = s.shell.modules.filter((m) => m.page && (m.enabled || m.error));
     const railBtn = (m, active) => html`<div key=${m.name} title=${m.error ? `${m.title}: ${m.error}` : m.title} onClick=${() => !m.error && this.go(m.name)}
         style=${{ width: 32, height: 32, display: 'grid', placeItems: 'center', borderRadius: 6, cursor: m.error ? 'not-allowed' : 'pointer', color: m.error ? T.dim : m.hue, background: active ? T.raised : 'transparent', opacity: m.error ? 0.5 : 1 }}>
         <${Icon} svg=${m.icon || '<circle cx="10" cy="10" r="7"></circle>'} size=${20} sw=${1.5} /></div>`;
@@ -145,7 +145,9 @@ class App extends Component {
               ${impl && s.data ? impl.Middle({ app: this, data: s.data, mod, fmt }) : null}
             </div>
           </div>
-          ${mod.agent
+          ${impl && impl.Right
+            ? impl.Right({ app: this, data: s.data, mod, fmt })
+            : mod.agent
             ? html`<${Session} module=${s.page} hue=${mod.hue} fmt=${fmt} selected=${!!s.sel} prefill=${s.prefill} onIdle=${() => this.refresh()} />`
             : html`<div style=${{ minWidth: 0, minHeight: 0, background: T.panel, borderRadius: 6, padding: '16px 12px 12px', ...mono13, color: T.dim }}>no agent on this page</div>`}
         </div>

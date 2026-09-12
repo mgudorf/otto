@@ -41,7 +41,7 @@ def register(read, full, store: Store, config) -> None:
         return [{"neighbor": r["b"] if r["a"] == k else r["a"], "kind": r["kind"], "weight": r["weight"], "note": r["note"]} for r in rows]
 
     def graph_items(tag: str, limit: int = 20) -> dict:
-        """The memories and closed sessions carrying a tag (merged aliases included), newest first."""
+        """The memories and tagged sessions carrying a tag (merged aliases included), newest first."""
         k = key(tag)
         if not _node(k):
             return {"error": f"no node {k!r}"}

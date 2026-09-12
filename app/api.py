@@ -17,6 +17,8 @@ from app.store import Store, now_iso
 
 router = APIRouter()
 
+REPLAYED = "resumed from Otto's record"
+
 
 class Broadcast:
     """In-process fan-out of session events to open event streams."""
@@ -75,22 +77,21 @@ async def _restart(app) -> None:
 # ---- shell -----------------------------------------------------------------------------------
 @router.get("/api/shell")
 def shell(request: Request) -> dict:
+    """Every module, page or not: the rail and the `shown` toggle filter on `page`; hue and icon resolve for all."""
     st = request.app.state
     settings = st.store.all_settings()
     modules = []
     for m in st.registry.ordered():
-        if not m.manifest.page:
-            continue
         a = m.manifest.agent
         modules.append({
             "name": m.name, "title": m.manifest.title, "hue": m.manifest.hue, "icon": m.manifest.icon,
-            "order": m.manifest.order, "enabled": settings.get(f"modules.{m.name}.enabled", True) is not False,
+            "order": m.manifest.order, "page": m.manifest.page, "enabled": settings.get(f"modules.{m.name}.enabled", True) is not False,
             "scheduled": settings.get(f"modules.{m.name}.scheduled", True) is not False, "tasks": len(m.manifest.schedules),
             "agent": {"placeholder": a.placeholder, "skills": list(a.skills)} if a else None, "error": None,
         })
     for name, err in st.registry.errors.items():
         modules.append({
-            "name": name, "title": name, "hue": "#5f636c", "icon": "", "order": 98, "enabled": False,
+            "name": name, "title": name, "hue": "#5f636c", "icon": "", "order": 98, "page": True, "enabled": False,
             "scheduled": False, "tasks": 0, "agent": None, "error": err.strip().splitlines()[-1][:300],
         })
     c = st.config
@@ -236,6 +237,9 @@ async def vacuum(request: Request) -> dict:
 
 
 # ---- sessions --------------------------------------------------------------------------------
+# A session is one CLI conversation. The module panes keep one open per module; Chat keeps many.
+# start_turn and tag_session are the two paths every session goes through; a module's routes call
+# them with its own broadcast key. Busy state is per session id.
 def _module(request: Request, name: str):
     mod = request.app.state.registry.modules.get(name)
     if mod is None or mod.manifest.agent is None:
@@ -247,11 +251,11 @@ def _session(store: Store, module: str) -> dict | None:
     return store.one("SELECT * FROM sessions WHERE module = ? AND closed_at IS NULL ORDER BY opened_at DESC LIMIT 1", (module,))
 
 
-def _turns(store: Store, session_id: str) -> list[dict]:
+def turns(store: Store, session_id: str) -> list[dict]:
     return store.query("SELECT id, ts, role, text, tool, status FROM session_turns WHERE session_id = ? ORDER BY id", (session_id,))
 
 
-def _add_turn(store: Store, session_id: str, role: str, text: str | None = None, tool: str | None = None, status: str | None = None) -> int:
+def add_turn(store: Store, session_id: str, role: str, text: str | None = None, tool: str | None = None, status: str | None = None) -> int:
     cur = store.execute(
         "INSERT INTO session_turns(session_id, ts, role, text, tool, status) VALUES (?, ?, ?, ?, ?, ?)",
         (session_id, now_iso(), role, text, tool, status),
@@ -275,8 +279,8 @@ def session(request: Request, module: str) -> dict:
     a = mod.manifest.agent
     return {
         "session": sess,
-        "turns": _turns(st.store, sess["id"]) if sess else [],
-        "busy": module in st.session_busy,
+        "turns": turns(st.store, sess["id"]) if sess else [],
+        "busy": sess is not None and sess["id"] in st.session_busy,
         "context_label": _context_label(st, mod),
         "agent": {"cmd": f"claude · {module}", "placeholder": a.placeholder, "skills": list(a.skills)},
     }
@@ -290,26 +294,36 @@ async def session_send(request: Request, module: str, body: dict = Body(...)) ->
     text = (body.get("text") or "").strip()
     if not text:
         raise HTTPException(400, "empty message")
-    if module in st.session_busy:
+    sess = _session(store, module)
+    if sess is not None and sess["id"] in st.session_busy:
         raise HTTPException(409, "a turn is still running")
 
     if text == "/clear":
-        sess = _session(store, module)
         if sess is None:
             return {"cleared": False}
-        st.runner.submit(f"{module}.close", module, f"session:{module}", "session", _closer(st, mod, sess["id"]), notify=True)
+        tag_session(st, mod, sess["id"], module, close=True)
         st.broadcast.publish(module, {"role": "system", "text": "session cleared", "ts": now_iso()})
         return {"cleared": True}
 
-    sess = _session(store, module)
     if sess is None:
         sid = str(uuid.uuid4())
         store.execute("INSERT INTO sessions(id, module, opened_at) VALUES (?, ?, ?)", (sid, module, now_iso()))
         sess = _session(store, module)
-    sid, started = sess["id"], bool(sess["cli_started"])
-    _add_turn(store, sid, "user", text=text)
-    st.broadcast.publish(module, {"role": "user", "text": text, "ts": now_iso()})
-    st.session_busy.add(module)
+    job = start_turn(st, mod, sess["id"], bool(sess["cli_started"]), text, text, module)
+    return {"queued": job.id, "session": sess["id"]}
+
+
+def start_turn(st, mod, sid: str, started: bool, text: str, prompt: str, key: str, replay: str | None = None, on_done=None):
+    """Record the owner's turn and queue the CLI turn on `session:<sid>`; its events stream on `key`.
+
+    `text` is what is stored, `prompt` what the CLI gets. `replay`, on a resumed turn whose transcript the CLI has
+    lost, restarts the session under the same id with that preamble in front of the prompt. `on_done` runs after a
+    turn that succeeded, inside the job.
+    """
+    store: Store = st.store
+    add_turn(store, sid, "user", text=text)
+    st.broadcast.publish(key, {"role": "user", "text": text, "ts": now_iso()})
+    st.session_busy.add(sid)
 
     async def turn(ctx):
         tool_rows: dict[str, int] = {}
@@ -317,44 +331,54 @@ async def session_send(request: Request, module: str, body: dict = Body(...)) ->
         async def on_event(ev: dict) -> None:
             role = ev["role"]
             if role == "model":
-                _add_turn(store, sid, "model", text=ev["text"])
+                add_turn(store, sid, "model", text=ev["text"])
             elif role == "tool":
-                tool_rows[ev.get("id") or ""] = _add_turn(store, sid, "tool", tool=ev["tool"], status=ev["status"])
+                tool_rows[ev.get("id") or ""] = add_turn(store, sid, "tool", tool=ev["tool"], status=ev["status"])
             elif role == "tool_result":
                 rid = tool_rows.get(ev.get("id") or "")
                 if rid:
                     store.execute("UPDATE session_turns SET status = ? WHERE id = ?", (ev["status"], rid))
             elif role == "init":
                 ctx.log("tools: " + ", ".join(ev.get("tools", [])))
-            st.broadcast.publish(module, {**ev, "ts": now_iso()})
+            st.broadcast.publish(key, {**ev, "ts": now_iso()})
 
         try:
-            await st.claude.session_turn(mod, sid, not started, text, on_event)
+            try:
+                await st.claude.session_turn(mod, sid, not started, prompt, on_event)
+            except ClaudeError as e:
+                if not (started and replay is not None and e.lost_transcript):
+                    raise
+                ctx.log("the CLI has no transcript for this session; replaying Otto's record")
+                add_turn(store, sid, "system", text=REPLAYED)
+                st.broadcast.publish(key, {"role": "system", "text": REPLAYED, "ts": now_iso()})
+                await st.claude.session_turn(mod, sid, True, replay + prompt, on_event)
             store.execute("UPDATE sessions SET cli_started = 1 WHERE id = ?", (sid,))
+            if on_done is not None:
+                on_done()
             return "ok"
         except ClaudeError as e:
-            _add_turn(store, sid, "system", text=f"error: {e}")
-            st.broadcast.publish(module, {"role": "error", "text": str(e), "ts": now_iso()})
+            add_turn(store, sid, "system", text=f"error: {e}")
+            st.broadcast.publish(key, {"role": "error", "text": str(e), "ts": now_iso()})
             if not started:  # the CLI never took this id; retire it so the next turn starts clean
                 store.execute("UPDATE sessions SET closed_at = ?, title = ? WHERE id = ?", (now_iso(), "(failed to start)", sid))
             raise
         finally:
-            st.session_busy.discard(module)
-            st.broadcast.publish(module, {"role": "idle", "ts": now_iso()})
+            st.session_busy.discard(sid)
+            st.broadcast.publish(key, {"role": "idle", "ts": now_iso()})
 
-    job = st.runner.submit(f"{module}.turn", module, f"session:{module}", "session", turn)
-    return {"queued": job.id, "session": sid}
+    return st.runner.submit(f"{mod.name}.turn", mod.name, f"session:{sid}", "session", turn)
 
 
-def _closer(st, mod, sid: str):
+def tag_session(st, mod, sid: str, key: str, close: bool):
+    """Queue the tagger on `session:<sid>`: a oneshot names a title and tags. `close` also ends the session."""
     store: Store = st.store
 
-    async def close(ctx):
-        turns = _turns(store, sid)
-        user_lines = [t["text"] for t in turns if t["role"] == "user" and t["text"]]
+    async def tag(ctx):
+        rows = turns(store, sid)
+        user_lines = [t["text"] for t in rows if t["role"] == "user" and t["text"]]
         title, tags = (user_lines[0][:80] if user_lines else "(empty)"), []
         if user_lines:
-            transcript = "\n".join(f"{t['role']}: {t['text']}" for t in turns if t["role"] in ("user", "model") and t["text"])[:6000]
+            transcript = "\n".join(f"{t['role']}: {t['text']}" for t in rows if t["role"] in ("user", "model") and t["text"])[:6000]
             prompt = (
                 'Below is a conversation. Reply with only JSON of the form {"title": <at most 8 words>, '
                 '"tags": [<3 to 6 lowercase topic identifiers>]}.\n\n' + transcript
@@ -367,11 +391,15 @@ def _closer(st, mod, sid: str):
             except Exception as e:
                 ctx.log(f"tagging failed, keeping fallback title: {e!r}")
         with ctx.commit() as conn:
-            conn.execute("UPDATE sessions SET closed_at = ?, title = ?, tags = ? WHERE id = ?", (now_iso(), title, json.dumps(tags), sid))
-        ctx.event("closed", f"session: {title}" + (f" [{', '.join(tags)}]" if tags else ""), ref=sid)
+            if close:
+                conn.execute("UPDATE sessions SET closed_at = ?, title = ?, tags = ? WHERE id = ?", (now_iso(), title, json.dumps(tags), sid))
+            else:
+                conn.execute("UPDATE sessions SET title = ?, tags = ? WHERE id = ?", (title, json.dumps(tags), sid))
+        ctx.event("closed" if close else "tagged", f"session: {title}" + (f" [{', '.join(tags)}]" if tags else ""), ref=sid)
+        st.broadcast.publish(key, {"role": "tagged", "title": title, "tags": tags, "ts": now_iso()})
         return title
 
-    return close
+    return st.runner.submit(f"{mod.name}.{'close' if close else 'tag'}", mod.name, f"session:{sid}", "session", tag, notify=True)
 
 
 @router.get("/api/session/{module}/events")

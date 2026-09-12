@@ -50,6 +50,12 @@ class Nightly:
 
 
 @dataclass(frozen=True)
+class Chat:
+    upload_max_mb: int   # an attachment larger than this is refused
+    replay_chars: int    # characters of the stored transcript replayed when the CLI has lost a conversation
+
+
+@dataclass(frozen=True)
 class Business:
     leads_per_run: int
 
@@ -118,6 +124,7 @@ class Config:
     claude: Claude
     data: Data
     nightly: Nightly
+    chat: Chat
     business: Business
     memory: Memory
     science: Science
@@ -142,6 +149,7 @@ def load(root: Path = ROOT) -> Config:
         claude=Claude(**raw["claude"]),
         data=Data(db=root / raw["data"]["db"], workspace=root / raw["data"]["workspace"]),
         nightly=Nightly(**raw["nightly"]),
+        chat=Chat(**raw["chat"]),
         business=Business(**raw["business"]),
         memory=Memory(**raw["memory"]),
         science=Science(**{**raw["science"], "root": root / raw["science"]["root"]}),

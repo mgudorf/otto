@@ -12,10 +12,11 @@ SOURCES = """
 SELECT 'memory' AS src, m.id AS item, t.tag AS tag, m.created_at AS ts
   FROM memory_tags t JOIN memories m ON m.id = t.memory_id
 UNION ALL
-SELECT 'session', s.id, j.value, s.closed_at
+SELECT 'session', s.id, j.value, COALESCE(s.closed_at, s.opened_at)
   FROM sessions s, json_each(s.tags) j
- WHERE s.closed_at IS NOT NULL
+ WHERE s.tags IS NOT NULL
 """
+# Every tagged session counts, open or closed: the module panes are tagged when they close, a Chat conversation after its first turn.
 
 
 def key(tag: str) -> str:

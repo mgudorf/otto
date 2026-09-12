@@ -49,6 +49,7 @@ export class Session extends Component {
     if (ev.role === 'user' || ev.role === 'model') turns.push({ role: ev.role, text: ev.text, ts: ev.ts });
     else if (ev.role === 'tool') { this.toolIds[ev.id] = turns.length; turns.push({ role: 'tool', tool: ev.tool, status: ev.status, ts: ev.ts }); }
     else if (ev.role === 'tool_result') { const i = this.toolIds[ev.id]; if (i !== undefined && turns[i]) turns[i] = { ...turns[i], status: ev.status }; }
+    else if (ev.role === 'delta' || ev.role === 'tagged') return;   // Chat's page uses these; the pane shows whole turns
     else if (ev.role === 'error') turns.push({ role: 'system', text: `error: ${ev.text}`, ts: ev.ts });
     else if (ev.role === 'system') { turns.length = 0; turns.push({ role: 'system', text: ev.text, ts: ev.ts }); }
     else if (ev.role === 'idle') { this.setState({ turns, busy: false }); this.props.onIdle && this.props.onIdle(); return; }
