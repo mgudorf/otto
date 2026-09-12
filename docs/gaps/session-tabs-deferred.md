@@ -4,7 +4,7 @@
 - Found: 2026-09-07, sync-architecture
 - Status: deferred by the owner
 
-What happens: one open session per module; `/clear` closes it, tags it and starts a fresh one. Closed sessions keep their title, tags and turns.
+What happens: one open session per module pane; `/clear` closes it, tags it and starts a fresh one. Closed sessions keep their title, tags and turns. Chat (merged 2026-09-12) keeps many conversations on its own page through the same `start_turn` seam with busy state per session id, so the platform now supports several open sessions per module; the panes still show one.
 
 Expected: several open sessions per module, selectable by tab.
 

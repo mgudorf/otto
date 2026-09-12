@@ -4,7 +4,7 @@
 - Found: 2026-09-09, sync-architecture
 - Status: open, needs a decision
 
-What happens: Home renders a `Review` group for any module with a `queue` hook; Search has one, Business and Memory do not. Both keep rows that wait on a yes or no: `business_items` leads with `status = 'open'` (six today), and `memory_suggestions` with `status = 'open'`. Each is visible only through the module's `today` hook, which covers the local day, and through its own blank state. A lead the nightly scout queued on Monday is off Home by Tuesday and survives only as the `leads` number.
+What happens: Home renders a `Review` group for any module with a `queue` hook; Search has one, Business and Memory do not. Both keep rows that wait on a yes or no: `business_items` leads with `status = 'open'` (six on 2026-09-09, eight on 2026-09-12), and `memory_suggestions` with `status = 'open'`. Each is visible only through the module's `today` hook, which covers the local day, and through its own blank state. A lead the nightly scout queued on Monday is off Home by Tuesday and survives only as the `leads` number.
 
 Expected: everything waiting on the owner's decision is on the first page they open, however old it is, which is what the `queue` seam was built for.
 
