@@ -26,7 +26,7 @@ class FakeServer:
 
 def _seed_finding(store, i: int, ts: str) -> int:
     cur = store.execute(
-        "INSERT INTO search_findings(topic_id, kind, title, url, summary, found_at) VALUES (1, 'work', ?, ?, 'why', ?)",
+        "INSERT INTO web_search_findings(topic_id, kind, title, url, summary, found_at) VALUES (1, 'work', ?, ?, 'why', ?)",
         (f"finding {i}", f"https://x.example/{i}", ts),
     )
     return cur.lastrowid
@@ -64,7 +64,7 @@ def test_decisions_and_topic_tools(config):
             r = await c.post("/api/web_search/action/agree", json={"id": f1})
             assert r.json() == {"id": f1, "status": "agreed"}
             assert (await c.post("/api/web_search/action/disagree", json={"id": f1})).status_code == 409
-            row = store.one("SELECT status, decided_at FROM search_findings WHERE id = ?", (f1,))
+            row = store.one("SELECT status, decided_at FROM web_search_findings WHERE id = ?", (f1,))
             assert row["status"] == "agreed" and row["decided_at"]
             assert [a["verb"] for a in (await c.get(f"/api/web_search/item/{f1}")).json()["actions"]] == ["link"]
             assert [f["id"] for f in read.tools["search_findings"]("finding 2")] == [f2]
@@ -110,7 +110,7 @@ class FakeCtx:
             with self.store.tx() as conn:
                 yield conn
                 if cursor:
-                    conn.execute("INSERT INTO cursors(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", cursor)
+                    conn.execute("INSERT INTO app_cursors(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", cursor)
 
         return _tx()
 
@@ -143,8 +143,8 @@ def test_nightly_skips_without_topics(ws_store, config):
 def test_nightly_inserts_and_is_idempotent(ws_store, config):
     assert config.web_search.max_findings == 3
     ts = "2026-09-07T00:00:00+00:00"
-    ws_store.execute("INSERT INTO search_topics(kind, text, created_at) VALUES ('money', 'grid storage legislation', ?)", (ts,))
-    ws_store.execute("INSERT INTO search_topics(kind, text, created_at) VALUES ('learn', 'causal inference', ?)", (ts,))
+    ws_store.execute("INSERT INTO web_search_topics(kind, text, created_at) VALUES ('money', 'grid storage legislation', ?)", (ts,))
+    ws_store.execute("INSERT INTO web_search_topics(kind, text, created_at) VALUES ('learn', 'causal inference', ?)", (ts,))
     items = [{"topic_id": 1 + i % 2, "title": f"page {i}", "url": f"https://x.example/{i}", "summary": "matters"} for i in range(4)]
     items.insert(1, dict(items[0]))                                   # duplicate url
     items.append({"topic_id": 9, "title": "unknown topic", "url": "https://x.example/9", "summary": ""})
@@ -152,7 +152,7 @@ def test_nightly_inserts_and_is_idempotent(ws_store, config):
     ctx = FakeCtx(ws_store, config, "```json\n" + json.dumps(items) + "\n```")
     assert run(tasks.nightly(ctx)) == "3 new finding(s) from 7 proposed"
     assert "grid storage legislation" in ctx.prompts[0] and "up to 3" in ctx.prompts[0]
-    stored = ws_store.query("SELECT topic_id, kind, url, status FROM search_findings ORDER BY id")
+    stored = ws_store.query("SELECT topic_id, kind, url, status FROM web_search_findings ORDER BY id")
     assert [r["url"] for r in stored] == ["https://x.example/0", "https://x.example/1", "https://x.example/2"]
     assert [r["kind"] for r in stored] == ["money", "learn", "money"] and stored[0]["status"] == "open"
     assert ws_store.cursor("web_search.nightly") is not None
@@ -160,4 +160,4 @@ def test_nightly_inserts_and_is_idempotent(ws_store, config):
     again = FakeCtx(ws_store, config, json.dumps(items))
     assert run(tasks.nightly(again)) == "1 new finding(s) from 7 proposed"
     assert "https://x.example/0" in again.prompts[0]
-    assert ws_store.scalar("SELECT COUNT(*) FROM search_findings") == 4
+    assert ws_store.scalar("SELECT COUNT(*) FROM web_search_findings") == 4

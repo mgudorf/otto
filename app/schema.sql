@@ -1,7 +1,8 @@
--- Platform tables. Module tables live in each module's schema.sql.
+-- Platform tables, prefixed app_. Module tables live in each module's schema.sql under the module's own prefix;
+-- an index or trigger is named after its table. A table that changes its name is a line in app/migrate.py RENAMES.
 -- All timestamps are UTC ISO-8601 strings, so string comparison orders them.
 
-CREATE TABLE IF NOT EXISTS tasks (
+CREATE TABLE IF NOT EXISTS app_tasks (
   name             TEXT PRIMARY KEY,
   module           TEXT NOT NULL,
   interval_seconds INTEGER NOT NULL,
@@ -14,7 +15,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   last_result      TEXT
 );
 
-CREATE TABLE IF NOT EXISTS jobs (
+CREATE TABLE IF NOT EXISTS app_jobs (
   id          INTEGER PRIMARY KEY,
   task        TEXT NOT NULL,
   module      TEXT NOT NULL,
@@ -27,27 +28,27 @@ CREATE TABLE IF NOT EXISTS jobs (
   result      TEXT,
   error       TEXT
 );
-CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status);
-CREATE INDEX IF NOT EXISTS jobs_queued ON jobs(queued_at);
+CREATE INDEX IF NOT EXISTS app_jobs_status ON app_jobs(status);
+CREATE INDEX IF NOT EXISTS app_jobs_queued ON app_jobs(queued_at);
 
-CREATE TABLE IF NOT EXISTS job_logs (
+CREATE TABLE IF NOT EXISTS app_job_logs (
   id      INTEGER PRIMARY KEY,
-  job_id  INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  job_id  INTEGER NOT NULL REFERENCES app_jobs(id) ON DELETE CASCADE,
   ts      TEXT NOT NULL,
   message TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS settings (
+CREATE TABLE IF NOT EXISTS app_settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL              -- JSON
 );
 
-CREATE TABLE IF NOT EXISTS cursors (
+CREATE TABLE IF NOT EXISTS app_cursors (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS events (
+CREATE TABLE IF NOT EXISTS app_events (
   id     INTEGER PRIMARY KEY,
   ts     TEXT NOT NULL,
   module TEXT NOT NULL,
@@ -56,9 +57,9 @@ CREATE TABLE IF NOT EXISTS events (
   job_id INTEGER,
   ref    TEXT
 );
-CREATE INDEX IF NOT EXISTS events_ts ON events(ts);
+CREATE INDEX IF NOT EXISTS app_events_ts ON app_events(ts);
 
-CREATE TABLE IF NOT EXISTS sessions (
+CREATE TABLE IF NOT EXISTS app_sessions (
   id        TEXT PRIMARY KEY,
   module    TEXT NOT NULL,
   opened_at TEXT NOT NULL,
@@ -68,9 +69,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   cli_started INTEGER NOT NULL DEFAULT 0   -- 1 once the CLI has created the session (then --resume)
 );
 
-CREATE TABLE IF NOT EXISTS session_turns (
+CREATE TABLE IF NOT EXISTS app_session_turns (
   id         INTEGER PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL REFERENCES app_sessions(id) ON DELETE CASCADE,
   ts         TEXT NOT NULL,
   role       TEXT NOT NULL,        -- user | model | tool | system
   text       TEXT,
@@ -78,13 +79,13 @@ CREATE TABLE IF NOT EXISTS session_turns (
   status     TEXT
 );
 
-CREATE TABLE IF NOT EXISTS module_errors (
+CREATE TABLE IF NOT EXISTS app_module_errors (
   module TEXT PRIMARY KEY,
   ts     TEXT NOT NULL,
   error  TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS llm_runs (
+CREATE TABLE IF NOT EXISTS app_llm_runs (
   id         INTEGER PRIMARY KEY,
   ts         TEXT NOT NULL,
   module     TEXT NOT NULL,

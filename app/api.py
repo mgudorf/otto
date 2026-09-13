@@ -103,7 +103,7 @@ def shell(request: Request) -> dict:
         "claude": {
             "binary": c.claude.binary, "model": c.claude.model, "models": list(c.claude.models), "efforts": list(c.claude.efforts), "workspace": str(c.data.workspace),
             "agents_dir": str(c.root / "app" / "modules"), "sessions_kept_days": c.claude.sessions_kept_days,
-            "background_jobs": [r["name"] for r in st.store.query("SELECT name FROM tasks WHERE llm = 1 ORDER BY name")],
+            "background_jobs": [r["name"] for r in st.store.query("SELECT name FROM app_tasks WHERE llm = 1 ORDER BY name")],
         },
         "budget": st.claude.budget(),
     }
@@ -112,7 +112,7 @@ def shell(request: Request) -> dict:
 # ---- tasks / jobs / events -----------------------------------------------------------------
 @router.get("/api/tasks")
 def tasks(request: Request) -> list[dict]:
-    return request.app.state.store.query("SELECT * FROM tasks ORDER BY module, name")
+    return request.app.state.store.query("SELECT * FROM app_tasks ORDER BY module, name")
 
 
 @router.post("/api/tasks/{name}")
@@ -123,21 +123,21 @@ def task_enable(request: Request, name: str, body: dict = Body(...)) -> dict:
     except KeyError:
         raise HTTPException(404, "no such task")
     st.store.event("system", "enabled" if body.get("enabled") else "disabled", name)
-    return st.store.one("SELECT * FROM tasks WHERE name = ?", (name,))
+    return st.store.one("SELECT * FROM app_tasks WHERE name = ?", (name,))
 
 
 @router.get("/api/jobs")
 def jobs(request: Request, limit: int = 100) -> list[dict]:
-    return request.app.state.store.query("SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (max(1, min(limit, 1000)),))
+    return request.app.state.store.query("SELECT * FROM app_jobs ORDER BY id DESC LIMIT ?", (max(1, min(limit, 1000)),))
 
 
 @router.get("/api/jobs/{job_id}")
 def job(request: Request, job_id: int) -> dict:
     store: Store = request.app.state.store
-    row = store.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+    row = store.one("SELECT * FROM app_jobs WHERE id = ?", (job_id,))
     if row is None:
         raise HTTPException(404, "no such job")
-    row["logs"] = store.query("SELECT ts, message FROM job_logs WHERE job_id = ? ORDER BY id", (job_id,))
+    row["logs"] = store.query("SELECT ts, message FROM app_job_logs WHERE job_id = ? ORDER BY id", (job_id,))
     return row
 
 
@@ -145,8 +145,8 @@ def job(request: Request, job_id: int) -> dict:
 def events(request: Request, module: str = "", limit: int = 200, offset: int = 0) -> dict:
     store: Store = request.app.state.store
     where, params = ("WHERE module = ?", [module]) if module else ("", [])
-    total = store.scalar(f"SELECT COUNT(*) FROM events {where}", tuple(params))
-    rows = store.query(f"SELECT * FROM events {where} ORDER BY id DESC LIMIT ? OFFSET ?", (*params, max(1, min(limit, 1000)), max(0, offset)))
+    total = store.scalar(f"SELECT COUNT(*) FROM app_events {where}", tuple(params))
+    rows = store.query(f"SELECT * FROM app_events {where} ORDER BY id DESC LIMIT ? OFFSET ?", (*params, max(1, min(limit, 1000)), max(0, offset)))
     return {"events": rows, "total": total}
 
 
@@ -283,11 +283,11 @@ def _module(request: Request, name: str):
 
 
 def _open(store: Store, module: str) -> list[dict]:
-    return store.query("SELECT * FROM sessions WHERE module = ? AND closed_at IS NULL ORDER BY opened_at", (module,))
+    return store.query("SELECT * FROM app_sessions WHERE module = ? AND closed_at IS NULL ORDER BY opened_at", (module,))
 
 
 def _session(store: Store, module: str, sid: str) -> dict:
-    row = store.one("SELECT * FROM sessions WHERE module = ? AND id = ? AND closed_at IS NULL", (module, sid))
+    row = store.one("SELECT * FROM app_sessions WHERE module = ? AND id = ? AND closed_at IS NULL", (module, sid))
     if row is None:
         raise HTTPException(404, "no open session with that id")
     return row
@@ -297,7 +297,7 @@ def _label(store: Store, row: dict) -> str:
     """The tab's name: the tagger's title once it has run, until then the owner's first line."""
     if row["title"]:
         return row["title"]
-    first = store.scalar("SELECT text FROM session_turns WHERE session_id = ? AND role = 'user' ORDER BY id LIMIT 1", (row["id"],))
+    first = store.scalar("SELECT text FROM app_session_turns WHERE session_id = ? AND role = 'user' ORDER BY id LIMIT 1", (row["id"],))
     return (first or "new").splitlines()[0][:80]
 
 
@@ -306,12 +306,12 @@ def _key(module: str, sid: str) -> str:
 
 
 def turns(store: Store, session_id: str) -> list[dict]:
-    return store.query("SELECT id, ts, role, text, tool, status FROM session_turns WHERE session_id = ? ORDER BY id", (session_id,))
+    return store.query("SELECT id, ts, role, text, tool, status FROM app_session_turns WHERE session_id = ? ORDER BY id", (session_id,))
 
 
 def add_turn(store: Store, session_id: str, role: str, text: str | None = None, tool: str | None = None, status: str | None = None) -> int:
     cur = store.execute(
-        "INSERT INTO session_turns(session_id, ts, role, text, tool, status) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO app_session_turns(session_id, ts, role, text, tool, status) VALUES (?, ?, ?, ?, ?, ?)",
         (session_id, now_iso(), role, text, tool, status),
     )
     return cur.lastrowid
@@ -375,7 +375,7 @@ async def session_send(request: Request, module: str, body: dict = Body(...)) ->
 
 def new_session(store: Store, module: str) -> dict:
     sid = str(uuid.uuid4())
-    store.execute("INSERT INTO sessions(id, module, opened_at) VALUES (?, ?, ?)", (sid, module, now_iso()))
+    store.execute("INSERT INTO app_sessions(id, module, opened_at) VALUES (?, ?, ?)", (sid, module, now_iso()))
     return _session(store, module, sid)
 
 
@@ -411,7 +411,7 @@ def start_turn(st, mod, sid: str, started: bool, text: str, prompt: str, key: st
             elif role == "tool_result":
                 rid = tool_rows.get(ev.get("id") or "")
                 if rid:
-                    store.execute("UPDATE session_turns SET status = ? WHERE id = ?", (ev["status"], rid))
+                    store.execute("UPDATE app_session_turns SET status = ? WHERE id = ?", (ev["status"], rid))
             elif role == "init":
                 ctx.log("tools: " + ", ".join(ev.get("tools", [])))
             st.broadcast.publish(key, {**ev, "ts": now_iso()})
@@ -426,7 +426,7 @@ def start_turn(st, mod, sid: str, started: bool, text: str, prompt: str, key: st
                 add_turn(store, sid, "system", text=REPLAYED)
                 st.broadcast.publish(key, {"role": "system", "text": REPLAYED, "ts": now_iso()})
                 await st.claude.session_turn(mod, sid, True, replay + prompt, on_event)
-            store.execute("UPDATE sessions SET cli_started = 1 WHERE id = ?", (sid,))
+            store.execute("UPDATE app_sessions SET cli_started = 1 WHERE id = ?", (sid,))
             if on_done is not None:
                 on_done()
             return "ok"
@@ -434,7 +434,7 @@ def start_turn(st, mod, sid: str, started: bool, text: str, prompt: str, key: st
             add_turn(store, sid, "system", text=f"error: {e}")
             st.broadcast.publish(key, {"role": "error", "text": str(e), "ts": now_iso()})
             if not started:  # the CLI never took this id; retire it so the next turn starts clean
-                store.execute("UPDATE sessions SET closed_at = ?, title = ? WHERE id = ?", (now_iso(), "(failed to start)", sid))
+                store.execute("UPDATE app_sessions SET closed_at = ?, title = ? WHERE id = ?", (now_iso(), "(failed to start)", sid))
             raise
         finally:
             st.session_busy.discard(sid)
@@ -466,9 +466,9 @@ def tag_session(st, mod, sid: str, key: str, close: bool):
                 ctx.log(f"tagging failed, keeping fallback title: {e!r}")
         with ctx.commit() as conn:
             if close:
-                conn.execute("UPDATE sessions SET closed_at = ?, title = ?, tags = ? WHERE id = ?", (now_iso(), title, json.dumps(tags), sid))
+                conn.execute("UPDATE app_sessions SET closed_at = ?, title = ?, tags = ? WHERE id = ?", (now_iso(), title, json.dumps(tags), sid))
             else:
-                conn.execute("UPDATE sessions SET title = ?, tags = ? WHERE id = ?", (title, json.dumps(tags), sid))
+                conn.execute("UPDATE app_sessions SET title = ?, tags = ? WHERE id = ?", (title, json.dumps(tags), sid))
         ctx.event("closed" if close else "tagged", f"session: {title}" + (f" [{', '.join(tags)}]" if tags else ""), ref=sid)
         st.broadcast.publish(key, {"role": "tagged", "title": title, "tags": tags, "ts": now_iso()})
         return title

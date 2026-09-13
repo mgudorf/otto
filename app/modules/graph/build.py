@@ -10,10 +10,10 @@ from itertools import combinations
 
 SOURCES = """
 SELECT 'memory' AS src, m.id AS item, t.tag AS tag, m.created_at AS ts
-  FROM memory_tags t JOIN memories m ON m.id = t.memory_id
+  FROM memory_tags t JOIN memory_items m ON m.id = t.memory_id
 UNION ALL
 SELECT 'session', s.id, j.value, COALESCE(s.closed_at, s.opened_at)
-  FROM sessions s, json_each(s.tags) j
+  FROM app_sessions s, json_each(s.tags) j
  WHERE s.tags IS NOT NULL
 """
 # Every tagged session counts, open or closed: the module panes are tagged when they close, a Chat conversation after its first turn.

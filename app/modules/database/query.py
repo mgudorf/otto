@@ -6,10 +6,13 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from functools import lru_cache
+from pathlib import Path
 
 from app.store import Store
 
 PROGRESS_EVERY = 1000  # VM instructions between deadline checks
+APP = Path(__file__).resolve().parents[2]
 
 
 def _cell(v):
@@ -28,26 +31,53 @@ def statements(sql: str) -> list[str]:
     return [s for s in (x.strip() for x in out) if s]
 
 
+@lru_cache(maxsize=1)
+def owners() -> dict[str, str]:
+    """Table -> the module whose schema.sql creates it (`app` for app/schema.sql), read off a scratch connection each
+    schema runs on, so nothing parses SQL. A table no schema creates is `other`: a dropped module's, or the owner's own."""
+    out: dict[str, str] = {}
+    schemas = [("app", APP / "schema.sql"), *sorted((p.parent.name, p) for p in (APP / "modules").glob("*/schema.sql"))]
+    for module, path in schemas:
+        scratch = sqlite3.connect(":memory:")
+        scratch.executescript(path.read_text("utf-8"))
+        out.update({r[0]: module for r in scratch.execute("SELECT name FROM sqlite_master WHERE type = 'table'")})
+        scratch.close()
+    return out
+
+
 def tables(store: Store) -> list[dict]:
-    """User tables with row counts: no sqlite_* internals, no shadow tables of virtual tables."""
+    """User tables with their module and row count: no sqlite_* internals, no shadow tables of virtual tables."""
     conn = store.read_only()
     with store.ro_lock:
         names = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
         virtual = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'")]
         shown = [n for n in names if not any(n != v and n.startswith(v + "_") for v in virtual)]
-        return [{"name": n, "rows": conn.execute(f'SELECT COUNT(*) FROM "{n}"').fetchone()[0]} for n in shown]
+        return [{"name": n, "module": owners().get(n, "other"), "rows": conn.execute(f'SELECT COUNT(*) FROM "{n}"').fetchone()[0]} for n in shown]
+
+
+def _describe(store: Store, t: dict) -> dict:
+    """A shown table with its columns (name, type, notnull, default, pk), indexes, triggers and CREATE statement."""
+    conn = store.read_only()
+    name = t["name"]
+    with store.ro_lock:
+        sql = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)).fetchone()[0]
+        columns = [{"name": r[1], "type": r[2], "notnull": bool(r[3]), "default": r[4], "pk": bool(r[5])} for r in conn.execute(f'PRAGMA table_info("{name}")')]
+        indexes = [{"name": r[0], "sql": r[1]} for r in conn.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL ORDER BY name", (name,))]
+        triggers = [{"name": r[0], "sql": r[1]} for r in conn.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? ORDER BY name", (name,))]
+    return {**t, "columns": columns, "indexes": indexes, "triggers": triggers, "sql": sql}
+
+
+def table(store: Store, name: str) -> dict | None:
+    """One shown table, described; None for a name that is not one."""
+    t = next((t for t in tables(store) if t["name"] == name), None)
+    return _describe(store, t) if t else None
 
 
 def schema(store: Store) -> list[dict]:
-    """Every shown table with its CREATE statement, columns and row count."""
-    conn = store.read_only()
-    out = []
-    for t in tables(store):
-        with store.ro_lock:
-            sql = conn.execute("SELECT sql FROM sqlite_master WHERE name = ?", (t["name"],)).fetchone()[0]
-            cols = [r[1] for r in conn.execute(f'PRAGMA table_info("{t["name"]}")')]
-        out.append({**t, "columns": cols, "sql": sql})
-    return out
+    """Every shown table, described."""
+    return [_describe(store, t) for t in tables(store)]
 
 
 def _schema_version(conn: sqlite3.Connection) -> int:

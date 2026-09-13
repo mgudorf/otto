@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS db_queries (
+CREATE TABLE IF NOT EXISTS database_queries (
   id         INTEGER PRIMARY KEY,
   name       TEXT NOT NULL UNIQUE,
   sql        TEXT NOT NULL,

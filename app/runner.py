@@ -48,7 +48,7 @@ class JobContext:
 
     def log(self, message: str) -> None:
         self.store.execute(
-            "INSERT INTO job_logs(job_id, ts, message) VALUES (?, ?, ?)", (self.job.id, now_iso(), message)
+            "INSERT INTO app_job_logs(job_id, ts, message) VALUES (?, ?, ?)", (self.job.id, now_iso(), message)
         )
 
     @contextmanager
@@ -58,7 +58,7 @@ class JobContext:
             yield conn
             if cursor:
                 conn.execute(
-                    "INSERT INTO cursors(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    "INSERT INTO app_cursors(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                     cursor,
                 )
 
@@ -90,7 +90,7 @@ class Runner:
 
     async def start(self) -> None:
         self.store.execute(
-            "UPDATE jobs SET status = 'failed', finished_at = ?, error = 'daemon restarted' WHERE status IN ('queued', 'running')",
+            "UPDATE app_jobs SET status = 'failed', finished_at = ?, error = 'daemon restarted' WHERE status IN ('queued', 'running')",
             (now_iso(),),
         )
         self._workers = [asyncio.create_task(self._worker(), name=f"runner-{i}") for i in range(self.max_concurrent)]
@@ -99,7 +99,7 @@ class Runner:
         if self.draining:
             raise RuntimeError("daemon is restarting")
         cur = self.store.execute(
-            "INSERT INTO jobs(task, module, resource, kind, status, queued_at) VALUES (?, ?, ?, ?, 'queued', ?)",
+            "INSERT INTO app_jobs(task, module, resource, kind, status, queued_at) VALUES (?, ?, ?, ?, 'queued', ?)",
             (task, module, resource, kind, now_iso()),
         )
         job = Job(cur.lastrowid, task, module, resource, kind, fn, notify, asyncio.get_running_loop().create_future())
@@ -127,7 +127,7 @@ class Runner:
     async def _run(self, job: Job) -> None:
         async with _as_async(self._lock(job.resource)):
             self.running.add(job.id)
-            self.store.execute("UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?", (now_iso(), job.id))
+            self.store.execute("UPDATE app_jobs SET status = 'running', started_at = ? WHERE id = ?", (now_iso(), job.id))
             ctx = JobContext(job, self)
             status, result, error, why = "done", None, None, None
             try:
@@ -149,14 +149,14 @@ class Runner:
     def _finish(self, job: Job, status: str, result: Any, error: str | None, why: str | None) -> None:
         text = None if result is None else str(result)[:4000]
         self.store.execute(
-            "UPDATE jobs SET status = ?, finished_at = ?, result = ?, error = ? WHERE id = ?",
+            "UPDATE app_jobs SET status = ?, finished_at = ?, result = ?, error = ? WHERE id = ?",
             (status, now_iso(), text, error, job.id),
         )
         if job.kind == "scheduled":
             # the tail of a traceback, not its head: the exception is at the end and the frame headers are not the reason
             last = error[-500:] if error else (text or "")[:500]
             self.store.execute(
-                "UPDATE tasks SET last_run = ?, last_status = ?, last_result = ? WHERE name = ?",
+                "UPDATE app_tasks SET last_run = ?, last_status = ?, last_result = ? WHERE name = ?",
                 (now_iso(), status, last, job.task),
             )
         if status == "failed":

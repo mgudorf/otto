@@ -27,7 +27,7 @@ def setup(config) -> None:
     conn = sqlite3.connect(config.data.db, timeout=5)
     try:
         add_cleared_at(conn)
-        conn.execute("UPDATE feedback SET status = 'failed', error = 'daemon restarted' WHERE status = 'queued'")
+        conn.execute("UPDATE feedback_items SET status = 'failed', error = 'daemon restarted' WHERE status = 'queued'")
         conn.commit()
     finally:
         conn.close()

@@ -27,7 +27,7 @@ ON CONFLICT(id) DO UPDATE SET labels = excluded.labels, snippet = excluded.snipp
 def _stamp_synced(conn) -> None:
     """In the same transaction as the results, so the page never reports a sync that did not commit."""
     conn.execute(
-        "INSERT INTO cursors(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "INSERT INTO app_cursors(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         (SYNCED, now_iso()),
     )
 
@@ -92,7 +92,7 @@ async def _backfill(ctx, gm) -> str:
         fetched += len(rows)
         ctx.log(f"backfill {fetched}/{len(todo)}")
     with ctx.commit(cursor=(CURSOR, history_id)) as conn:
-        conn.execute("DELETE FROM cursors WHERE key = ?", (BACKFILL,))
+        conn.execute("DELETE FROM app_cursors WHERE key = ?", (BACKFILL,))
         _stamp_synced(conn)
     return f"backfilled {fetched} messages from the last {days} days ({len(have)} already mirrored)"
 

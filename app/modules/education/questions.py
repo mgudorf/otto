@@ -22,9 +22,9 @@ TAG_CHARS = 40
 ACTIVE = "q.completed_at IS NULL"
 LISTED = "q.deleted_at IS NULL"                                # a deleted question is off both slices; the row stays, unrepeatable
 SELECT = """SELECT q.*, t.name AS topic,
-  (SELECT COUNT(*) FROM question_parts p WHERE p.question_id = q.id) AS parts,
-  (SELECT COUNT(*) FROM question_parts p WHERE p.question_id = q.id AND p.score IS NOT NULL) AS graded_parts
-FROM questions q JOIN topics t ON t.id = q.topic_id"""
+  (SELECT COUNT(*) FROM education_question_parts p WHERE p.question_id = q.id) AS parts,
+  (SELECT COUNT(*) FROM education_question_parts p WHERE p.question_id = q.id AND p.score IS NOT NULL) AS graded_parts
+FROM education_questions q JOIN education_topics t ON t.id = q.topic_id"""
 
 # Header acronyms: a run of capitals (plural s stripped) in the title, the tag or the topic name must occur in the
 # setup or a prompt, or the question names something it never defines. Crude by design; false positives go here.
@@ -80,7 +80,7 @@ def question(store: Store, question_id: int) -> dict | None:
 
 
 def parts_of(store: Store, question_id: int) -> list[dict]:
-    return store.query("SELECT * FROM question_parts WHERE question_id = ? ORDER BY n", (question_id,))
+    return store.query("SELECT * FROM education_question_parts WHERE question_id = ? ORDER BY n", (question_id,))
 
 
 def feedback_of(store: Store, question_id: int) -> list[str]:
@@ -93,7 +93,7 @@ def due_queue(store: Store) -> list[dict]:
 
 
 def due_count(store: Store) -> int:
-    return store.scalar(f"SELECT COUNT(*) FROM questions q WHERE {LISTED} AND {ACTIVE}")
+    return store.scalar(f"SELECT COUNT(*) FROM education_questions q WHERE {LISTED} AND {ACTIVE}")
 
 
 def open_question(store: Store) -> dict | None:
@@ -105,17 +105,17 @@ def topic_rows(store: Store) -> list[dict]:
     """Progress per topic: difficulty, completed/asked, average, the last RECENT scores, last asked."""
     rows = store.query(
         f"""SELECT t.id, t.name, t.description, t.difficulty,
-             (SELECT COUNT(*) FROM questions q WHERE q.topic_id = t.id AND {LISTED}) AS asked,
-             (SELECT COUNT(*) FROM questions q WHERE q.topic_id = t.id AND {LISTED} AND q.completed_at IS NOT NULL) AS completed,
-             (SELECT AVG(score) FROM questions q WHERE q.topic_id = t.id AND {LISTED} AND q.completed_at IS NOT NULL) AS average,
-             (SELECT MAX(created_at) FROM questions q WHERE q.topic_id = t.id AND {LISTED}) AS last_asked
-           FROM topics t WHERE t.retired_at IS NULL ORDER BY t.name"""
+             (SELECT COUNT(*) FROM education_questions q WHERE q.topic_id = t.id AND {LISTED}) AS asked,
+             (SELECT COUNT(*) FROM education_questions q WHERE q.topic_id = t.id AND {LISTED} AND q.completed_at IS NOT NULL) AS completed,
+             (SELECT AVG(score) FROM education_questions q WHERE q.topic_id = t.id AND {LISTED} AND q.completed_at IS NOT NULL) AS average,
+             (SELECT MAX(created_at) FROM education_questions q WHERE q.topic_id = t.id AND {LISTED}) AS last_asked
+           FROM education_topics t WHERE t.retired_at IS NULL ORDER BY t.name"""
     )
     for t in rows:
         t["average"] = None if t["average"] is None else round(t["average"])
         t["recent"] = [
             r["score"] for r in store.query(
-                "SELECT score FROM questions WHERE topic_id = ? AND deleted_at IS NULL AND completed_at IS NOT NULL"
+                "SELECT score FROM education_questions WHERE topic_id = ? AND deleted_at IS NULL AND completed_at IS NOT NULL"
                 " ORDER BY completed_at DESC LIMIT ?", (t["id"], RECENT)
             )
         ]
@@ -125,8 +125,8 @@ def topic_rows(store: Store) -> list[dict]:
 def waiting_topics(store: Store, limit: int) -> list[dict]:
     """Active topics that have waited longest for a question, never asked first: breadth over depth."""
     return store.query(
-        f"""SELECT t.*, (SELECT MAX(created_at) FROM questions q WHERE q.topic_id = t.id AND {LISTED}) AS last_asked
-           FROM topics t WHERE t.retired_at IS NULL ORDER BY last_asked IS NOT NULL, last_asked, t.name LIMIT ?""",
+        f"""SELECT t.*, (SELECT MAX(created_at) FROM education_questions q WHERE q.topic_id = t.id AND {LISTED}) AS last_asked
+           FROM education_topics t WHERE t.retired_at IS NULL ORDER BY last_asked IS NOT NULL, last_asked, t.name LIMIT ?""",
         (limit,),
     )
 
@@ -163,10 +163,10 @@ def _topic_block(store: Store, t: dict) -> str:
     lines = [f"Topic {t['id']}: {t['name']} — difficulty {t['difficulty']}/{DIFFICULTY_MAX}"]
     if t.get("description"):
         lines.append(f"  What the owner wants: {t['description'][:300]}")
-    asked = store.query("SELECT id, title, deleted_at FROM questions WHERE topic_id = ? ORDER BY created_at DESC", (t["id"],))
+    asked = store.query("SELECT id, title, deleted_at FROM education_questions WHERE topic_id = ? ORDER BY created_at DESC", (t["id"],))
     lines.append("  Already asked, never repeat: " + ("; ".join(_asked_line(store, a) for a in asked) if asked else "nothing yet"))
     last = store.one(
-        "SELECT id, title, score FROM questions WHERE topic_id = ? AND deleted_at IS NULL AND completed_at IS NOT NULL"
+        "SELECT id, title, score FROM education_questions WHERE topic_id = ? AND deleted_at IS NULL AND completed_at IS NOT NULL"
         " ORDER BY completed_at DESC LIMIT 1", (t["id"],)
     )
     if last:
@@ -219,7 +219,7 @@ def clean_parts(parts) -> list[dict]:
 
 def validate_question(store: Store, topic_id, title, topic_tag, definitions, premise, parts) -> str | None:
     """The rules every new question meets, whoever wrote it. Returns the problem, or None."""
-    if store.one("SELECT id FROM topics WHERE id = ? AND retired_at IS NULL", (topic_id,)) is None:
+    if store.one("SELECT id FROM education_topics WHERE id = ? AND retired_at IS NULL", (topic_id,)) is None:
         return f"no active topic {topic_id}"
     if not isinstance(parts, (list, tuple)):
         return "parts must be a list"
@@ -233,7 +233,7 @@ def validate_question(store: Store, topic_id, title, topic_tag, definitions, pre
         return "title and topic_tag are required"
     if not str(definitions or "").strip() or not str(premise or "").strip():
         return "definitions and premise are required"
-    if store.one("SELECT id FROM questions WHERE topic_id = ? AND title = ?", (topic_id, str(title).strip())):
+    if store.one("SELECT id FROM education_questions WHERE topic_id = ? AND title = ?", (topic_id, str(title).strip())):
         return f"a question titled {str(title).strip()!r} already exists on topic {topic_id}"
     return None
 
@@ -258,12 +258,12 @@ def insert_question(conn, topic_id, title, topic_tag, definitions, premise, part
     """Write one validated question and its parts on an open connection. `opened` makes it the tutor's context at once."""
     ts = now_iso()
     cur = conn.execute(
-        "INSERT INTO questions(topic_id, title, topic_tag, definitions, premise, difficulty, source, created_at, opened_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO education_questions(topic_id, title, topic_tag, definitions, premise, difficulty, source, created_at, opened_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (topic_id, str(title).strip(), str(topic_tag).strip(), str(definitions).strip(), str(premise).strip(), int(difficulty), source, ts, ts if opened else None),
     )
     for n, p in enumerate(clean_parts(parts), 1):
         conn.execute(
-            "INSERT INTO question_parts(question_id, n, title, text, rubric) VALUES (?, ?, ?, ?, ?)", (cur.lastrowid, n, p["title"], p["prompt"], p["rubric"])
+            "INSERT INTO education_question_parts(question_id, n, title, text, rubric) VALUES (?, ?, ?, ?, ?)", (cur.lastrowid, n, p["title"], p["prompt"], p["rubric"])
         )
     return cur.lastrowid
 
@@ -273,7 +273,7 @@ def add_question(store: Store, topic_id, title, topic_tag, definitions, premise,
     err = validate_question(store, topic_id, title, topic_tag, definitions, premise, parts)
     if err:
         return {"error": err}
-    t = store.one("SELECT name, difficulty FROM topics WHERE id = ?", (topic_id,))
+    t = store.one("SELECT name, difficulty FROM education_topics WHERE id = ?", (topic_id,))
     with store.tx() as conn:
         qid = insert_question(conn, topic_id, title, topic_tag, definitions, premise, parts, t["difficulty"], source, opened)
     out = {"id": qid, "parts": len(clean_parts(parts))}

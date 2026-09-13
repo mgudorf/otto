@@ -26,11 +26,11 @@ def _json_array(raw: str) -> list:
 
 
 async def nightly(ctx) -> str:
-    topics = ctx.store.query("SELECT id, kind, text FROM search_topics ORDER BY kind, created_at")
+    topics = ctx.store.query("SELECT id, kind, text FROM web_search_topics ORDER BY kind, created_at")
     if not topics:
         return Skipped("no topics")
     cap = ctx.config.web_search.max_findings
-    seen = ctx.store.query("SELECT url, title, status FROM search_findings ORDER BY found_at DESC LIMIT 100")
+    seen = ctx.store.query("SELECT url, title, status FROM web_search_findings ORDER BY found_at DESC LIMIT 100")
     prompt = "\n".join([
         "The owner's search topics, as (topic_id, kind, text). Kinds: " + "; ".join(f"{k} = {v}" for k, v in KIND_MEANS.items()) + ".",
         *[f"- ({t['id']}, {t['kind']}) {t['text'][:300]}" for t in topics],
@@ -57,7 +57,7 @@ async def nightly(ctx) -> str:
             if not title or not url or topic_id not in kinds:
                 continue
             cur = conn.execute(
-                "INSERT OR IGNORE INTO search_findings(topic_id, kind, title, url, summary, found_at) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO web_search_findings(topic_id, kind, title, url, summary, found_at) VALUES (?, ?, ?, ?, ?, ?)",
                 (topic_id, kinds[topic_id], title, url, summary, ts),
             )
             if cur.rowcount:

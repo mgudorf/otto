@@ -1,6 +1,6 @@
 -- A topic is one of the owner's domains. A question is one shared setup (definitions, then a premise) with lettered
 -- parts; the owner answers parts on the page, the tutor grades them in the session, and the owner completes the quiz.
-CREATE TABLE IF NOT EXISTS topics (
+CREATE TABLE IF NOT EXISTS education_topics (
   id          INTEGER PRIMARY KEY,
   name        TEXT NOT NULL UNIQUE,
   description TEXT,                                            -- one line on what the owner wants from it, optional
@@ -9,9 +9,9 @@ CREATE TABLE IF NOT EXISTS topics (
   retired_at  TEXT
 );
 
-CREATE TABLE IF NOT EXISTS questions (
+CREATE TABLE IF NOT EXISTS education_questions (
   id           INTEGER PRIMARY KEY,
-  topic_id     INTEGER NOT NULL REFERENCES topics(id),
+  topic_id     INTEGER NOT NULL REFERENCES education_topics(id),
   title        TEXT NOT NULL,                                  -- 3 to 8 words naming what the question is about
   topic_tag    TEXT,                                           -- the facet within the topic, 2 to 5 words; NULL on v0 rows
   definitions  TEXT,                                           -- every relation and variable the parts draw on: markdown, math in LaTeX; NULL on rows older than v2
@@ -27,10 +27,10 @@ CREATE TABLE IF NOT EXISTS questions (
   deleted_at   TEXT,                                           -- thrown away by the owner: off every list, kept so the generator never re-asks it
   UNIQUE (topic_id, title)
 );
-CREATE INDEX IF NOT EXISTS questions_created ON questions(created_at);
+CREATE INDEX IF NOT EXISTS education_questions_created ON education_questions(created_at);
 
-CREATE TABLE IF NOT EXISTS question_parts (
-  question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS education_question_parts (
+  question_id INTEGER NOT NULL REFERENCES education_questions(id) ON DELETE CASCADE,
   n           INTEGER NOT NULL,                                -- 1-based; shown as (a), (b), ...
   title       TEXT,                                            -- 2 to 5 words naming the part; NULL on rows older than v2
   text        TEXT NOT NULL,                                   -- the ask, markdown
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS question_parts (
 CREATE TABLE IF NOT EXISTS education_feedback (
   id          INTEGER PRIMARY KEY,
   ts          TEXT NOT NULL,
-  topic_id    INTEGER REFERENCES topics(id),
-  question_id INTEGER REFERENCES questions(id),                -- kept when the question is deleted; the words still describe it
+  topic_id    INTEGER REFERENCES education_topics(id),
+  question_id INTEGER REFERENCES education_questions(id),      -- kept when the question is deleted; the words still describe it
   text        TEXT NOT NULL                                    -- the owner's words, unchanged
 );

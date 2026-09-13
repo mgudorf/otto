@@ -61,7 +61,7 @@ def register(read, full, store: Store, config=None) -> None:
         """The owner's feedback lines, verbatim, newest first. topic_id narrows."""
         where, params = ("WHERE f.topic_id = ?", (topic_id,)) if topic_id is not None else ("", ())
         return store.query(
-            f"SELECT f.id, f.ts, f.topic_id, t.name AS topic, f.question_id, f.text FROM education_feedback f LEFT JOIN topics t ON t.id = f.topic_id {where} ORDER BY f.id DESC LIMIT 100",
+            f"SELECT f.id, f.ts, f.topic_id, t.name AS topic, f.question_id, f.text FROM education_feedback f LEFT JOIN education_topics t ON t.id = f.topic_id {where} ORDER BY f.id DESC LIMIT 100",
             params,
         )
 
@@ -70,17 +70,17 @@ def register(read, full, store: Store, config=None) -> None:
         name = name.strip()
         if not name:
             return {"error": "empty name"}
-        existing = store.one("SELECT * FROM topics WHERE name = ? COLLATE NOCASE", (name,))
+        existing = store.one("SELECT * FROM education_topics WHERE name = ? COLLATE NOCASE", (name,))
         if existing and existing["retired_at"] is None:
             return {"error": f"topic {existing['id']} already exists: {existing['name']}"}
         desc = (description or "").strip() or None
         with store.tx() as conn:
             if existing:
-                conn.execute("UPDATE topics SET retired_at = NULL, description = COALESCE(?, description) WHERE id = ?", (desc, existing["id"]))
+                conn.execute("UPDATE education_topics SET retired_at = NULL, description = COALESCE(?, description) WHERE id = ?", (desc, existing["id"]))
                 tid = existing["id"]
             else:
                 tid = conn.execute(
-                    "INSERT INTO topics(name, description, difficulty, created_at) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO education_topics(name, description, difficulty, created_at) VALUES (?, ?, ?, ?)",
                     (name, desc, config.education.start_difficulty, now_iso()),
                 ).lastrowid
         store.event("education", "added topic", f"(agent) {name}", ref=str(tid))
@@ -103,11 +103,11 @@ def register(read, full, store: Store, config=None) -> None:
         if not text:
             return {"error": "empty text"}
         if question_id is not None:
-            q = store.one("SELECT id, topic_id FROM questions WHERE id = ?", (question_id,))
+            q = store.one("SELECT id, topic_id FROM education_questions WHERE id = ?", (question_id,))
             if q is None:
                 return {"error": f"no question {question_id}"}
             topic_id = q["topic_id"] if topic_id is None else topic_id
-        if topic_id is not None and store.one("SELECT id FROM topics WHERE id = ?", (topic_id,)) is None:
+        if topic_id is not None and store.one("SELECT id FROM education_topics WHERE id = ?", (topic_id,)) is None:
             return {"error": f"no topic {topic_id}"}
         with store.tx() as conn:
             cur = conn.execute("INSERT INTO education_feedback(ts, topic_id, question_id, text) VALUES (?, ?, ?, ?)", (now_iso(), topic_id, question_id, text))

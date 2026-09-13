@@ -12,7 +12,7 @@ def register(read, full, store: Store, config) -> None:
     d = config.database
 
     def db_schema() -> list[dict]:
-        """Every table with its CREATE statement, columns and row count."""
+        """Every table under the module that owns it: row count, columns (name, type, notnull, default, pk), indexes, triggers and the CREATE statement."""
         return query.schema(store)
 
     def db_query(sql: str, limit: int = 100) -> dict:

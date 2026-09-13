@@ -142,3 +142,24 @@ def test_docs_tools_confined(store, config):
     for bad in ("config.toml", "../app/config.py", "docs/design/support.js", "docs/../app/claude.py"):
         assert "error" in read.tools["docs_read"](bad), bad
     assert read.tools["feedback_list"]() == []
+
+
+def test_tables_are_named_after_their_module():
+    """Every table a schema creates carries its owner's prefix (app_ for the platform) and every index and trigger its
+    table's name, so a name says where a table lives and the Database page groups by module. A table that changes its
+    name is a line in app/migrate.py RENAMES, and no schema creates a name listed there."""
+    import sqlite3
+
+    from app.migrate import RENAMES
+
+    schemas = [("app", ROOT / "app" / "schema.sql"), *sorted((p.parent.name, p) for p in (ROOT / "app" / "modules").glob("*/schema.sql"))]
+    for module, path in schemas:
+        conn = sqlite3.connect(":memory:")
+        conn.executescript(path.read_text("utf-8"))
+        for kind, name, table in conn.execute("SELECT type, name, tbl_name FROM sqlite_master WHERE sql IS NOT NULL").fetchall():
+            if kind == "table":
+                assert name.startswith(f"{module}_"), f"{path.parent.name}/schema.sql: table {name} lacks the {module}_ prefix"
+                assert name not in RENAMES, f"{path.parent.name}/schema.sql creates {name}, an old name in app/migrate.py RENAMES"
+            else:
+                assert name.startswith(f"{table}_"), f"{path.parent.name}/schema.sql: {kind} {name} is not named after {table}"
+        conn.close()

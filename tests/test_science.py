@@ -266,7 +266,7 @@ def test_science_read_tools_never_write(sci, monkeypatch):
         assert "error" in _data(await full.call_tool("science_new", {"path": "../out", "kind": "folder"}))
         files = [json.loads(c.text) for c in (await app.state.mcp_read.call_tool("science_files", {})).content]
         assert {f["id"] for f in files} == {"analysis.ipynb", "etl.py", "sub/deep.py", "lab/run.py"} and all(f["kernel"] is None and f["running"] is False for f in files)
-        assert [e["verb"] for e in app.state.store.query("SELECT verb FROM events WHERE module = 'science' ORDER BY id")] == ["ran", "edited", "edited", "ran", "created"]
+        assert [e["verb"] for e in app.state.store.query("SELECT verb FROM app_events WHERE module = 'science' ORDER BY id")] == ["ran", "edited", "edited", "ran", "created"]
         app.state.store.close()
 
     run(main())

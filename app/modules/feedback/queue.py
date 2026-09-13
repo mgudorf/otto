@@ -13,6 +13,7 @@ from pathlib import Path
 from textwrap import indent
 
 import app.modules
+from app import migrate
 from app.store import Store, now_iso
 
 MODULES_DIR = Path(app.modules.__file__).parent
@@ -23,8 +24,8 @@ FIELDS = "id, created_at, page, item_module, item_id, item_text, text, status, k
 
 def add_cleared_at(conn: sqlite3.Connection) -> None:
     """The column a feedback table created before it lacks; a no-op afterwards."""
-    if "cleared_at" not in {r[1] for r in conn.execute("PRAGMA table_info(feedback)")}:
-        conn.execute("ALTER TABLE feedback ADD COLUMN cleared_at TEXT")
+    if "cleared_at" not in {r[1] for r in conn.execute("PRAGMA table_info(feedback_items)")}:
+        conn.execute("ALTER TABLE feedback_items ADD COLUMN cleared_at TEXT")
 
 
 def names() -> list[str]:
@@ -40,15 +41,15 @@ def _scope(modules: list[str]) -> tuple[str, list[str]]:
 def pending(store: Store, modules: list[str]) -> list[dict]:
     """Rows recorded from a module's page, or about one of its items, that no work session has cleared. Any status."""
     where, params = _scope(modules)
-    return store.query(f"SELECT {FIELDS} FROM feedback WHERE {where} ORDER BY id", tuple(params))
+    return store.query(f"SELECT {FIELDS} FROM feedback_items WHERE {where} ORDER BY id", tuple(params))
 
 
 def clear(store: Store, modules: list[str]) -> list[int]:
     """Stamp cleared_at on every pending row of the modules; nothing is deleted. Returns the ids."""
     where, params = _scope(modules)
-    ids = [r["id"] for r in store.query(f"SELECT id FROM feedback WHERE {where} ORDER BY id", tuple(params))]
+    ids = [r["id"] for r in store.query(f"SELECT id FROM feedback_items WHERE {where} ORDER BY id", tuple(params))]
     if ids:
-        store.execute(f"UPDATE feedback SET cleared_at = ? WHERE id IN ({', '.join('?' * len(ids))})", (now_iso(), *ids))
+        store.execute(f"UPDATE feedback_items SET cleared_at = ? WHERE id IN ({', '.join('?' * len(ids))})", (now_iso(), *ids))
     return ids
 
 
@@ -128,6 +129,9 @@ def main(argv: list[str], config) -> int:
     store = Store(config.data.db)
     try:
         with store.raw() as conn:
+            if migrate.pending(conn):   # the daemon renames tables at boot; touching them first would break the one still running
+                print("the database still has tables under older names; start the daemon on this code first (python -m app)", file=sys.stderr)
+                return 1
             add_cleared_at(conn)
         who = ", ".join(modules)
         if verb == "clear":

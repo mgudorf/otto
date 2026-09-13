@@ -33,7 +33,7 @@ def _folder(config, sid: str) -> Path:
 
 
 def _get(store: Store, sid: str) -> dict:
-    row = store.one("SELECT * FROM sessions WHERE id = ? AND module = ?", (sid, MODULE))
+    row = store.one("SELECT * FROM app_sessions WHERE id = ? AND module = ?", (sid, MODULE))
     if row is None:
         raise HTTPException(404, "no such conversation")
     return row
@@ -41,7 +41,7 @@ def _get(store: Store, sid: str) -> dict:
 
 def _create(store: Store) -> dict:
     sid = str(uuid.uuid4())
-    store.execute("INSERT INTO sessions(id, module, opened_at) VALUES (?, ?, ?)", (sid, MODULE, now_iso()))
+    store.execute("INSERT INTO app_sessions(id, module, opened_at) VALUES (?, ?, ?)", (sid, MODULE, now_iso()))
     return _get(store, sid)
 
 
@@ -49,7 +49,7 @@ def _title(store: Store, row: dict) -> str:
     """The tagger's title once it has run; until then the owner's first line."""
     if row["title"]:
         return row["title"]
-    first = store.scalar("SELECT text FROM session_turns WHERE session_id = ? AND role = 'user' ORDER BY id LIMIT 1", (row["id"],))
+    first = store.scalar("SELECT text FROM app_session_turns WHERE session_id = ? AND role = 'user' ORDER BY id LIMIT 1", (row["id"],))
     return (first or NEW_TITLE).splitlines()[0][:80]
 
 
@@ -68,7 +68,7 @@ def _search(query: str) -> tuple[list[str], list[str]]:
     """One LIKE per word over the title and every turn's text, all words required."""
     where, params = [], []
     for term in query.split():
-        where.append("(COALESCE(s.title, '') LIKE ? OR EXISTS (SELECT 1 FROM session_turns u WHERE u.session_id = s.id AND u.text LIKE ?))")
+        where.append("(COALESCE(s.title, '') LIKE ? OR EXISTS (SELECT 1 FROM app_session_turns u WHERE u.session_id = s.id AND u.text LIKE ?))")
         params += [f"%{term}%", f"%{term}%"]
     return where, params
 
@@ -98,12 +98,12 @@ def left(request: Request, query: str = "", page: int = 0) -> dict:
     where, params = _search(query)
     sql_where = "WHERE s.module = ?" + "".join(f" AND {w}" for w in where)
     params = [MODULE, *params]
-    total = store.scalar(f"SELECT COUNT(*) FROM sessions s {sql_where}", tuple(params))
+    total = store.scalar(f"SELECT COUNT(*) FROM app_sessions s {sql_where}", tuple(params))
     rows = store.query(
         f"""SELECT s.id, s.title, s.opened_at,
-                   COALESCE((SELECT MAX(ts) FROM session_turns t WHERE t.session_id = s.id), s.opened_at) AS last_ts,
-                   COALESCE((SELECT MAX(id) FROM session_turns t WHERE t.session_id = s.id), 0) AS last_turn
-              FROM sessions s {sql_where} ORDER BY last_ts DESC, last_turn DESC, s.rowid DESC LIMIT ?""",
+                   COALESCE((SELECT MAX(ts) FROM app_session_turns t WHERE t.session_id = s.id), s.opened_at) AS last_ts,
+                   COALESCE((SELECT MAX(id) FROM app_session_turns t WHERE t.session_id = s.id), 0) AS last_turn
+              FROM app_sessions s {sql_where} ORDER BY last_ts DESC, last_turn DESC, s.rowid DESC LIMIT ?""",
         (*params, limit),
     )
     groups: list[dict] = []
@@ -178,7 +178,7 @@ async def delete(request: Request, body: dict = Body(...)) -> dict:
 
     async def run(ctx):
         with ctx.commit() as conn:
-            conn.execute("DELETE FROM sessions WHERE id = ?", (sid,))   # turns go with it (ON DELETE CASCADE)
+            conn.execute("DELETE FROM app_sessions WHERE id = ?", (sid,))   # turns go with it (ON DELETE CASCADE)
         shutil.rmtree(_folder(st.config, sid), ignore_errors=True)
         ctx.event("deleted", title[:120], ref=sid)
         return {"id": sid}
@@ -233,12 +233,12 @@ async def events(request: Request, sid: str):
 
 # ---- shell hooks ---------------------------------------------------------------------------
 def numbers(store: Store) -> dict:
-    return {"value": store.scalar("SELECT COUNT(*) FROM sessions WHERE module = ?", (MODULE,)), "label": "conversations"}
+    return {"value": store.scalar("SELECT COUNT(*) FROM app_sessions WHERE module = ?", (MODULE,)), "label": "conversations"}
 
 
 def context(store: Store, registry) -> str:
-    n = store.scalar("SELECT COUNT(*) FROM sessions WHERE module = ?", (MODULE,))
-    recent = store.query("SELECT id, title FROM sessions WHERE module = ? ORDER BY opened_at DESC LIMIT 5", (MODULE,))
+    n = store.scalar("SELECT COUNT(*) FROM app_sessions WHERE module = ?", (MODULE,))
+    recent = store.query("SELECT id, title FROM app_sessions WHERE module = ? ORDER BY opened_at DESC LIMIT 5", (MODULE,))
     lines = [f"Conversations: {n}", "Most recent:"]
     lines += [f"  {_title(store, r)}" for r in recent] or ["  none"]
     lines.append("Each conversation has its own folder under the workspace; the owner's messages name it.")

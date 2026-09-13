@@ -34,7 +34,7 @@ def test_same_resource_serializes_and_different_overlap(store, config):
     run(main())
     assert spans["a"][1] <= spans["b"][0] or spans["b"][1] <= spans["a"][0], "same resource must not overlap"
     assert spans["c"][0] < min(spans["a"][1], spans["b"][1]), "different resources overlap"
-    assert {r["status"] for r in store.query("SELECT status FROM jobs")} == {"done"}
+    assert {r["status"] for r in store.query("SELECT status FROM app_jobs")} == {"done"}
 
 
 def test_cap_holds(store, config):
@@ -64,7 +64,7 @@ def test_failure_is_local(store, config):
     async def ok(ctx):
         return "fine"
 
-    store.execute("INSERT INTO tasks(name, module, interval_seconds) VALUES ('bad', 'm', 60)")
+    store.execute("INSERT INTO app_tasks(name, module, interval_seconds) VALUES ('bad', 'm', 60)")
 
     async def main():
         r = make_runner(store, config, cap=1)
@@ -79,13 +79,13 @@ def test_failure_is_local(store, config):
         await r.drain(1)
 
     run(main())
-    rows = {r["task"]: r for r in store.query("SELECT * FROM jobs")}
+    rows = {r["task"]: r for r in store.query("SELECT * FROM app_jobs")}
     assert rows["bad"]["status"] == "failed" and "kaput" in rows["bad"]["error"]
     assert rows["good"]["status"] == "done"
     # a multi-line message keeps its reason: the event names the exception, last_result holds the tail of the traceback
-    event = store.one("SELECT * FROM events WHERE verb = 'failed'")["text"]
+    event = store.one("SELECT * FROM app_events WHERE verb = 'failed'")["text"]
     assert event.startswith("bad: ValueError: kaput 401:") and "invalid_grant" in event
-    assert "invalid_grant" in store.one("SELECT last_result FROM tasks WHERE name = 'bad'")["last_result"]
+    assert "invalid_grant" in store.one("SELECT last_result FROM app_tasks WHERE name = 'bad'")["last_result"]
 
 
 def test_budget_refusal_is_skipped(store, config):
@@ -99,16 +99,16 @@ def test_budget_refusal_is_skipped(store, config):
         await r.drain(1)
 
     run(main())
-    job = store.one("SELECT * FROM jobs")
+    job = store.one("SELECT * FROM app_jobs")
     assert job["status"] == "skipped" and job["result"] == "nightly budget used (5/5)" and job["error"] is None
-    assert store.scalar("SELECT COUNT(*) FROM events WHERE verb = 'failed'") == 0
+    assert store.scalar("SELECT COUNT(*) FROM app_events WHERE verb = 'failed'") == 0
 
 
 def test_skipped_and_logs_and_commit(store, config):
     async def fn(ctx):
         ctx.log("hello")
         with ctx.commit(cursor=("k", "v1")) as conn:
-            conn.execute("INSERT INTO settings(key, value) VALUES ('x', '1')")
+            conn.execute("INSERT INTO app_settings(key, value) VALUES ('x', '1')")
         return Skipped("nothing to do")
 
     async def main():
@@ -119,7 +119,7 @@ def test_skipped_and_logs_and_commit(store, config):
         await r.drain(1)
 
     run(main())
-    job = store.one("SELECT * FROM jobs")
+    job = store.one("SELECT * FROM app_jobs")
     assert job["status"] == "skipped" and job["result"] == "nothing to do"
-    assert store.one("SELECT * FROM job_logs")["message"] == "hello"
+    assert store.one("SELECT * FROM app_job_logs")["message"] == "hello"
     assert store.cursor("k") == "v1" and store.setting("x") == 1

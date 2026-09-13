@@ -58,7 +58,7 @@ def test_chat_conversation_lifecycle(config):
             item = (await c.get(f"/api/chat/item/{sid}")).json()
             assert [(t["role"], t.get("tool"), t.get("status")) for t in item["turns"]] == [("user", None, None), ("tool", "Write", "done"), ("model", None, None)]
             assert item["title"] == "Notes about x" and item["tags"] == ["notes", "chat"] and item["busy"] is False
-            row = st.store.one("SELECT * FROM sessions WHERE id = ?", (sid,))
+            row = st.store.one("SELECT * FROM app_sessions WHERE id = ?", (sid,))
             assert row["module"] == "chat" and row["cli_started"] == 1 and row["closed_at"] is None
             # the turn: a new CLI session with Write and Edit, the search tools, partial messages on
             args = calls[0]["args"]
@@ -81,11 +81,11 @@ def test_chat_conversation_lifecycle(config):
             # a second turn resumes and queues no second tag job
             await c.post("/api/chat/send", json={"id": sid, "text": "and add a heading"})
             await settle(app)
-            assert "--resume" in calls[2]["args"] and st.store.scalar("SELECT COUNT(*) FROM jobs WHERE task = 'chat.tag'") == 1
+            assert "--resume" in calls[2]["args"] and st.store.scalar("SELECT COUNT(*) FROM app_jobs WHERE task = 'chat.tag'") == 1
             # every conversation has its own resource; the list orders by last activity and searches the turns
             sid2 = (await c.post("/api/chat/send", json={"text": "something else"})).json()["id"]
             await settle(app)
-            resources = {j["resource"] for j in st.store.query("SELECT resource FROM jobs WHERE task = 'chat.turn'")}
+            resources = {j["resource"] for j in st.store.query("SELECT resource FROM app_jobs WHERE task = 'chat.turn'")}
             assert resources == {f"session:{sid}", f"session:{sid2}"}
             left = (await c.get("/api/chat/left")).json()
             assert left["showing"] == "2 / 2" and [r["text"] for r in left["groups"][0]["rows"]] == ["something else", "Notes about x"]
@@ -95,13 +95,13 @@ def test_chat_conversation_lifecycle(config):
             assert n["value"] == 2 and n["label"] == "conversations"
             # delete is the only removal: row, turns and folder
             assert (await c.post("/api/chat/delete", json={"id": sid2})).status_code == 200
-            assert st.store.one("SELECT id FROM sessions WHERE id = ?", (sid2,)) is None
-            assert st.store.scalar("SELECT COUNT(*) FROM session_turns WHERE session_id = ?", (sid2,)) == 0
+            assert st.store.one("SELECT id FROM app_sessions WHERE id = ?", (sid2,)) is None
+            assert st.store.scalar("SELECT COUNT(*) FROM app_session_turns WHERE session_id = ?", (sid2,)) == 0
             assert not (config.data.workspace / "chat" / sid2).exists() and (await c.get("/api/chat/left")).json()["showing"] == "1 / 1"
             assert (await c.get(f"/api/chat/item/{sid2}")).status_code == 404
             # a scheduled run through the same seam never gets the write built-ins
             st.claude.config = dataclasses.replace(config, nightly=dataclasses.replace(config.nightly, window="00:00-23:59"))
-            st.store.execute("INSERT INTO search_topics(kind, text, created_at) VALUES ('work', 'x', '2026-09-01T00:00:00+00:00')")
+            st.store.execute("INSERT INTO web_search_topics(kind, text, created_at) VALUES ('work', 'x', '2026-09-01T00:00:00+00:00')")
             job = st.runner.submit("web_search.nightly", "web_search", "web_search", "scheduled", search_tasks.nightly)
             try:
                 await job.done
@@ -136,9 +136,9 @@ def test_chat_replays_lost_transcript(config):
             transcript = "user: save a note about x\nmodel: Saved it as notes.md."
             assert prompt.startswith("Earlier in this conversation") and transcript[-40:] in prompt and transcript[:20] not in prompt
             assert prompt.rstrip().endswith(")") and "and now?" in prompt
-            row = st.store.one("SELECT cli_started, closed_at FROM sessions WHERE id = ?", (sid,))
+            row = st.store.one("SELECT cli_started, closed_at FROM app_sessions WHERE id = ?", (sid,))
             assert row["cli_started"] == 1 and row["closed_at"] is None
-            assert st.store.scalar("SELECT COUNT(*) FROM jobs WHERE task = 'chat.turn' AND status = 'done'") == 2
+            assert st.store.scalar("SELECT COUNT(*) FROM app_jobs WHERE task = 'chat.turn' AND status = 'done'") == 2
         await app.state.runner.drain(1)
         app.state.store.close()
 

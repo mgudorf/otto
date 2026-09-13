@@ -218,7 +218,7 @@ def test_email_quota_retry(store, email_config, fake, monkeypatch):
 
     run(main())
     assert fake.quota_refusals == 0
-    assert "gmail 403" in store.one("SELECT error FROM jobs ORDER BY id DESC")["error"]
+    assert "gmail 403" in store.one("SELECT error FROM app_jobs ORDER BY id DESC")["error"]
 
 
 def test_email_token_refresh(store, email_config, fake):
@@ -298,7 +298,7 @@ def test_email_triage(store, email_config, fake):
         assert await r.submit("email.triage", "email", "email", "scheduled", triage).done == "2 triaged, 1 high"
         rows = store.query("SELECT message_id, priority, source FROM email_triage ORDER BY message_id")
         assert rows == [{"message_id": "m2", "priority": "low", "source": "scheduled"}, {"message_id": "m3", "priority": "high", "source": "scheduled"}]
-        assert store.cursor("email.triage") and store.scalar("SELECT COUNT(*) FROM llm_runs WHERE status = 'done'") == 1
+        assert store.cursor("email.triage") and store.scalar("SELECT COUNT(*) FROM app_llm_runs WHERE status = 'done'") == 1
         args = calls[0]["args"]
         allowed = args[args.index("--allowedTools") + 1]
         assert "mcp__otto-read__email_search" in allowed and "email_flag" not in allowed
@@ -322,7 +322,7 @@ def test_email_triage(store, email_config, fake):
     assert flag("m1", "bogus", "") ["error"].startswith("priority must be")
     high = next(f for f in read if f.__name__ == "email_triage")()
     assert [(h["id"], h["source"]) for h in high] == [("m3", "scheduled"), ("m1", "session")]
-    assert store.one("SELECT verb FROM events WHERE module = 'email' ORDER BY id DESC")["verb"] == "flagged"
+    assert store.one("SELECT verb FROM app_events WHERE module = 'email' ORDER BY id DESC")["verb"] == "flagged"
 
 
 HTML = """<!DOCTYPE html><html><head><title>page title</title><style>p{color:red}</style>

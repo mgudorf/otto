@@ -117,7 +117,7 @@ class FakeCtx:
             with self.store.tx() as conn:
                 yield conn
                 if cursor:
-                    conn.execute("INSERT INTO cursors(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", cursor)
+                    conn.execute("INSERT INTO app_cursors(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", cursor)
 
         return _tx()
 

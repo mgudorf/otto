@@ -111,19 +111,19 @@ def test_education_end_to_end(config):
             r = await c.post("/api/education/action/generate", json={})
             assert r.status_code == 200, r.text
             gid = r.json()["id"]
-            g = store.one("SELECT * FROM questions WHERE id = ?", (gid,))
+            g = store.one("SELECT * FROM education_questions WHERE id = ?", (gid,))
             assert g["title"] == "Why softmax saturates" and g["definitions"] == DEFS and g["premise"] == "A classifier ends in the softmax above."
             assert g["topic_tag"] == "softmax temperature" and g["source"] == "session" and g["opened_at"] is None and g["tags"] == "[]"
-            assert [(p["title"], p["rubric"]) for p in store.query("SELECT title, rubric FROM question_parts WHERE question_id = ? ORDER BY n", (gid,))] == [(p["title"], p["rubric"]) for p in PARTS]
+            assert [(p["title"], p["rubric"]) for p in store.query("SELECT title, rubric FROM education_question_parts WHERE question_id = ? ORDER BY n", (gid,))] == [(p["title"], p["rubric"]) for p in PARTS]
             assert "otto-read" in " ".join(calls[-1]) and "--no-session-persistence" in calls[-1]
             # an answer is a turn in the tutor's session: stored, the question started, the tutor briefed with the rubric
             r = await c.post("/api/education/action/answer", json={"id": qid, "n": 1, "answer": "because the exponential dominates"})
             assert r.status_code == 200, r.text
             assert r.json()["id"] == qid and r.json()["n"] == 1 and "queued" in r.json()
             await settle(app)
-            p = store.one("SELECT * FROM question_parts WHERE question_id = ? AND n = 1", (qid,))
+            p = store.one("SELECT * FROM education_question_parts WHERE question_id = ? AND n = 1", (qid,))
             assert p["answer"] == "because the exponential dominates" and p["answered_at"] and p["graded_at"] is None
-            assert store.one("SELECT started_at FROM questions WHERE id = ?", (qid,))["started_at"]
+            assert store.one("SELECT started_at FROM education_questions WHERE id = ?", (qid,))["started_at"]
             brief = procs[-1].stdin.data.decode()
             assert PARTS[0]["rubric"] in brief and "because the exponential dominates" in brief and DEFS in brief and "first answer to this part" in brief
             args = calls[-1]
@@ -155,7 +155,7 @@ def test_education_end_to_end(config):
             brief = procs[-1].stdin.data.decode()
             assert "Scored 100/100, correct. Your note then: right" in brief and "because the exponential dominates" in brief and "again" in brief
             assert "--resume" in calls[-1]
-            p = store.one("SELECT * FROM question_parts WHERE question_id = ? AND n = 1", (qid,))
+            p = store.one("SELECT * FROM education_question_parts WHERE question_id = ? AND n = 1", (qid,))
             assert p["answer"] == "again" and p["answered_at"] and p["graded_at"] is None and p["score"] is None and p["note"] is None
             item = (await c.get(f"/api/education/item/{qid}")).json()
             assert item["parts"][0]["score"] is None and item["parts"][0]["answered_at"]
@@ -170,21 +170,21 @@ def test_education_end_to_end(config):
             out = grade(store, qid, 4, 90, "nearly")
             assert out["remaining"] == 0 and out["question_score"] == 95
             assert "error" in grade(store, qid, 9, 50, "")
-            q = store.one("SELECT * FROM questions WHERE id = ?", (qid,))
+            q = store.one("SELECT * FROM education_questions WHERE id = ?", (qid,))
             assert q["completed_at"] is None and q["score"] == 95
-            assert store.scalar("SELECT difficulty FROM topics WHERE id = ?", (tid,)) == start_d
+            assert store.scalar("SELECT difficulty FROM education_topics WHERE id = ?", (tid,)) == start_d
             item = (await c.get(f"/api/education/item/{qid}")).json()
             assert [a["verb"] for a in item["actions"]] == ["complete", "delete"] and item["actions"][0]["primary"]
             r = await c.post("/api/education/action/complete", json={"id": qid})
             assert r.status_code == 200 and r.json() == {"id": qid, "score": 95, "topic_difficulty": start_d + 1}
-            assert store.scalar("SELECT difficulty FROM topics WHERE id = ?", (tid,)) == start_d + 1
+            assert store.scalar("SELECT difficulty FROM education_topics WHERE id = ?", (tid,)) == start_d + 1
             assert (await c.post("/api/education/action/complete", json={"id": qid})).status_code == 409
             assert (await c.post("/api/education/action/answer", json={"id": qid, "n": 1, "answer": "late"})).status_code == 409
             item = (await c.get(f"/api/education/item/{qid}")).json()
             assert item["status"] == "completed" and item["actions"] == [] and item["kind"] == f"Physics · d{start_d} · 95"
             # a revision after completion recomputes the mean and never moves the difficulty again
             assert grade(store, qid, 4, 60, "revised")["question_score"] == 88
-            assert store.scalar("SELECT difficulty FROM topics WHERE id = ?", (tid,)) == start_d + 1
+            assert store.scalar("SELECT difficulty FROM education_topics WHERE id = ?", (tid,)) == start_d + 1
             # LEFT: the completed tab lists it by day with its score; the active tab holds the generated one
             left = (await c.get("/api/education/left?chip=completed")).json()
             assert left["chip"] == "completed" and [r["id"] for g in left["groups"] for r in g["rows"]] == [qid] and left["showing"] == "1 / 1"
@@ -216,7 +216,7 @@ def test_education_end_to_end(config):
             assert next(x for x in (await c.get("/api/home/numbers")).json() if x["module"] == "education")["value"] == 0
             t = (await c.get("/api/education/blank")).json()["topics"][0]
             assert (t["completed"], t["asked"]) == (1, 1)                                                   # it no longer counts as asked
-            assert store.scalar("SELECT COUNT(*) FROM question_parts WHERE question_id = ?", (gid,)) == 3
+            assert store.scalar("SELECT COUNT(*) FROM education_question_parts WHERE question_id = ?", (gid,)) == 3
             assert store.one("SELECT question_id, text FROM education_feedback") == {"question_id": gid, "text": "too easy"}
             assert "Why softmax saturates (Pinned output, Low temperature, Smallest gradient) [deleted by the owner]"                 in generate_prompt(store, waiting_topics(store, 1))
             assert (await c.post("/api/education/action/tags", json={"id": gid, "tags": ["x"]})).status_code == 404
@@ -274,14 +274,14 @@ def test_generate_task(config, monkeypatch):
             return await job.done
 
         assert str(await run_once()) == "no topics"
-        store.execute("INSERT INTO topics(name, difficulty, created_at) VALUES ('Physics', 7, ?)", (now_iso(),))
+        store.execute("INSERT INTO education_topics(name, difficulty, created_at) VALUES ('Physics', 7, ?)", (now_iso(),))
         out = await run_once()
         assert out.startswith("1 new question(s) for Physics") and "4 rejected" in out
-        q = store.one("SELECT * FROM questions")
+        q = store.one("SELECT * FROM education_questions")
         assert q["title"] == "Why softmax saturates" and q["definitions"] == DEFS and q["difficulty"] == 7 and q["source"] == "nightly" and q["started_at"] is None
-        assert [(p["title"], p["rubric"]) for p in store.query("SELECT title, rubric FROM question_parts ORDER BY n")] == [(p["title"], p["rubric"]) for p in PARTS]
+        assert [(p["title"], p["rubric"]) for p in store.query("SELECT title, rubric FROM education_question_parts ORDER BY n")] == [(p["title"], p["rubric"]) for p in PARTS]
         assert store.cursor("education.generate")
-        logs = " ".join(r["message"] for r in store.query("SELECT message FROM job_logs"))
+        logs = " ".join(r["message"] for r in store.query("SELECT message FROM app_job_logs"))
         assert "at least one part" in logs and "(b) needs a title, a prompt and a rubric" in logs and "topic 9 not asked for" in logs
         # a budget refusal ends as skipped, not failed
         monkeypatch.setattr(st.claude, "budget", lambda: {"used": 3, "max": 3, "window": "02:00-05:00", "in_window": True})
@@ -291,8 +291,8 @@ def test_generate_task(config, monkeypatch):
         for i in range(config.education.per_night):
             add_question(store, 1, f"filler {i}", "tag", DEFS, "p", PARTS, "nightly", False)
         assert str(await run_once()).startswith("1 new question(s) for Physics")
-        assert [r["status"] for r in store.query("SELECT status FROM jobs ORDER BY id")] == ["skipped", "done", "skipped", "done"]
-        assert store.scalar("SELECT COUNT(*) FROM events WHERE verb = 'failed'") == 0
+        assert [r["status"] for r in store.query("SELECT status FROM app_jobs ORDER BY id")] == ["skipped", "done", "skipped", "done"]
+        assert store.scalar("SELECT COUNT(*) FROM app_events WHERE verb = 'failed'") == 0
         await st.runner.drain(1)
         store.close()
 
@@ -359,20 +359,21 @@ def test_setup_migrates_v1(config):
     conn = sqlite3.connect(config.data.db)
     conn.executescript(V1)
     conn.close()
-    for _ in range(2):
-        setup(config)
+    build(config).state.store.close()   # the boot path: the tables take their current names first, then setup reshapes them
+    setup(config)                       # a second run finds nothing to do
     conn = sqlite3.connect(config.data.db)
     conn.execute("PRAGMA foreign_keys=ON")
     ddl = {r[0]: r[1] for r in conn.execute("SELECT name, sql FROM sqlite_master WHERE type = 'table'")}
-    assert "BETWEEN 1 AND 10" in ddl["topics"] and "BETWEEN 1 AND 10" in ddl["questions"] and "skipped_at" not in ddl["questions"]
-    columns = {r[1] for r in conn.execute("PRAGMA table_info(questions)")}
+    assert not {"topics", "questions", "question_parts"} & set(ddl)
+    assert "BETWEEN 1 AND 10" in ddl["education_topics"] and "BETWEEN 1 AND 10" in ddl["education_questions"] and "skipped_at" not in ddl["education_questions"]
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(education_questions)")}
     assert {"definitions", "tags", "opened_at", "completed_at"} <= columns and "graded_at" not in columns
-    assert "title" in {r[1] for r in conn.execute("PRAGMA table_info(question_parts)")}
-    assert conn.execute("SELECT difficulty FROM topics").fetchone() == (5,)
-    assert conn.execute("SELECT id, difficulty, completed_at, score, tags FROM questions ORDER BY id").fetchall() == [
+    assert "title" in {r[1] for r in conn.execute("PRAGMA table_info(education_question_parts)")}
+    assert conn.execute("SELECT difficulty FROM education_topics").fetchone() == (5,)
+    assert conn.execute("SELECT id, difficulty, completed_at, score, tags FROM education_questions ORDER BY id").fetchall() == [
         (1, 5, "2026-09-09T02:00:00+00:00", 80, "[]"), (3, 9, None, None, "[]"),
     ]
-    assert conn.execute("SELECT question_id FROM question_parts ORDER BY question_id").fetchall() == [(1,), (3,)]
+    assert conn.execute("SELECT question_id FROM education_question_parts ORDER BY question_id").fetchall() == [(1,), (3,)]
     assert conn.execute("SELECT question_id, text FROM education_feedback").fetchone() == (None, "too easy")
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
     conn.close()

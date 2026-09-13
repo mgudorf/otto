@@ -43,7 +43,7 @@ def register(read, full, store: Store, config) -> None:
         """Feedback notes already recorded, newest first. status narrows to queued, filed or failed."""
         where, params = ("WHERE status = ?", [status]) if status else ("", [])
         rows = store.query(
-            f"SELECT id, created_at, page, item_module, item_id, text, status, kind, title, summary, tags, ref FROM feedback {where} ORDER BY id DESC LIMIT ?",
+            f"SELECT id, created_at, page, item_module, item_id, text, status, kind, title, summary, tags, ref FROM feedback_items {where} ORDER BY id DESC LIMIT ?",
             (*params, max(1, min(limit, 500))),
         )
         for r in rows:

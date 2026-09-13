@@ -95,11 +95,11 @@ def test_memory_end_to_end(config):
             # an export is every table as JSON rows
             r = (await c.post("/api/data/export")).json()
             dump = json.loads(Path(r["path"]).read_text("utf-8"))
-            assert dump["settings"] and "memories" in dump and (await c.get("/api/data")).json()["exports"] == 1
+            assert dump["app_settings"] and "memory_items" in dump and (await c.get("/api/data")).json()["exports"] == 1
             # every static file revalidates, so a restarted daemon never serves stale modules
             assert (await c.get("/shell.js")).headers["cache-control"] == "no-cache"
             # a run counts against the nightly budget from the moment it starts, so concurrent runs see each other
-            app.state.store.execute("INSERT INTO llm_runs(ts, module, task, status, budgeted) VALUES (?, 'memory', 'memory.suggest', 'running', 1)", (now_iso(),))
+            app.state.store.execute("INSERT INTO app_llm_runs(ts, module, task, status, budgeted) VALUES (?, 'memory', 'memory.suggest', 'running', 1)", (now_iso(),))
             assert (await c.get("/api/shell")).json()["budget"]["used"] == 1
         await app.state.runner.drain(1)
         app.state.store.close()
@@ -146,7 +146,7 @@ def test_session_turn_and_clear(config):
             r = await c.post("/api/session/memory/send", json={"text": "/clear", "id": sid})
             assert r.json() == {"cleared": True}
             await settle(app)
-            row = app.state.store.one("SELECT * FROM sessions WHERE id = ?", (sid,))
+            row = app.state.store.one("SELECT * FROM app_sessions WHERE id = ?", (sid,))
             assert row["closed_at"] and row["title"] == "Search for x" and json.loads(row["tags"]) == ["memory", "search"]
             assert calls[3]["args"][calls[3]["args"].index("--max-turns") + 1] == "2"
             assert [t["id"] for t in (await c.get("/api/session/memory")).json()["sessions"]] == [sid2]
@@ -167,7 +167,7 @@ def test_failed_first_turn_retires_session(config):
             await c.post("/api/session/memory/send", json={"text": "hi"})
             await settle(app)
             assert (await c.get("/api/session/memory")).json()["sessions"] == []
-            rows = app.state.store.query("SELECT * FROM sessions")
+            rows = app.state.store.query("SELECT * FROM app_sessions")
             assert rows[0]["closed_at"] and rows[0]["title"] == "(failed to start)"
         await app.state.runner.drain(1)
         app.state.store.close()
@@ -292,7 +292,7 @@ def test_feedback_end_to_end(config):
             assert "mcp__otto-read__docs_read" in args[args.index("--allowedTools") + 1]
             prompt = procs[0].stdin.data.decode("utf-8")
             assert f"Feedback #{fid}" in prompt and "buy sqlite book" in prompt
-            assert app.state.store.one("SELECT budgeted FROM llm_runs WHERE module = 'feedback'")["budgeted"] == 0
+            assert app.state.store.one("SELECT budgeted FROM app_llm_runs WHERE module = 'feedback'")["budgeted"] == 0
             ev = (await c.get("/api/events?module=memory")).json()["events"]
             assert [e["verb"] for e in ev][:2] == ["filed", "feedback"]
             # a reply that is not JSON fails the note; retry requeues it
@@ -311,16 +311,16 @@ def test_feedback_end_to_end(config):
             # a note sent during a drain is refused before any row exists
             app.state.runner.draining = True
             assert (await c.post("/api/feedback/action/add", json={"page": "memory", "text": "late"})).status_code == 503
-            assert app.state.store.scalar("SELECT COUNT(*) FROM feedback") == 2
+            assert app.state.store.scalar("SELECT COUNT(*) FROM feedback_items") == 2
         await app.state.runner.drain(1)
         app.state.store.close()
         # a note whose filing job died with the last daemon reads failed at the next boot, so retry is offered
         app = build(config)
         st = app.state
-        st.store.execute("INSERT INTO feedback(created_at, page, text) VALUES ('2026-09-13T00:00:00+00:00', 'memory', 'orphan')")
+        st.store.execute("INSERT INTO feedback_items(created_at, page, text) VALUES ('2026-09-13T00:00:00+00:00', 'memory', 'orphan')")
         st.store.close()
         app = build(config)
-        row = app.state.store.one("SELECT status, error FROM feedback WHERE text = 'orphan'")
+        row = app.state.store.one("SELECT status, error FROM feedback_items WHERE text = 'orphan'")
         assert row == {"status": "failed", "error": "daemon restarted"}
         app.state.store.close()
 

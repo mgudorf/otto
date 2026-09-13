@@ -22,7 +22,7 @@ def _json_array(raw: str) -> list:
 async def suggest(ctx) -> str:
     cfg = ctx.config.memory
     recent = ctx.store.query(
-        "SELECT id, kind, text FROM memories WHERE created_at >= ? AND done_at IS NULL ORDER BY created_at",
+        "SELECT id, kind, text FROM memory_items WHERE created_at >= ? AND done_at IS NULL ORDER BY created_at",
         (days_ago_iso(cfg.suggest_lookback_days),),
     )
     if not recent:

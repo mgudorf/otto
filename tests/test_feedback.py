@@ -17,13 +17,13 @@ def test_feedback_queue(store, config, tmp_path, capsys):
     with store.raw() as conn:
         queue.add_cleared_at(conn)
         queue.add_cleared_at(conn)
-        assert "cleared_at" in {r[1] for r in conn.execute("PRAGMA table_info(feedback)")}
+        assert "cleared_at" in {r[1] for r in conn.execute("PRAGMA table_info(feedback_items)")}
     for page, item_module, text in (("science", None, "shortcuts"), ("home", "science", "cell highlight"), ("email", None, "bodies")):
-        store.execute("INSERT INTO feedback(created_at, page, item_module, text) VALUES ('2026-09-12T00:00:00+00:00', ?, ?, ?)", (page, item_module, text))
+        store.execute("INSERT INTO feedback_items(created_at, page, item_module, text) VALUES ('2026-09-12T00:00:00+00:00', ?, ?, ?)", (page, item_module, text))
     assert [r["text"] for r in queue.pending(store, ["science"])] == ["shortcuts", "cell highlight"]   # by page or by item
     assert queue.clear(store, ["science"]) == [1, 2]
     assert queue.pending(store, ["science"]) == [] and [r["id"] for r in queue.pending(store, ["email"])] == [3]
-    assert store.scalar("SELECT count(*) FROM feedback") == 3                                          # cleared, not deleted
+    assert store.scalar("SELECT count(*) FROM feedback_items") == 3                                          # cleared, not deleted
 
     docs = tmp_path / "docs"
     (docs / "science").mkdir(parents=True)

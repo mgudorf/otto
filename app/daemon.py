@@ -23,7 +23,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from mcp.server.mcpserver import MCPServer
 
-from app import api, revision
+from app import api, migrate, revision
 from app.claude import FULL_SERVER, READ_SERVER, ClaudeRunner, clean_env
 from app.config import Config, load
 from app.modules import Registry
@@ -46,12 +46,14 @@ class Static(StaticFiles):
 
 def build(config: Config, spawn_fn=None) -> FastAPI:
     store = Store(config.data.db)
+    rebuild = migrate.rename_tables(store, config.data.db.parent / "backups")   # before any schema: a renamed table must not meet an empty new one
     store.migrate((HERE / "schema.sql").read_text("utf-8"))
     registry = Registry()
     registry.load()
     for m in registry.ordered():
         if m.schema:
             store.migrate(m.schema)
+    migrate.rebuild_fts(store, rebuild)
     for m in registry.ordered():
         if m.setup:
             try:
@@ -60,9 +62,9 @@ def build(config: Config, spawn_fn=None) -> FastAPI:
                 registry.errors[m.name] = traceback.format_exc()
                 del registry.modules[m.name]
     with store.tx() as conn:
-        conn.execute("DELETE FROM module_errors")
+        conn.execute("DELETE FROM app_module_errors")
         for name, err in registry.errors.items():
-            conn.execute("INSERT INTO module_errors(module, ts, error) VALUES (?, ?, ?)", (name, now_iso(), err))
+            conn.execute("INSERT INTO app_module_errors(module, ts, error) VALUES (?, ?, ?)", (name, now_iso(), err))
             log.error("module %s failed to load:\n%s", name, err)
     store.seed_settings({
         "ui.start_page": config.ui.start_page,

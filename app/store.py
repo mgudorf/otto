@@ -93,29 +93,29 @@ class Store:
 
     # settings: JSON values keyed by dotted name
     def setting(self, key: str) -> Any:
-        row = self.one("SELECT value FROM settings WHERE key = ?", (key,))
+        row = self.one("SELECT value FROM app_settings WHERE key = ?", (key,))
         return json.loads(row["value"]) if row else None
 
     def set_setting(self, key: str, value: Any) -> None:
         self.execute(
-            "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            "INSERT INTO app_settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, json.dumps(value)),
         )
 
     def seed_settings(self, defaults: dict[str, Any]) -> None:
         for key, value in defaults.items():
-            self.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, json.dumps(value)))
+            self.execute("INSERT OR IGNORE INTO app_settings(key, value) VALUES (?, ?)", (key, json.dumps(value)))
 
     def all_settings(self) -> dict[str, Any]:
-        return {r["key"]: json.loads(r["value"]) for r in self.query("SELECT key, value FROM settings")}
+        return {r["key"]: json.loads(r["value"]) for r in self.query("SELECT key, value FROM app_settings")}
 
     # cursors: per-task sync positions
     def cursor(self, key: str) -> str | None:
-        return self.scalar("SELECT value FROM cursors WHERE key = ?", (key,))
+        return self.scalar("SELECT value FROM app_cursors WHERE key = ?", (key,))
 
     def event(self, module: str, verb: str, text: str, job_id: int | None = None, ref: str | None = None) -> None:
         self.execute(
-            "INSERT INTO events(ts, module, verb, text, job_id, ref) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO app_events(ts, module, verb, text, job_id, ref) VALUES (?, ?, ?, ?, ?, ?)",
             (now_iso(), module, verb, text, job_id, ref),
         )
 

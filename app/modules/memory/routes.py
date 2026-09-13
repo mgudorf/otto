@@ -52,7 +52,7 @@ def _tags(store: Store, memory_id: int) -> list[str]:
 
 
 def _get(store: Store, memory_id: int) -> dict:
-    row = store.one("SELECT * FROM memories WHERE id = ?", (memory_id,))
+    row = store.one("SELECT * FROM memory_items WHERE id = ?", (memory_id,))
     if row is None:
         raise HTTPException(404, "no such memory")
     return row
@@ -81,11 +81,11 @@ def left(request: Request, query: str = "", chip: str = "All", page: int = 0) ->
         where.append("m.kind = ?")
         params.append(kind)
     if query.strip():
-        where.append("m.id IN (SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?)")
+        where.append("m.id IN (SELECT rowid FROM memory_fts WHERE memory_fts MATCH ?)")
         params.append(_fts(query))
     sql_where = ("WHERE " + " AND ".join(where)) if where else ""
-    total = store.scalar(f"SELECT COUNT(*) FROM memories m {sql_where}", tuple(params))
-    rows = store.query(f"SELECT m.* FROM memories m {sql_where} ORDER BY m.created_at DESC LIMIT ?", (*params, limit))
+    total = store.scalar(f"SELECT COUNT(*) FROM memory_items m {sql_where}", tuple(params))
+    rows = store.query(f"SELECT m.* FROM memory_items m {sql_where} ORDER BY m.created_at DESC LIMIT ?", (*params, limit))
     return {
         "groups": _group_by_day(rows),
         "chips": list(CHIPS),
@@ -98,7 +98,7 @@ def left(request: Request, query: str = "", chip: str = "All", page: int = 0) ->
 @router.get("/blank")
 def blank(request: Request) -> dict:
     store: Store = request.app.state.store
-    counts = {r["kind"]: r["n"] for r in store.query("SELECT kind, COUNT(*) AS n FROM memories GROUP BY kind")}
+    counts = {r["kind"]: r["n"] for r in store.query("SELECT kind, COUNT(*) AS n FROM memory_items GROUP BY kind")}
     return {"kinds": list(KINDS), "counts": counts, "suggestions": queue(store)}
 
 
@@ -159,7 +159,7 @@ def _capture(store: Store, body: dict):
     def write(ctx) -> dict:
         ts = now_iso()
         with ctx.commit() as conn:
-            cur = conn.execute("INSERT INTO memories(kind, text, created_at, updated_at) VALUES (?, ?, ?, ?)", (kind, text, ts, ts))
+            cur = conn.execute("INSERT INTO memory_items(kind, text, created_at, updated_at) VALUES (?, ?, ?, ?)", (kind, text, ts, ts))
             for t in tags:
                 conn.execute("INSERT OR IGNORE INTO memory_tags(memory_id, tag) VALUES (?, ?)", (cur.lastrowid, t))
         ctx.event("captured", f"{kind}: {text[:120]}", ref=str(cur.lastrowid))
@@ -173,7 +173,7 @@ def _forget(store: Store, body: dict):
 
     def write(ctx) -> dict:
         with ctx.commit() as conn:
-            conn.execute("DELETE FROM memories WHERE id = ?", (r["id"],))
+            conn.execute("DELETE FROM memory_items WHERE id = ?", (r["id"],))
         ctx.event("forgot", f"{r['kind']}: {r['text'][:120]}", ref=str(r["id"]))
         return {"id": r["id"]}
 
@@ -188,7 +188,7 @@ def _tag(store: Store, body: dict):
         with ctx.commit() as conn:
             for t in tags:
                 conn.execute("INSERT OR IGNORE INTO memory_tags(memory_id, tag) VALUES (?, ?)", (r["id"], t))
-            conn.execute("UPDATE memories SET updated_at = ? WHERE id = ?", (now_iso(), r["id"]))
+            conn.execute("UPDATE memory_items SET updated_at = ? WHERE id = ?", (now_iso(), r["id"]))
         ctx.event("tagged", f"{', '.join(tags)} on {r['text'][:80]}", ref=str(r["id"]))
         return {"id": r["id"], "tags": _tags(store, r["id"])}
 
@@ -211,7 +211,7 @@ def _done(store: Store, body: dict):
 
     def write(ctx) -> dict:
         with ctx.commit() as conn:
-            conn.execute("UPDATE memories SET done_at = ?, updated_at = ? WHERE id = ?", (now_iso(), now_iso(), r["id"]))
+            conn.execute("UPDATE memory_items SET done_at = ?, updated_at = ? WHERE id = ?", (now_iso(), now_iso(), r["id"]))
         ctx.event("completed", r["text"][:120], ref=str(r["id"]))
         return {"id": r["id"]}
 
@@ -245,7 +245,7 @@ ACTIONS = {
 
 # ---- shell hooks ---------------------------------------------------------------------------
 def numbers(store: Store) -> dict:
-    return {"value": store.scalar("SELECT COUNT(*) FROM memories"), "label": "memories"}
+    return {"value": store.scalar("SELECT COUNT(*) FROM memory_items"), "label": "memories"}
 
 
 def queue(store: Store) -> list[dict]:
@@ -258,13 +258,13 @@ def today(store: Store) -> list[dict]:
     start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
     from app.store import iso
 
-    rows = store.query("SELECT * FROM memories WHERE created_at >= ? ORDER BY created_at DESC", (iso(start),))
+    rows = store.query("SELECT * FROM memory_items WHERE created_at >= ? ORDER BY created_at DESC", (iso(start),))
     return [_row(r) for r in rows]
 
 
 def context(store: Store, registry) -> str:
-    counts = store.query("SELECT kind, COUNT(*) AS n FROM memories GROUP BY kind ORDER BY kind")
-    recent = store.query("SELECT id, kind, text, created_at FROM memories ORDER BY created_at DESC LIMIT 10")
+    counts = store.query("SELECT kind, COUNT(*) AS n FROM memory_items GROUP BY kind ORDER BY kind")
+    recent = store.query("SELECT id, kind, text, created_at FROM memory_items ORDER BY created_at DESC LIMIT 10")
     open_s = queue(store)                                      # the "s12" ids the page and Home open
     lines = ["Counts: " + (", ".join(f"{c['n']} {c['kind']}" for c in counts) or "none")]
     lines.append("Most recent (id, kind, text):")

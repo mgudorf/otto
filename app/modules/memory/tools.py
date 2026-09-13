@@ -13,18 +13,18 @@ def register(read, full, store: Store, config) -> None:
         """Full-text search over memories. kind narrows to note, link, quote, fact or task. Newest first."""
         where, params = [], []
         if query.strip():
-            where.append("id IN (SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?)")
+            where.append("id IN (SELECT rowid FROM memory_fts WHERE memory_fts MATCH ?)")
             params.append(_fts(query))
         if kind:
             where.append("kind = ?")
             params.append(kind)
         sql_where = ("WHERE " + " AND ".join(where)) if where else ""
-        rows = store.query(f"SELECT id, kind, text, created_at, done_at FROM memories {sql_where} ORDER BY created_at DESC LIMIT ?", (*params, max(1, min(limit, 100))))
+        rows = store.query(f"SELECT id, kind, text, created_at, done_at FROM memory_items {sql_where} ORDER BY created_at DESC LIMIT ?", (*params, max(1, min(limit, 100))))
         return [{**r, "tags": _tags(store, r["id"])} for r in rows]
 
     def memory_get(id: int) -> dict:
         """One memory by id, with its tags."""
-        r = store.one("SELECT id, kind, text, created_at, updated_at, done_at FROM memories WHERE id = ?", (id,))
+        r = store.one("SELECT id, kind, text, created_at, updated_at, done_at FROM memory_items WHERE id = ?", (id,))
         if r is None:
             return {"error": f"no memory {id}"}
         return {**r, "tags": _tags(store, r["id"])}
@@ -45,7 +45,7 @@ def register(read, full, store: Store, config) -> None:
             return {"error": "empty text"}
         ts = now_iso()
         with store.tx() as conn:
-            cur = conn.execute("INSERT INTO memories(kind, text, created_at, updated_at) VALUES (?, ?, ?, ?)", (kind, text.strip(), ts, ts))
+            cur = conn.execute("INSERT INTO memory_items(kind, text, created_at, updated_at) VALUES (?, ?, ?, ?)", (kind, text.strip(), ts, ts))
             for t in tags or []:
                 if t.strip():
                     conn.execute("INSERT OR IGNORE INTO memory_tags(memory_id, tag) VALUES (?, ?)", (cur.lastrowid, t.strip()))
@@ -54,7 +54,7 @@ def register(read, full, store: Store, config) -> None:
 
     def memory_tag(id: int, tags: list[str]) -> dict:
         """Add tags to a memory."""
-        if store.one("SELECT id FROM memories WHERE id = ?", (id,)) is None:
+        if store.one("SELECT id FROM memory_items WHERE id = ?", (id,)) is None:
             return {"error": f"no memory {id}"}
         clean = [t.strip() for t in tags if t.strip()]
         with store.tx() as conn:

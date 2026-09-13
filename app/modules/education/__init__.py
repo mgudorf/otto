@@ -28,8 +28,8 @@ SCHEMA = Path(__file__).parent / "schema.sql"
 # Columns added to tables an older database created. schema.sql only creates tables, so a database that already has
 # them is brought up here; a fresh one has every column from schema.sql and this finds nothing to add.
 COLUMNS = {
-    "questions": {"topic_tag": "TEXT", "deleted_at": "TEXT"},                   # v1, v3
-    "question_parts": {
+    "education_questions": {"topic_tag": "TEXT", "deleted_at": "TEXT"},         # v1, v3
+    "education_question_parts": {
         "rubric": "TEXT",                                                       # v1
         "answer": "TEXT",
         "answered_at": "TEXT",
@@ -65,26 +65,26 @@ def setup(config) -> None:
                 for name, ddl in columns.items():
                     if name not in have:
                         conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
-            if "BETWEEN 1 AND 10" not in _sql(conn, "topics"):
-                conn.execute(_create("topics", "topics_v2"))
+            if "BETWEEN 1 AND 10" not in _sql(conn, "education_topics"):
+                conn.execute(_create("education_topics", "education_topics_v2"))
                 conn.execute(
-                    "INSERT INTO topics_v2(id, name, description, difficulty, created_at, retired_at) "
-                    "SELECT id, name, description, 2 * difficulty - 1, created_at, retired_at FROM topics"
+                    "INSERT INTO education_topics_v2(id, name, description, difficulty, created_at, retired_at) "
+                    "SELECT id, name, description, 2 * difficulty - 1, created_at, retired_at FROM education_topics"
                 )
-                conn.execute("DROP TABLE topics")
-                conn.execute("ALTER TABLE topics_v2 RENAME TO topics")
-            if "skipped_at" in _sql(conn, "questions"):
-                conn.execute("DELETE FROM question_parts WHERE question_id IN (SELECT id FROM questions WHERE skipped_at IS NOT NULL)")
-                conn.execute("UPDATE education_feedback SET question_id = NULL WHERE question_id IN (SELECT id FROM questions WHERE skipped_at IS NOT NULL)")
-                conn.execute(_create("questions", "questions_v2"))
+                conn.execute("DROP TABLE education_topics")
+                conn.execute("ALTER TABLE education_topics_v2 RENAME TO education_topics")
+            if "skipped_at" in _sql(conn, "education_questions"):
+                conn.execute("DELETE FROM education_question_parts WHERE question_id IN (SELECT id FROM education_questions WHERE skipped_at IS NOT NULL)")
+                conn.execute("UPDATE education_feedback SET question_id = NULL WHERE question_id IN (SELECT id FROM education_questions WHERE skipped_at IS NOT NULL)")
+                conn.execute(_create("education_questions", "education_questions_v2"))
                 conn.execute(
-                    "INSERT INTO questions_v2(id, topic_id, title, topic_tag, premise, difficulty, source, created_at, started_at, completed_at, score) "
+                    "INSERT INTO education_questions_v2(id, topic_id, title, topic_tag, premise, difficulty, source, created_at, started_at, completed_at, score) "
                     "SELECT id, topic_id, title, topic_tag, premise, 2 * difficulty - 1, source, created_at, started_at, graded_at, score "
-                    "FROM questions WHERE skipped_at IS NULL"
+                    "FROM education_questions WHERE skipped_at IS NULL"
                 )
-                conn.execute("DROP TABLE questions")
-                conn.execute("ALTER TABLE questions_v2 RENAME TO questions")
-                conn.execute("CREATE INDEX IF NOT EXISTS questions_created ON questions(created_at)")
+                conn.execute("DROP TABLE education_questions")
+                conn.execute("ALTER TABLE education_questions_v2 RENAME TO education_questions")
+                conn.execute("CREATE INDEX IF NOT EXISTS education_questions_created ON education_questions(created_at)")
         except BaseException:
             conn.execute("ROLLBACK")
             raise

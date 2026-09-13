@@ -33,9 +33,9 @@ def test_sync_creates_rows_and_removes_orphans(store, config):
     reg = fake_registry(("a", (Schedule("t1", "60s"), Schedule("t2", "24h", llm=True))))
     runner = Runner(store, config, reg, None, 1)
     sched = Scheduler(store, config, reg, runner)
-    store.execute("INSERT INTO tasks(name, module, interval_seconds, next_run) VALUES ('zombie.x', 'zombie', 5, '2020-01-01T00:00:00+00:00')")
+    store.execute("INSERT INTO app_tasks(name, module, interval_seconds, next_run) VALUES ('zombie.x', 'zombie', 5, '2020-01-01T00:00:00+00:00')")
     sched.sync_tasks()
-    rows = {r["name"]: r for r in store.query("SELECT * FROM tasks")}
+    rows = {r["name"]: r for r in store.query("SELECT * FROM app_tasks")}
     assert set(rows) == {"a.t1", "a.t2"}
     assert rows["a.t1"]["interval_seconds"] == 60 and rows["a.t1"]["llm"] == 0
     assert rows["a.t2"]["llm"] == 1
@@ -56,9 +56,9 @@ def test_tick_submits_due_and_advances(store, config):
         assert sched.tick() == []  # not due again yet
 
     run(main())
-    row = store.one("SELECT * FROM tasks WHERE name = 'a.t1'")
+    row = store.one("SELECT * FROM app_tasks WHERE name = 'a.t1'")
     assert parse(row["next_run"]) > now() + timedelta(seconds=50)
-    assert store.one("SELECT * FROM jobs")["status"] == "queued"
+    assert store.one("SELECT * FROM app_jobs")["status"] == "queued"
 
 
 def test_nightly_runs_are_staggered(store, config):
@@ -67,13 +67,13 @@ def test_nightly_runs_are_staggered(store, config):
     runner = Runner(store, config, reg, None, 1)
     sched = Scheduler(store, config, reg, runner)
     sched.sync_tasks()
-    store.execute("UPDATE tasks SET next_run = ? WHERE llm = 1", (iso(now() - timedelta(minutes=1)),))
+    store.execute("UPDATE app_tasks SET next_run = ? WHERE llm = 1", (iso(now() - timedelta(minutes=1)),))
 
     async def main():
         assert sched.tick() == ["a.t1", "a.plain"]   # t2 is held, and stays due
         assert sched.tick() == []
-        assert store.one("SELECT next_run FROM tasks WHERE name = 'a.t2'")["next_run"] < now_iso()
-        store.execute("UPDATE jobs SET queued_at = ?", (iso(now() - timedelta(minutes=config.nightly.stagger_minutes + 1)),))
+        assert store.one("SELECT next_run FROM app_tasks WHERE name = 'a.t2'")["next_run"] < now_iso()
+        store.execute("UPDATE app_jobs SET queued_at = ?", (iso(now() - timedelta(minutes=config.nightly.stagger_minutes + 1)),))
         assert sched.tick() == ["a.t2"]              # the gap has passed
 
     run(main())
@@ -105,4 +105,4 @@ def test_disabled_and_missing_module(store, config):
     sched.set_enabled("a.t1", True)
     del reg.modules["a"]
     assert sched.tick() == []
-    assert store.one("SELECT last_status, last_result FROM tasks WHERE name = 'a.t1'")["last_result"] == "module not loaded"
+    assert store.one("SELECT last_status, last_result FROM app_tasks WHERE name = 'a.t1'")["last_result"] == "module not loaded"

@@ -34,12 +34,12 @@ def seed(store):
     ts = now_iso()
     with store.tx() as conn:
         for i in (1, 2, 3):
-            conn.execute("INSERT INTO memories(id, kind, text, created_at, updated_at) VALUES (?, 'note', ?, ?, ?)", (i, f"m{i}", ts, ts))
+            conn.execute("INSERT INTO memory_items(id, kind, text, created_at, updated_at) VALUES (?, 'note', ?, ?, ?)", (i, f"m{i}", ts, ts))
         for mid, tag in [(1, "Python"), (1, "sqlite"), (2, "python "), (2, "SQLite"), (3, "ledger")]:
             conn.execute("INSERT INTO memory_tags(memory_id, tag) VALUES (?, ?)", (mid, tag))
-        conn.execute("INSERT INTO sessions(id, module, opened_at, closed_at, title, tags) VALUES ('s1', 'memory', ?, ?, 'one', ?)", (ts, ts, json.dumps(["SQLITE", "tax"])))
-        conn.execute("INSERT INTO sessions(id, module, opened_at) VALUES ('s2', 'memory', ?)", (ts,))
-        conn.execute("INSERT INTO sessions(id, module, opened_at, title, tags) VALUES ('s3', 'chat', ?, 'three', ?)", (ts, json.dumps(["tax", "Chat"])))
+        conn.execute("INSERT INTO app_sessions(id, module, opened_at, closed_at, title, tags) VALUES ('s1', 'memory', ?, ?, 'one', ?)", (ts, ts, json.dumps(["SQLITE", "tax"])))
+        conn.execute("INSERT INTO app_sessions(id, module, opened_at) VALUES ('s2', 'memory', ?)", (ts,))
+        conn.execute("INSERT INTO app_sessions(id, module, opened_at, title, tags) VALUES ('s3', 'chat', ?, 'three', ?)", (ts, json.dumps(["tax", "Chat"])))
 
 
 def nodes(store):
@@ -51,7 +51,7 @@ def edges(store):
 
 
 def snapshot(store):
-    return [store.query(f"SELECT * FROM {t} ORDER BY 1, 2") for t in ("memories", "memory_tags", "sessions")]
+    return [store.query(f"SELECT * FROM {t} ORDER BY 1, 2") for t in ("memory_items", "memory_tags", "app_sessions")]
 
 
 def test_rebuild_from_sources(store):
@@ -93,7 +93,7 @@ def test_overlays_and_sources_untouched(store, config):
     assert [m["id"] for m in items["memories"]] == [3] and [s["id"] for s in items["sessions"]] == ["s1", "s3"]
     assert {e["neighbor"] for e in read.tools["graph_neighbors"]("sqlite")} == {"python", "tax"}
     assert snapshot(store) == sources_before
-    assert [e["verb"] for e in store.query("SELECT verb FROM events ORDER BY id")] == ["merged", "pruned", "linked", "restored", "unlinked"]
+    assert [e["verb"] for e in store.query("SELECT verb FROM app_events ORDER BY id")] == ["merged", "pruned", "linked", "restored", "unlinked"]
 
 
 def test_write_tools_only_on_full(store, config):

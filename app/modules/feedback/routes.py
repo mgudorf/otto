@@ -19,7 +19,7 @@ RECENT = 5
 
 
 def _get(store: Store, fid: int) -> dict:
-    row = store.one("SELECT * FROM feedback WHERE id = ?", (fid,))
+    row = store.one("SELECT * FROM feedback_items WHERE id = ?", (fid,))
     if row is None:
         raise HTTPException(404, "no such feedback")
     return row
@@ -71,11 +71,11 @@ def _filer(st, fid: int):
             ref = str(data["ref"]).strip() if data.get("ref") else None
         except Exception as e:
             with ctx.commit() as conn:
-                conn.execute("UPDATE feedback SET status = 'failed', error = ?, job_id = ? WHERE id = ?", (f"{e!r}"[:500], ctx.job.id, fid))
+                conn.execute("UPDATE feedback_items SET status = 'failed', error = ?, job_id = ? WHERE id = ?", (f"{e!r}"[:500], ctx.job.id, fid))
             raise
         with ctx.commit() as conn:
             conn.execute(
-                "UPDATE feedback SET status = 'filed', kind = ?, title = ?, summary = ?, tags = ?, ref = ?, draft = ?, filed_at = ?, job_id = ?, error = NULL WHERE id = ?",
+                "UPDATE feedback_items SET status = 'filed', kind = ?, title = ?, summary = ?, tags = ?, ref = ?, draft = ?, filed_at = ?, job_id = ?, error = NULL WHERE id = ?",
                 (kind, title[:120], summary[:200], json.dumps(tags), ref, draft, now_iso(), ctx.job.id, fid),
             )
         store.event(row["page"], "filed", f"{kind}: {title}"[:200], ctx.job.id, str(fid))
@@ -102,7 +102,7 @@ async def action(request: Request, verb: str, body: dict = Body(default={})) -> 
         item = body.get("item") or {}
         with store.tx() as conn:
             cur = conn.execute(
-                "INSERT INTO feedback(created_at, page, item_module, item_id, item_text, text) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO feedback_items(created_at, page, item_module, item_id, item_text, text) VALUES (?, ?, ?, ?, ?, ?)",
                 (now_iso(), page, item.get("module"), None if item.get("id") is None else str(item["id"]), (item.get("text") or "")[:ITEM_TEXT_CHARS] or None, text),
             )
         fid = cur.lastrowid
@@ -113,7 +113,7 @@ async def action(request: Request, verb: str, body: dict = Body(default={})) -> 
         row = _get(store, int(body.get("id", 0)))
         if row["status"] != "failed":
             raise HTTPException(409, f"feedback is {row['status']}, not failed")
-        store.execute("UPDATE feedback SET status = 'queued', error = NULL WHERE id = ?", (row["id"],))
+        store.execute("UPDATE feedback_items SET status = 'queued', error = NULL WHERE id = ?", (row["id"],))
         _submit(st, row["id"])
         return {"id": row["id"]}
     raise HTTPException(404, f"unknown action {verb}")
@@ -124,7 +124,7 @@ def recent(request: Request, page: str) -> dict:
     """One page's own notes. The panel is per page, so a note filed on Home is never another module's business."""
     store: Store = request.app.state.store
     rows = store.query(
-        "SELECT id, created_at, page, status, kind, summary, error FROM feedback WHERE page = ? ORDER BY id DESC LIMIT ?",
+        "SELECT id, created_at, page, status, kind, summary, error FROM feedback_items WHERE page = ? ORDER BY id DESC LIMIT ?",
         (page, RECENT),
     )
     return {"page": page, "rows": rows}
@@ -134,7 +134,7 @@ def recent(request: Request, page: str) -> dict:
 def list_route(request: Request, status: str = "", limit: int = 100) -> list[dict]:
     store: Store = request.app.state.store
     where, params = ("WHERE status = ?", [status]) if status else ("", [])
-    rows = store.query(f"SELECT * FROM feedback {where} ORDER BY id DESC LIMIT ?", (*params, max(1, min(limit, 1000))))
+    rows = store.query(f"SELECT * FROM feedback_items {where} ORDER BY id DESC LIMIT ?", (*params, max(1, min(limit, 1000))))
     for r in rows:
         r["tags"] = json.loads(r["tags"]) if r["tags"] else []
     return rows

@@ -13,7 +13,7 @@ NO_DEFINITIONS = "(none — the premise carries every definition)"      # rows o
 
 def grade_brief(store: Store, q: dict, part: dict, previous: dict | None) -> str:
     """The turn that asks the tutor to grade one answer: the whole question, the rubric, the answer, the earlier attempt if any."""
-    t = store.one("SELECT name, description FROM topics WHERE id = ?", (q["topic_id"],))
+    t = store.one("SELECT name, description FROM education_topics WHERE id = ?", (q["topic_id"],))
     earlier = "(none: this is the first answer to this part)"
     if previous:
         earlier = (
@@ -48,30 +48,30 @@ def verdict_for(score: int) -> str:
 def apply_grade(conn, q: dict, n: int, score: int, note: str | None, verdict: str) -> dict:
     """Score one part on an open connection. Once every part is scored the question's mean is kept; completion is the owner's press."""
     conn.execute(
-        "UPDATE question_parts SET verdict = ?, score = ?, note = ?, graded_at = ? WHERE question_id = ? AND n = ?",
+        "UPDATE education_question_parts SET verdict = ?, score = ?, note = ?, graded_at = ? WHERE question_id = ? AND n = ?",
         (verdict, score, (note or "").strip() or None, now_iso(), q["id"], n),
     )
     out: dict = {"question_id": q["id"], "part": n, "verdict": verdict, "score": score}
-    out["remaining"] = conn.execute("SELECT COUNT(*) FROM question_parts WHERE question_id = ? AND score IS NULL", (q["id"],)).fetchone()[0]
+    out["remaining"] = conn.execute("SELECT COUNT(*) FROM education_question_parts WHERE question_id = ? AND score IS NULL", (q["id"],)).fetchone()[0]
     if out["remaining"] == 0:
-        mean = round(conn.execute("SELECT AVG(score) FROM question_parts WHERE question_id = ?", (q["id"],)).fetchone()[0])
-        conn.execute("UPDATE questions SET score = ? WHERE id = ?", (mean, q["id"]))
+        mean = round(conn.execute("SELECT AVG(score) FROM education_question_parts WHERE question_id = ?", (q["id"],)).fetchone()[0])
+        conn.execute("UPDATE education_questions SET score = ? WHERE id = ?", (mean, q["id"]))
         out["question_score"] = mean
     return out
 
 
 def complete(conn, config, q: dict) -> dict:
     """Close the quiz on an open connection: every part scored, the mean kept, the topic's difficulty moved by the flow band once."""
-    remaining = conn.execute("SELECT COUNT(*) FROM question_parts WHERE question_id = ? AND score IS NULL", (q["id"],)).fetchone()[0]
+    remaining = conn.execute("SELECT COUNT(*) FROM education_question_parts WHERE question_id = ? AND score IS NULL", (q["id"],)).fetchone()[0]
     if remaining:
         raise ValueError(f"{remaining} part(s) not graded yet")
-    mean = round(conn.execute("SELECT AVG(score) FROM question_parts WHERE question_id = ?", (q["id"],)).fetchone()[0])
-    conn.execute("UPDATE questions SET completed_at = ?, score = ? WHERE id = ?", (now_iso(), mean, q["id"]))
+    mean = round(conn.execute("SELECT AVG(score) FROM education_question_parts WHERE question_id = ?", (q["id"],)).fetchone()[0])
+    conn.execute("UPDATE education_questions SET completed_at = ?, score = ? WHERE id = ?", (now_iso(), mean, q["id"]))
     band = config.education
-    d = conn.execute("SELECT difficulty FROM topics WHERE id = ?", (q["topic_id"],)).fetchone()[0]
+    d = conn.execute("SELECT difficulty FROM education_topics WHERE id = ?", (q["topic_id"],)).fetchone()[0]
     nd = min(DIFFICULTY_MAX, d + 1) if mean > band.flow_high else max(1, d - 1) if mean < band.flow_low else d
     if nd != d:
-        conn.execute("UPDATE topics SET difficulty = ? WHERE id = ?", (nd, q["topic_id"]))
+        conn.execute("UPDATE education_topics SET difficulty = ? WHERE id = ?", (nd, q["topic_id"]))
     return {"id": q["id"], "score": mean, "topic_difficulty": nd}
 
 
@@ -80,7 +80,7 @@ def grade(store: Store, question_id, part, score, note) -> dict:
     q = question(store, int(question_id))
     if q is None:
         return {"error": f"no question {question_id}"}
-    row = store.one("SELECT * FROM question_parts WHERE question_id = ? AND n = ?", (q["id"], int(part)))
+    row = store.one("SELECT * FROM education_question_parts WHERE question_id = ? AND n = ?", (q["id"], int(part)))
     if row is None:
         return {"error": f"question {question_id} has no part {part}"}
     try:

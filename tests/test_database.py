@@ -1,4 +1,4 @@
-"""Database module: both executors, run/explain/save through the app, and the tool split."""
+"""Database module: both executors, run/explain/save through the app, the tables by module with their schemas, and the tool split."""
 
 import dataclasses
 import sqlite3
@@ -23,9 +23,9 @@ def test_read_refuses_writes(store):
     conn = store.read_only()
     assert conn.execute("SELECT 1").fetchone() == (1,)
     with pytest.raises(sqlite3.OperationalError, match="readonly"):
-        conn.execute("INSERT INTO cursors(key, value) VALUES ('k', 'v')")
-    assert "readonly" in query.read(store, "INSERT INTO cursors(key, value) VALUES ('k', 'v')", 10, 1)["error"]
-    assert store.scalar("SELECT COUNT(*) FROM cursors") == 0
+        conn.execute("INSERT INTO app_cursors(key, value) VALUES ('k', 'v')")
+    assert "readonly" in query.read(store, "INSERT INTO app_cursors(key, value) VALUES ('k', 'v')", 10, 1)["error"]
+    assert store.scalar("SELECT COUNT(*) FROM app_cursors") == 0
     assert query.read(store, ENDLESS, 10, 0.1)["error"].startswith("interrupted")
     assert query.read(store, "   ", 10, 1)["error"] == "empty statement"
     assert query.read(store, "SELECT 1; SELECT 2", 10, 1)["rows"] == [[2]]  # the last statement that returned rows
@@ -38,24 +38,30 @@ def test_statements_split_on_real_ends():
 
 
 def test_execute_writes(store):
-    r = query.execute(store, "insert into cursors(key, value) values ('a', '1'), ('b', '2')", 10, 5)
+    r = query.execute(store, "insert into app_cursors(key, value) values ('a', '1'), ('b', '2')", 10, 5)
     assert r["changed"] == 2 and r["ddl"] is False and r["columns"] == []
-    r = query.execute(store, "update cursors set value = '9'; select key, value from cursors order by key", 10, 5)
+    r = query.execute(store, "update app_cursors set value = '9'; select key, value from app_cursors order by key", 10, 5)
     assert r["changed"] == 2 and r["statements"] == 2 and r["rows"] == [["a", "9"], ["b", "9"]]
     r = query.execute(store, "create table t(x); drop table t", 10, 5)
     assert r["ddl"] is True and r["changed"] == 0
     # a failure stops the script where it broke and names the statement; what already ran stays
-    r = query.execute(store, "delete from cursors where key = 'a'; select nope from nothing", 10, 5)
+    r = query.execute(store, "delete from app_cursors where key = 'a'; select nope from nothing", 10, 5)
     assert r["error"].startswith("statement 2:") and r["changed"] == 1
-    assert store.scalar("SELECT COUNT(*) FROM cursors") == 1
+    assert store.scalar("SELECT COUNT(*) FROM app_cursors") == 1
     # the owner's own transaction is the way to make a script all-or-nothing
-    r = query.execute(store, "begin; delete from cursors; select nope from nothing; commit", 10, 5)
+    r = query.execute(store, "begin; delete from app_cursors; select nope from nothing; commit", 10, 5)
     assert "error" in r
     query.execute(store, "rollback", 10, 5)
-    assert store.scalar("SELECT COUNT(*) FROM cursors") == 1
+    assert store.scalar("SELECT COUNT(*) FROM app_cursors") == 1
     assert query.execute(store, ENDLESS, 10, 0.1)["error"].startswith("interrupted")
     assert query.execute(store, "  ", 10, 5)["error"] == "empty statement"
-    assert store.scalar("SELECT value FROM cursors WHERE key = 'b'") == "9"  # connection still usable
+    assert store.scalar("SELECT value FROM app_cursors WHERE key = 'b'") == "9"  # connection still usable
+
+
+def test_owners_come_from_the_schemas():
+    owners = query.owners()
+    assert owners["app_events"] == "app" and owners["memory_items"] == "memory" and owners["web_search_findings"] == "web_search"
+    assert owners["memory_fts"] == "memory" and "scratch" not in owners
 
 
 def test_database_run_explain_save(config):
@@ -67,31 +73,54 @@ def test_database_run_explain_save(config):
         async with client_for(app) as c:
             for text in ("a", "b", "c"):
                 await c.post("/api/memory/action/capture", json={"kind": "note", "text": text})
-            r = (await c.post("/api/database/action/run", json={"sql": "select id, text from memories order by id"})).json()
+            r = (await c.post("/api/database/action/run", json={"sql": "select id, text from memory_items order by id"})).json()
             assert r["columns"] == ["id", "text"] and r["total"] == 2 and r["truncated"] is True and r["rows"][0][1] == "a"
-            r = (await c.post("/api/database/action/run", json={"sql": "delete from memories where text = 'c'"})).json()
+            r = (await c.post("/api/database/action/run", json={"sql": "delete from memory_items where text = 'c'"})).json()
             assert r["changed"] == 1 and r["columns"] == []
-            assert app.state.store.scalar("SELECT COUNT(*) FROM memories") == 2
-            r = (await c.post("/api/database/action/explain", json={"sql": "select * from memories where id = 1;"})).json()
-            assert r["lines"] and "memories" in r["lines"][0]
+            assert app.state.store.scalar("SELECT COUNT(*) FROM memory_items") == 2
+            r = (await c.post("/api/database/action/explain", json={"sql": "select * from memory_items where id = 1;"})).json()
+            assert r["lines"] and "memory_items" in r["lines"][0]
+            # LEFT: the tables under their modules, app first then rail order; shadow tables and sqlite_* stay hidden
             left = (await c.get("/api/database/left")).json()
-            tables = {x["text"]: x["stampText"] for x in left["groups"][0]["rows"]}
-            assert tables["memories"] == "2" and "memories_fts" in tables and "memories_fts_data" not in tables and "sqlite_sequence" not in tables
-            qid = (await c.post("/api/database/action/save", json={"name": "recent", "sql": "select * from memories"})).json()["id"]
-            saved = (await c.get("/api/database/left")).json()["groups"][1]
-            assert saved["count"] == 1 and saved["rows"][0]["text"] == "recent" and saved["rows"][0]["query_id"] == qid and saved["rows"][0]["sql"].startswith("select")
-            assert (await c.post("/api/database/action/save", json={"name": "recent", "sql": "select id from memories"})).json()["id"] == qid
+            names = [m["name"] for m in left["modules"]]
+            assert names[0] == "app" and names.index("email") < names.index("memory") < names.index("database") and "other" not in names
+            modules = {m["name"]: m for m in left["modules"]}
+            memory = {t["name"]: t["rows"] for t in modules["memory"]["tables"]}
+            assert memory == {"memory_fts": 2, "memory_items": 2, "memory_suggestions": 0, "memory_tags": 0} and modules["memory"]["rows"] == 4
+            tables = {t["name"] for m in left["modules"] for t in m["tables"]}
+            assert "memory_fts_data" not in tables and "sqlite_sequence" not in tables
+            assert all(t["name"].startswith(f"{m['name']}_") for m in left["modules"] for t in m["tables"])
+            # one table's schema
+            t = (await c.get("/api/database/table/memory_items")).json()
+            assert t["module"] == "memory" and t["rows"] == 2 and t["sql"].startswith("CREATE TABLE") and "memory_items" in t["sql"]
+            assert [x["name"] for x in t["columns"]] == ["id", "kind", "text", "created_at", "updated_at", "done_at"]
+            assert t["columns"][0] == {"name": "id", "type": "INTEGER", "notnull": False, "default": None, "pk": True}
+            assert t["columns"][1]["notnull"] is True and [i["name"] for i in t["indexes"]] == ["memory_items_created"]
+            assert {x["name"] for x in t["triggers"]} == {"memory_items_ad", "memory_items_ai", "memory_items_au"}
+            assert (await c.get("/api/database/table/memory_fts_data")).status_code == 404
+            assert (await c.get("/api/database/table/nope")).status_code == 404
+            # saved queries
+            qid = (await c.post("/api/database/action/save", json={"name": "recent", "sql": "select * from memory_items"})).json()["id"]
+            saved = (await c.get("/api/database/left")).json()["saved"]
+            assert len(saved) == 1 and saved[0]["name"] == "recent" and saved[0]["id"] == qid and saved[0]["sql"].startswith("select")
+            assert (await c.post("/api/database/action/save", json={"name": "recent", "sql": "select id from memory_items"})).json()["id"] == qid
             assert (await c.post("/api/database/action/save", json={"name": "", "sql": "x"})).status_code != 200
             assert (await c.post("/api/database/action/delete", json={"id": qid})).status_code == 200
-            assert (await c.get("/api/database/left")).json()["groups"][1]["count"] == 0
+            assert (await c.get("/api/database/left")).json()["saved"] == []
             blank = (await c.get("/api/database/blank")).json()
             assert blank["db"] == "otto.db" and blank["size_bytes"] > 0 and blank["tables"] == len(tables)
             db = next(n for n in (await c.get("/api/home/numbers")).json() if n["module"] == "database")
             assert db["label"] == "database" and db["value"].endswith("B")
             ev = (await c.get("/api/events?module=database")).json()
             assert [e["verb"] for e in ev["events"]][:4] == ["deleted", "saved", "saved", "wrote"]
-            assert "1 rows: delete from memories" in next(e["text"] for e in ev["events"] if e["verb"] == "wrote")
-            assert "memories (2): id, kind, text" in app.state.registry.get("database").context(app.state.store, app.state.registry)
+            assert "1 rows: delete from memory_items" in next(e["text"] for e in ev["events"] if e["verb"] == "wrote")
+            ctx = app.state.registry.get("database").context(app.state.store, app.state.registry)
+            assert "\napp:\n" in ctx and "\nmemory:\n  memory_fts (2): text\n  memory_items (2): id, kind, text" in ctx
+            # a table no schema owns shows under `other`, last
+            assert (await c.post("/api/database/action/run", json={"sql": "create table scratch(x)"})).json()["ddl"] is True
+            left = (await c.get("/api/database/left")).json()
+            assert left["modules"][-1] == {"name": "other", "rows": 0, "tables": [{"name": "scratch", "module": "other", "rows": 0}]}
+            assert (await c.get("/api/database/table/scratch")).json()["module"] == "other"
         await app.state.runner.drain(1)
         app.state.store.close()
 

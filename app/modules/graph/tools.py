@@ -50,11 +50,11 @@ def register(read, full, store: Store, config) -> None:
         sess_ids = sorted({i for s, i in hits if s == "session"})
         lim = max(1, min(limit, 200))
         memories = store.query(
-            f"SELECT id, kind, text, created_at FROM memories WHERE id IN ({','.join('?' * len(mem_ids))}) ORDER BY created_at DESC LIMIT ?",
+            f"SELECT id, kind, text, created_at FROM memory_items WHERE id IN ({','.join('?' * len(mem_ids))}) ORDER BY created_at DESC LIMIT ?",
             (*mem_ids, lim),
         ) if mem_ids else []
         sessions = store.query(
-            f"SELECT id, module, title, closed_at FROM sessions WHERE id IN ({','.join('?' * len(sess_ids))}) ORDER BY closed_at DESC LIMIT ?",
+            f"SELECT id, module, title, closed_at FROM app_sessions WHERE id IN ({','.join('?' * len(sess_ids))}) ORDER BY closed_at DESC LIMIT ?",
             (*sess_ids, lim),
         ) if sess_ids else []
         return {"tag": k, "memories": memories, "sessions": sessions}

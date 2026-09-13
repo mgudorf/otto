@@ -85,7 +85,7 @@ def left(request: Request, query: str = "", chip: str = "active", page: int = 0)
     if query.strip():
         where = (
             " AND (q.title LIKE ? OR q.premise LIKE ? OR COALESCE(q.definitions, '') LIKE ? OR q.tags LIKE ?"
-            " OR EXISTS (SELECT 1 FROM question_parts p WHERE p.question_id = q.id AND COALESCE(p.title, '') LIKE ?))"
+            " OR EXISTS (SELECT 1 FROM education_question_parts p WHERE p.question_id = q.id AND COALESCE(p.title, '') LIKE ?))"
         )
         params = (f"%{query.strip()}%",) * 5
     out = {"chips": list(TABS), "chip": tab}
@@ -95,7 +95,7 @@ def left(request: Request, query: str = "", chip: str = "active", page: int = 0)
         return {**out, "groups": groups, "showing": f"{len(rows)} / {len(rows)}", "more": False}
     size = int(store.setting("ui.page_size"))
     limit = size * (page + 1)
-    total = store.scalar(f"SELECT COUNT(*) FROM questions q WHERE {LISTED} AND NOT ({ACTIVE}){where}", params)
+    total = store.scalar(f"SELECT COUNT(*) FROM education_questions q WHERE {LISTED} AND NOT ({ACTIVE}){where}", params)
     rows = store.query(f"{SELECT} WHERE {LISTED} AND NOT ({ACTIVE}){where} ORDER BY q.completed_at DESC LIMIT ?", (*params, limit))
     return {**out, "groups": _group_by_day(rows), "showing": f"{min(limit, total)} / {total}", "more": total > limit}
 
@@ -111,7 +111,7 @@ def item_route(request: Request, question_id: int) -> dict:
     """Opening a question on the page makes it the tutor's context: the latest opened_at wins."""
     store: Store = request.app.state.store
     d = item(store, str(question_id))
-    store.execute("UPDATE questions SET opened_at = ? WHERE id = ?", (now_iso(), question_id))
+    store.execute("UPDATE education_questions SET opened_at = ? WHERE id = ?", (now_iso(), question_id))
     return d
 
 
@@ -145,7 +145,7 @@ async def answer(request: Request, body: dict = Body(default={})) -> dict:
     store: Store = st.store
     q = _question_for(store, body, ("active",))
     n = int(body.get("n") or 0)
-    part = store.one("SELECT * FROM question_parts WHERE question_id = ? AND n = ?", (q["id"], n))
+    part = store.one("SELECT * FROM education_question_parts WHERE question_id = ? AND n = ?", (q["id"], n))
     if part is None:
         raise HTTPException(404, "no such part")
     text = (body.get("answer") or "").strip()
@@ -155,9 +155,9 @@ async def answer(request: Request, body: dict = Body(default={})) -> dict:
     brief = grading.grade_brief(store, q, {**part, "answer": text}, part if part["graded_at"] else None)
     ts = now_iso()
     with store.tx() as conn:                                   # a new answer clears the grade of the old one; the brief carries it
-        conn.execute("UPDATE questions SET started_at = COALESCE(started_at, ?), opened_at = ?, score = NULL WHERE id = ?", (ts, ts, q["id"]))
+        conn.execute("UPDATE education_questions SET started_at = COALESCE(started_at, ?), opened_at = ?, score = NULL WHERE id = ?", (ts, ts, q["id"]))
         conn.execute(
-            "UPDATE question_parts SET answer = ?, answered_at = ?, verdict = NULL, score = NULL, note = NULL, graded_at = NULL WHERE question_id = ? AND n = ?",
+            "UPDATE education_question_parts SET answer = ?, answered_at = ?, verdict = NULL, score = NULL, note = NULL, graded_at = NULL WHERE question_id = ? AND n = ?",
             (text, ts, q["id"], n),
         )
     shown = f"({label(n)}) {part_title(part)}\n{text}"
@@ -236,7 +236,7 @@ def _delete(store: Store, body: dict):
     def write(ctx) -> dict:
         # Stamped, not dropped: off the page and out of the tutor's reach, but still in the generator's never-repeat list.
         with ctx.commit() as conn:
-            conn.execute("UPDATE questions SET deleted_at = ? WHERE id = ?", (now_iso(), q["id"]))
+            conn.execute("UPDATE education_questions SET deleted_at = ? WHERE id = ?", (now_iso(), q["id"]))
         ctx.event("deleted", q["title"][:120], ref=str(q["id"]))
         return {"id": q["id"]}
 
@@ -252,7 +252,7 @@ def _tags(store: Store, body: dict):
 
     def write(ctx) -> dict:
         with ctx.commit() as conn:
-            conn.execute("UPDATE questions SET tags = ? WHERE id = ?", (json.dumps(tags), q["id"]))
+            conn.execute("UPDATE education_questions SET tags = ? WHERE id = ?", (json.dumps(tags), q["id"]))
         return {"id": q["id"], "tags": tags}
 
     return write
@@ -263,18 +263,18 @@ def _add_topic(store: Store, body: dict):
     description = (body.get("description") or "").strip() or None
     if not name:
         raise HTTPException(400, "empty name")
-    existing = store.one("SELECT * FROM topics WHERE name = ? COLLATE NOCASE", (name,))
+    existing = store.one("SELECT * FROM education_topics WHERE name = ? COLLATE NOCASE", (name,))
     if existing and existing["retired_at"] is None:
         raise HTTPException(409, "topic exists")
 
     def write(ctx) -> dict:
         with ctx.commit() as conn:
             if existing:                                       # a retired topic comes back rather than failing UNIQUE
-                conn.execute("UPDATE topics SET retired_at = NULL, description = COALESCE(?, description) WHERE id = ?", (description, existing["id"]))
+                conn.execute("UPDATE education_topics SET retired_at = NULL, description = COALESCE(?, description) WHERE id = ?", (description, existing["id"]))
                 tid = existing["id"]
             else:
                 tid = conn.execute(
-                    "INSERT INTO topics(name, description, difficulty, created_at) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO education_topics(name, description, difficulty, created_at) VALUES (?, ?, ?, ?)",
                     (name, description, ctx.config.education.start_difficulty, now_iso()),
                 ).lastrowid
         ctx.event("added topic", name, ref=str(tid))
@@ -284,13 +284,13 @@ def _add_topic(store: Store, body: dict):
 
 
 def _retire_topic(store: Store, body: dict):
-    t = store.one("SELECT * FROM topics WHERE id = ? AND retired_at IS NULL", (int(body.get("id") or 0),))
+    t = store.one("SELECT * FROM education_topics WHERE id = ? AND retired_at IS NULL", (int(body.get("id") or 0),))
     if t is None:
         raise HTTPException(404, "no such topic")
 
     def write(ctx) -> dict:
         with ctx.commit() as conn:
-            conn.execute("UPDATE topics SET retired_at = ? WHERE id = ?", (now_iso(), t["id"]))
+            conn.execute("UPDATE education_topics SET retired_at = ? WHERE id = ?", (now_iso(), t["id"]))
         ctx.event("retired topic", t["name"], ref=str(t["id"]))
         return {"id": t["id"]}
 
@@ -340,7 +340,7 @@ def context(store: Store, registry) -> str:
     last = store.query(f"{SELECT} WHERE q.completed_at IS NOT NULL ORDER BY q.completed_at DESC LIMIT ?", (RECENT,))
     if last:
         lines.append("Last completed: " + "; ".join(f"Q{q['id']} {q['title'][:60]} ({q['topic']}) {q['score']}" for q in last))
-    fb = store.query("SELECT f.text, t.name AS topic FROM education_feedback f LEFT JOIN topics t ON t.id = f.topic_id ORDER BY f.id DESC LIMIT ?", (RECENT,))
+    fb = store.query("SELECT f.text, t.name AS topic FROM education_feedback f LEFT JOIN education_topics t ON t.id = f.topic_id ORDER BY f.id DESC LIMIT ?", (RECENT,))
     if fb:
         lines.append("Owner feedback, verbatim: " + "; ".join(f"\"{f['text'][:160]}\"" + (f" ({f['topic']})" if f["topic"] else "") for f in fb))
     return "\n".join(lines)

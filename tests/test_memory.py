@@ -29,7 +29,7 @@ class FakeClaude:
 
 def capture(store, kind, text):
     ts = now_iso()
-    return store.execute("INSERT INTO memories(kind, text, created_at, updated_at) VALUES (?, ?, ?, ?)", (kind, text, ts, ts)).lastrowid
+    return store.execute("INSERT INTO memory_items(kind, text, created_at, updated_at) VALUES (?, ?, ?, ?)", (kind, text, ts, ts)).lastrowid
 
 
 async def run_suggest(store, config, claude):
@@ -60,7 +60,7 @@ def test_suggest_inserts_once_and_reads_config(store, config):
     assert run(run_suggest(store, config, claude)) == "0 new suggestion(s) from 1 proposed"
     assert store.scalar("SELECT COUNT(*) FROM memory_suggestions") == 1
     assert "- Book a passport appointment" in claude.prompts[1], "dismissed suggestions stay in the never-repeat list"
-    assert store.one("SELECT status FROM jobs ORDER BY id DESC LIMIT 1")["status"] == "done"
+    assert store.one("SELECT status FROM app_jobs ORDER BY id DESC LIMIT 1")["status"] == "done"
 
 
 def test_suggest_skips_without_recent_memories(store, config):
@@ -68,7 +68,7 @@ def test_suggest_skips_without_recent_memories(store, config):
     claude = FakeClaude([])
     run(run_suggest(store, config, claude))
     assert claude.prompts == []
-    job = store.one("SELECT * FROM jobs")
+    job = store.one("SELECT * FROM app_jobs")
     assert job["status"] == "skipped" and "no memories" in job["result"]
 
 

@@ -38,7 +38,7 @@ def _search(query: str) -> tuple[list[str], list[str]]:
 
 
 def _get(store: Store, finding_id: int) -> dict:
-    row = store.one("SELECT * FROM search_findings WHERE id = ?", (finding_id,))
+    row = store.one("SELECT * FROM web_search_findings WHERE id = ?", (finding_id,))
     if row is None:
         raise HTTPException(404, "no such finding")
     return row
@@ -80,7 +80,7 @@ def _decide(status: str):
     def fn(store: Store, body: dict, ctx) -> dict:
         r = _get(store, int(body["id"]))
         with ctx.commit() as conn:
-            conn.execute("UPDATE search_findings SET status = ?, decided_at = ? WHERE id = ?", (status, now_iso(), r["id"]))
+            conn.execute("UPDATE web_search_findings SET status = ?, decided_at = ? WHERE id = ?", (status, now_iso(), r["id"]))
         ctx.event(status, r["title"][:120], ref=str(r["id"]))
         return {"id": r["id"], "status": status}
 
@@ -92,24 +92,24 @@ ACTIONS = {"agree": _decide("agreed"), "disagree": _decide("disagreed")}
 
 # ---- shell hooks ---------------------------------------------------------------------------
 def numbers(store: Store) -> dict:
-    return {"value": store.scalar("SELECT COUNT(*) FROM search_findings WHERE status = 'open'"), "label": "to review"}
+    return {"value": store.scalar("SELECT COUNT(*) FROM web_search_findings WHERE status = 'open'"), "label": "to review"}
 
 
 def today(store: Store) -> list[dict]:
     start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
-    rows = store.query(f"SELECT * FROM search_findings WHERE {LISTED} AND found_at >= ? ORDER BY found_at DESC, id DESC", (iso(start),))
+    rows = store.query(f"SELECT * FROM web_search_findings WHERE {LISTED} AND found_at >= ? ORDER BY found_at DESC, id DESC", (iso(start),))
     return [_row(r) for r in rows]
 
 
 def queue(store: Store) -> list[dict]:
     """Every finding still waiting on the owner, newest first; Home lists these under Review."""
-    rows = store.query("SELECT * FROM search_findings WHERE status = 'open' ORDER BY found_at DESC, id DESC")
+    rows = store.query("SELECT * FROM web_search_findings WHERE status = 'open' ORDER BY found_at DESC, id DESC")
     return [_row(r) for r in rows]
 
 
 def context(store: Store, registry) -> str:
-    topics = store.query("SELECT id, kind, text FROM search_topics ORDER BY kind, created_at")
-    queue = store.query("SELECT id, kind, title, url FROM search_findings WHERE status = 'open' ORDER BY found_at DESC")
+    topics = store.query("SELECT id, kind, text FROM web_search_topics ORDER BY kind, created_at")
+    queue = store.query("SELECT id, kind, title, url FROM web_search_findings WHERE status = 'open' ORDER BY found_at DESC")
     lines = ["Topics (id, kind, text):"]
     lines += [f"  {t['id']} {t['kind']}: {t['text'][:200]}" for t in topics] or ["  none"]
     lines.append(f"Open findings ({len(queue)}):")

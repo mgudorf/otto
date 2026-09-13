@@ -1,4 +1,4 @@
-"""Database: look at every table, run any SQL against the store, keep the queries worth keeping."""
+"""Database: every table under the module that owns it, any SQL against the store, the queries worth keeping."""
 
 from __future__ import annotations
 
@@ -28,26 +28,45 @@ def _human(n: float) -> str:
 
 
 def _saved(store: Store) -> list[dict]:
-    return store.query("SELECT * FROM db_queries ORDER BY updated_at DESC")
+    return store.query("SELECT * FROM database_queries ORDER BY updated_at DESC")
+
+
+def _modules(tables: list[dict], registry) -> list[dict]:
+    """The tables grouped under their modules: `app` first, then rail order, then any module no manifest lists, `other` last."""
+    by: dict[str, list[dict]] = {}
+    for t in tables:
+        by.setdefault(t["module"], []).append(t)
+    order = ["app", *(m.name for m in registry.ordered()), *sorted(by), "other"]
+    out, seen = [], set()
+    for name in order:
+        if name in by and name not in seen:
+            seen.add(name)
+            out.append({"name": name, "rows": sum(t["rows"] for t in by[name]), "tables": by[name]})
+    return out
 
 
 @router.get("/left")
 def left(request: Request) -> dict:
-    store: Store = request.app.state.store
-    tables = query.tables(store)
-    saved = _saved(store)
-    return {"groups": [
-        {"label": "tables", "count": len(tables),
-         "rows": [{"id": f"table:{t['name']}", "module": "database", "text": t["name"], "stampText": f"{t['rows']:,}"} for t in tables]},
-        {"label": "saved", "count": len(saved),
-         "rows": [{"id": f"query:{q['id']}", "module": "database", "text": q["name"], "stamp": q["updated_at"], "sql": q["sql"], "query_id": q["id"]} for q in saved]},
-    ]}
+    st = request.app.state
+    return {
+        "modules": _modules(query.tables(st.store), st.registry),
+        "saved": [{"id": q["id"], "name": q["name"], "sql": q["sql"], "updated_at": q["updated_at"]} for q in _saved(st.store)],
+    }
 
 
 @router.get("/blank")
 def blank(request: Request) -> dict:
     store: Store = request.app.state.store
     return {"db": store.path.name, "size_bytes": _size_bytes(store), "tables": len(query.tables(store))}
+
+
+@router.get("/table/{name}")
+def table(request: Request, name: str) -> dict:
+    """One table's schema: module, rows, columns with their types and constraints, indexes, triggers, the CREATE statement."""
+    t = query.table(request.app.state.store, name)
+    if t is None:
+        raise HTTPException(404, "no such table")
+    return t
 
 
 @router.post("/action/{verb}")
@@ -84,11 +103,11 @@ def _explain(st, body: dict):
 def save_query(conn, name: str, sql: str) -> int:
     ts = now_iso()
     conn.execute(
-        "INSERT INTO db_queries(name, sql, created_at, updated_at) VALUES (?, ?, ?, ?) "
+        "INSERT INTO database_queries(name, sql, created_at, updated_at) VALUES (?, ?, ?, ?) "
         "ON CONFLICT(name) DO UPDATE SET sql = excluded.sql, updated_at = excluded.updated_at",
         (name, sql, ts, ts),
     )
-    return conn.execute("SELECT id FROM db_queries WHERE name = ?", (name,)).fetchone()[0]
+    return conn.execute("SELECT id FROM database_queries WHERE name = ?", (name,)).fetchone()[0]
 
 
 def _save(st, body: dict):
@@ -106,13 +125,13 @@ def _save(st, body: dict):
 
 
 def _delete(st, body: dict):
-    row = st.store.one("SELECT id, name FROM db_queries WHERE id = ?", (int(body.get("id") or 0),))
+    row = st.store.one("SELECT id, name FROM database_queries WHERE id = ?", (int(body.get("id") or 0),))
     if row is None:
         raise HTTPException(404, "no such saved query")
 
     async def job(ctx):
         with ctx.commit() as conn:
-            conn.execute("DELETE FROM db_queries WHERE id = ?", (row["id"],))
+            conn.execute("DELETE FROM database_queries WHERE id = ?", (row["id"],))
         ctx.event("deleted", row["name"], ref=str(row["id"]))
         return {"id": row["id"]}
 
@@ -128,8 +147,10 @@ def numbers(store: Store) -> dict:
 
 
 def context(store: Store, registry) -> str:
-    lines = [f"Store: {store.path.name}, {_human(_size_bytes(store))}. Tables (name, rows, columns):"]
-    lines += [f"  {t['name']} ({t['rows']:,}): {', '.join(t['columns'])}" for t in query.schema(store)]
+    lines = [f"Store: {store.path.name}, {_human(_size_bytes(store))}. Tables by module (name, rows, columns):"]
+    for m in _modules(query.schema(store), registry):
+        lines.append(f"{m['name']}:")
+        lines += [f"  {t['name']} ({t['rows']:,}): {', '.join(c['name'] for c in t['columns'])}" for t in m["tables"]]
     saved = _saved(store)
     lines.append("Saved queries: " + (", ".join(q["name"] for q in saved) if saved else "none"))
     return "\n".join(lines)

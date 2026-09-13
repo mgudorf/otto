@@ -115,7 +115,7 @@ class ClaudeRunner:
         local = datetime.now().astimezone()
         day_start = iso(local.replace(hour=0, minute=0, second=0, microsecond=0))
         used = self.store.scalar(
-            "SELECT COUNT(*) FROM llm_runs WHERE ts >= ? AND budgeted = 1 AND status IN ('running', 'done', 'failed')", (day_start,)
+            "SELECT COUNT(*) FROM app_llm_runs WHERE ts >= ? AND budgeted = 1 AND status IN ('running', 'done', 'failed')", (day_start,)
         )
         start, end = self.config.nightly.bounds()
         from app.scheduler import in_window
@@ -227,13 +227,13 @@ class ClaudeRunner:
 
     def _record(self, ctx, status: str, minutes: float, session_id: str | None, budgeted: bool = True) -> int:
         cur = self.store.execute(
-            "INSERT INTO llm_runs(ts, module, task, job_id, status, minutes, session_id, budgeted) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO app_llm_runs(ts, module, task, job_id, status, minutes, session_id, budgeted) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (now_iso(), ctx.job.module, ctx.job.task, ctx.job.id, status, minutes, session_id, int(budgeted)),
         )
         return cur.lastrowid
 
     def _finish(self, run_id: int, status: str, minutes: float, session_id: str | None) -> None:
-        self.store.execute("UPDATE llm_runs SET status = ?, minutes = ?, session_id = ? WHERE id = ?", (status, minutes, session_id, run_id))
+        self.store.execute("UPDATE app_llm_runs SET status = ?, minutes = ?, session_id = ? WHERE id = ?", (status, minutes, session_id, run_id))
 
     async def oneshot(self, ctx, mod, prompt: str, tools: tuple[str, ...] = (), max_turns: int = 2) -> str:
         """User-triggered, read-only, unbudgeted single answer (session tagging, feedback filing)."""

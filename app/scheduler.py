@@ -43,16 +43,16 @@ class Scheduler:
         with self.store.tx() as conn:
             for name, (mod, s) in declared.items():
                 conn.execute(
-                    """INSERT INTO tasks(name, module, interval_seconds, resource, llm, enabled, next_run)
+                    """INSERT INTO app_tasks(name, module, interval_seconds, resource, llm, enabled, next_run)
                        VALUES (?, ?, ?, ?, ?, 1, ?)
                        ON CONFLICT(name) DO UPDATE SET module = excluded.module, interval_seconds = excluded.interval_seconds,
                          resource = excluded.resource, llm = excluded.llm""",
                     (name, mod, s.seconds, s.resource, int(s.llm), self._first_run(s.llm)),
                 )
-            existing = [r[0] for r in conn.execute("SELECT name FROM tasks").fetchall()]
+            existing = [r[0] for r in conn.execute("SELECT name FROM app_tasks").fetchall()]
             for name in existing:
                 if name not in declared:
-                    conn.execute("DELETE FROM tasks WHERE name = ?", (name,))
+                    conn.execute("DELETE FROM app_tasks WHERE name = ?", (name,))
 
     def _first_run(self, llm: bool) -> str:
         if not llm:
@@ -73,7 +73,7 @@ class Scheduler:
         """True while a nightly run went in the last `stagger_minutes`: the next one waits its turn."""
         cutoff = iso(now() - timedelta(minutes=self.config.nightly.stagger_minutes))
         return bool(self.store.scalar(
-            "SELECT 1 FROM jobs j JOIN tasks t ON t.name = j.task WHERE t.llm = 1 AND j.kind = 'scheduled' AND j.queued_at >= ? LIMIT 1",
+            "SELECT 1 FROM app_jobs j JOIN app_tasks t ON t.name = j.task WHERE t.llm = 1 AND j.kind = 'scheduled' AND j.queued_at >= ? LIMIT 1",
             (cutoff,),
         ))
 
@@ -84,7 +84,7 @@ class Scheduler:
     def tick(self) -> list[str]:
         """Submit every enabled task whose next_run has passed. Returns the names submitted."""
         due = self.store.query(
-            "SELECT * FROM tasks WHERE enabled = 1 AND next_run IS NOT NULL AND next_run <= ? ORDER BY next_run, name", (now_iso(),)
+            "SELECT * FROM app_tasks WHERE enabled = 1 AND next_run IS NOT NULL AND next_run <= ? ORDER BY next_run, name", (now_iso(),)
         )
         submitted = []
         for row in due:
@@ -93,14 +93,14 @@ class Scheduler:
             if row["llm"] and self._staggered():
                 continue                     # one nightly run per gap; the rest stay due for a later tick
             self.store.execute(
-                "UPDATE tasks SET next_run = ? WHERE name = ?", (self._next_run(bool(row["llm"]), row["interval_seconds"]), row["name"])
+                "UPDATE app_tasks SET next_run = ? WHERE name = ?", (self._next_run(bool(row["llm"]), row["interval_seconds"]), row["name"])
             )
             module = self.registry.modules.get(row["module"])
             task_name = row["name"].split(".", 1)[1]
             fn = module.tasks.get(task_name) if module else None
             if fn is None:
                 self.store.execute(
-                    "UPDATE tasks SET last_run = ?, last_status = 'failed', last_result = 'module not loaded' WHERE name = ?",
+                    "UPDATE app_tasks SET last_run = ?, last_status = 'failed', last_result = 'module not loaded' WHERE name = ?",
                     (now_iso(), row["name"]),
                 )
                 continue
@@ -118,10 +118,10 @@ class Scheduler:
                 self.store.event("system", "failed", f"scheduler tick: {e!r}"[:200])
 
     def set_enabled(self, name: str, enabled: bool) -> None:
-        row = self.store.one("SELECT llm FROM tasks WHERE name = ?", (name,))
+        row = self.store.one("SELECT llm FROM app_tasks WHERE name = ?", (name,))
         if row is None:
             raise KeyError(name)
         self.store.execute(
-            "UPDATE tasks SET enabled = ?, next_run = COALESCE(next_run, ?) WHERE name = ?",
+            "UPDATE app_tasks SET enabled = ?, next_run = COALESCE(next_run, ?) WHERE name = ?",
             (int(enabled), self._first_run(bool(row["llm"])), name),
         )
