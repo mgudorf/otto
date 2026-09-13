@@ -76,7 +76,7 @@ The UI is a view of daemon state. Pages render from the store and poll or subscr
 | Resources in the daemon | tokens under `data/secrets/`, cursors in `cursors`, Claude runs as child processes of the daemon, Jupyter kernels as child processes held in Science's module state and shut down at lifespan exit; the page holds nothing | `test_science_reap` |
 | Idempotent, kill-safe tasks | a task's only write path is `ctx.commit(cursor=...)`: results and the new cursor in one transaction | `test_skipped_and_logs_and_commit` |
 | Scheduled agent only reads | `ctx.run_task` is the only Claude entry point a task can reach: read server, read-only built-ins, budget. `session_turn` and `oneshot` are reachable from routes only. Science's `tasks.py` names neither `execute` nor `write` | `test_tasks_never_reach_interactive_claude`, `test_read_builtins_exclude_writers`, `test_science_tasks_never_execute_or_write` |
-| Failure is local | the runner catches per job (row failed, traceback in `error`, an `events` row); the registry records a module that fails to import or whose `setup` raises in `module_errors`, and the rail shows it disabled with the error | `test_failure_is_local`, `test_registry_skips_broken_module` |
+| Failure is local, and says why | the runner catches per job: the `jobs` row is failed with the full traceback in `error`, the `events` row reads `<task>: <exception type and message folded to one line>`, and a scheduled task's `last_result` holds the last 500 characters of the traceback, so a multi-line message keeps its reason. The registry records a module that fails to import or whose `setup` raises in `module_errors`, and the rail shows it disabled with the error | `test_failure_is_local`, `test_registry_skips_broken_module` |
 | UI is a view | pages fetch `/api/...` on the refresh interval and after every action; the loading line reflects in-flight fetches; the session pane and a running notebook cell subscribe to server-sent events | `test_memory_end_to_end`, `test_science_run_streams_and_saves` |
 
 ### Config
@@ -276,19 +276,6 @@ What happens: the daemon rotates `data/daemon.log` to `daemon.log.1`, `.2`, `.3`
 Expected: no file under `data/` other than `.gitkeep` is tracked; the log and its rotations stay local.
 
 Fix: add `data/*.log.*` to `.gitignore` and run `git rm --cached data/daemon.log.1` once.
-
-### A failed task reports no reason anywhere in the UI
-
-- Kind: bug
-- Where: `app/runner.py` `_finish` (line 152 writes the event, line 149 writes `tasks.last_result`)
-- Found: 2026-09-12, email organization session
-- Status: open
-
-What happens: both places that surface a failure take the wrong slice of the traceback. The event text is `(error or '').strip().splitlines()[-1][:200]`, the traceback's last line, which is the exception message only when that message is single-line; `tasks.last_result` is `(error or text or '')[:500]`, the traceback's first 500 characters, which is frame headers and never reaches the exception. `GmailError` renders as `gmail 401: {` then the JSON body over several lines, so on 2026-09-12 Otto recorded 216 consecutive `email.sync` failures over roughly eight hours whose entire Activity text was `email.sync: }` and whose `last_result` was three `File "..."` frames. The two real causes, an expired refresh token (`invalid_grant`) and then a deleted client secret (`invalid_client`), were readable only by grepping `data/daemon.log`. Any exception whose message spans lines loses its reason the same way, in every module.
-
-Expected: the event names the exception, and `tasks.last_result` holds the end of the traceback, so Activity says why a task failed without the owner opening the log.
-
-Fix: take the last non-blank line of the formatted exception rather than of the whole traceback (`traceback.format_exception_only(e)[-1]`), and slice `last_result` from the tail (`error[-500:]`) so the exception survives. Neither changes the stored `jobs.error`, which is already the full traceback.
 
 ### Daemon does not start at logon on this machine
 

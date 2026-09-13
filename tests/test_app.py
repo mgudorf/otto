@@ -251,8 +251,9 @@ def test_feedback_end_to_end(config):
             assert r.status_code == 200, r.text
             fid = r.json()["id"]
             await settle(app)
-            recent = (await c.get("/api/feedback/recent")).json()
-            assert recent["rows"][0]["status"] == "filed" and recent["rows"][0]["kind"] == "bug"
+            assert (await c.get("/api/feedback/recent")).status_code == 422                    # the panel is per page; there is no page-less list
+            recent = (await c.get("/api/feedback/recent?page=memory")).json()
+            assert recent["page"] == "memory" and recent["rows"][0]["status"] == "filed" and recent["rows"][0]["kind"] == "bug"
             row = (await c.get("/api/feedback/list")).json()[0]
             assert row["id"] == fid and row["text"] == "forget should also clear the inspector" and row["item_id"] == "7" and row["tags"] == ["memory", "bug", "inspector"]
             assert row["draft"].startswith("# Forget") and row["ref"] is None and row["job_id"]
@@ -270,13 +271,14 @@ def test_feedback_end_to_end(config):
             r = await c.post("/api/feedback/action/add", json={"page": "activity", "text": "show job durations"})
             bad = r.json()["id"]
             await settle(app)
-            recent = (await c.get("/api/feedback/recent")).json()
+            recent = (await c.get("/api/feedback/recent?page=activity")).json()
             assert recent["rows"][0]["status"] == "failed" and "JSON" in recent["rows"][0]["error"]
+            assert [r["id"] for r in (await c.get("/api/feedback/recent?page=memory")).json()["rows"]] == [fid]   # never another page's notes
             assert (await c.post("/api/feedback/action/retry", json={"id": fid})).status_code == 409
             app.state.claude.spawn = spying([FILED])
             assert (await c.post("/api/feedback/action/retry", json={"id": bad})).status_code == 200
             await settle(app)
-            assert (await c.get("/api/feedback/recent")).json()["rows"][0]["status"] == "filed"
+            assert (await c.get("/api/feedback/recent?page=activity")).json()["rows"][0]["status"] == "filed"
         await app.state.runner.drain(1)
         app.state.store.close()
 

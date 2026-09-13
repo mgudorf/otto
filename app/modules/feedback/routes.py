@@ -118,9 +118,14 @@ async def action(request: Request, verb: str, body: dict = Body(default={})) -> 
 
 
 @router.get("/recent")
-def recent(request: Request) -> dict:
+def recent(request: Request, page: str) -> dict:
+    """One page's own notes. The panel is per page, so a note filed on Home is never another module's business."""
     store: Store = request.app.state.store
-    return {"rows": store.query("SELECT id, created_at, page, status, kind, summary, error FROM feedback ORDER BY id DESC LIMIT ?", (RECENT,))}
+    rows = store.query(
+        "SELECT id, created_at, page, status, kind, summary, error FROM feedback WHERE page = ? ORDER BY id DESC LIMIT ?",
+        (page, RECENT),
+    )
+    return {"page": page, "rows": rows}
 
 
 @router.get("/list")
