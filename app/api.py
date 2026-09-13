@@ -305,12 +305,20 @@ async def session_send(request: Request, module: str, body: dict = Body(...)) ->
         st.broadcast.publish(module, {"role": "system", "text": "session cleared", "ts": now_iso()})
         return {"cleared": True}
 
+    sess = open_session(store, module)
+    job = start_turn(st, mod, sess["id"], bool(sess["cli_started"]), text, text, module)
+    return {"queued": job.id, "session": sess["id"]}
+
+
+def open_session(store: Store, module: str) -> dict:
+    """The module pane's open session, started now when there is none: the send route and a module route that turns an
+    owner's action into a turn of the pane (Education's answer) both come through here."""
+    sess = _session(store, module)
     if sess is None:
         sid = str(uuid.uuid4())
         store.execute("INSERT INTO sessions(id, module, opened_at) VALUES (?, ?, ?)", (sid, module, now_iso()))
         sess = _session(store, module)
-    job = start_turn(st, mod, sess["id"], bool(sess["cli_started"]), text, text, module)
-    return {"queued": job.id, "session": sess["id"]}
+    return sess
 
 
 def start_turn(st, mod, sid: str, started: bool, text: str, prompt: str, key: str, replay: str | None = None, on_done=None):
