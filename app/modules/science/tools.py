@@ -1,11 +1,10 @@
-"""MCP tools for the Science agent. Read tools go on both servers; run and set_cell on the full server only."""
+"""MCP tools for the Science agent. Read tools go on both servers; run, the cell edits and creation on the full server only."""
 
 from __future__ import annotations
 
-import nbformat
 from fastapi import HTTPException
 
-from app.modules.science import notebook, state
+from app.modules.science import notebook, runs, state
 from app.store import Store
 
 
@@ -30,11 +29,11 @@ def register(read, full, store: Store, config) -> None:
             return None
 
     def science_files() -> list[dict]:
-        """Every notebook and script under the science root, newest modification first, with its kernel state if one is live."""
+        """Every notebook and script under the science root, newest modification first, with its kernel state if one is live. Ids are paths under the root; folders are the path prefixes."""
         out = []
         for f in notebook.scan(state.config.root):
             k = state.kernels.get(state.config.root / f["id"])
-            out.append({"id": f["id"], "ext": f["ext"], "modified": f["mtime"], "kernel": k.state if k else None})
+            out.append({"id": f["id"], "ext": f["ext"], "modified": f["mtime"], "kernel": k.state if k else None, "running": f["id"] in state.scripts})
         return out
 
     def science_notebook(id: str) -> dict:
@@ -72,22 +71,23 @@ def register(read, full, store: Store, config) -> None:
         """Live kernels: which notebook, idle or busy, runs so far, minutes idle."""
         return [{"id": k.path.name, "path": str(k.path), "state": k.state, "runs": k.executions, "idle_minutes": round(k.idle_minutes(), 1)} for k in state.kernels.alive()]
 
-    async def science_run(id: str, index: int) -> dict:
-        """Run one code cell on the notebook's kernel (started if needed) and return its outputs. Only when the owner asked for that cell."""
+    async def science_run(id: str, index: int = -1) -> dict:
+        """Run one code cell on the notebook's kernel (started if needed), or a whole .py script on the science Python when id names one, and return the output. Only when the owner asked for it."""
         path = path_of(id)
-        if path is None or path.suffix != ".ipynb":
-            return {"error": f"no notebook {id}"}
+        if path is None:
+            return {"error": f"no file {id}"}
+        if path.suffix == ".py":
+            try:
+                summary = await runs.run_script(store, path, id)
+            except RuntimeError as e:
+                summary = str(e)
+            row = store.one("SELECT status, exit_code, output FROM science_script_runs WHERE path = ? ORDER BY id DESC LIMIT 1", (id,))
+            store.event("science", "ran", f"{path.name}: {summary} (agent)", ref=id)
+            return {"id": id, "status": row["status"], "exit_code": row["exit_code"], "output": cap(row["output"])}
         nb = notebook.read(path)
         if not 0 <= index < len(nb.cells) or nb.cells[index].cell_type != "code":
             return {"error": f"cell {index} is not a code cell"}
-        cell_id = nb.cells[index].get("id")
-        count, outputs = await state.kernels.execute(path, cell_id, notebook.join(nb.cells[index].source))
-        nb = notebook.read(path)
-        cell = next((c for c in nb.cells if c.get("id") == cell_id and c.cell_type == "code"), None)   # by id: the owner may have moved it meanwhile
-        if cell is not None:
-            cell.outputs = [nbformat.from_dict(o) for o in outputs]
-            cell.execution_count = count
-            notebook.write(path, nb)
+        count, outputs = await runs.run_cell(path, nb.cells[index].get("id"), notebook.join(nb.cells[index].source))
         store.event("science", "ran", f"{path.name} [{count}] (agent)", ref=id)
         return {"id": id, "index": index, "execution_count": count, "outputs": [shaped(o, False) for o in outputs]}
 
@@ -104,6 +104,30 @@ def register(read, full, store: Store, config) -> None:
         store.event("science", "edited", f"{path.name} cell {index} (agent)", ref=id)
         return {"id": id, "index": index}
 
+    def science_insert_cell(id: str, after: int, type: str, source: str) -> dict:
+        """Insert a cell (type code | markdown | raw) with this source after cell `after` (-1 for the top) and return its index."""
+        path = path_of(id)
+        if path is None or path.suffix != ".ipynb":
+            return {"error": f"no notebook {id}"}
+        if type not in notebook.TYPES:
+            return {"error": f"no cell type {type}"}
+        nb = notebook.read(path)
+        index = max(0, min(after + 1, len(nb.cells)))
+        nb.cells.insert(index, notebook.new_cell(type, source))
+        notebook.write(path, nb)
+        store.event("science", "edited", f"{path.name} cell {index} inserted (agent)", ref=id)
+        return {"id": id, "index": index}
+
+    def science_new(path: str, kind: str) -> dict:
+        """Create a folder, an empty .py script or a one-cell .ipynb notebook at `path` under the root (kind: folder | py | ipynb). Parent folders are made as needed."""
+        try:
+            target = notebook.target(state.config.root, path, kind)
+            new_id = notebook.create(state.config.root, target, kind)
+        except HTTPException as e:
+            return {"error": e.detail}
+        store.event("science", "created", f"{new_id} (agent)", ref=new_id)
+        return {"id": new_id, "kind": kind}
+
     for server in (read, full):
         server.tool()(science_files)
         server.tool()(science_notebook)
@@ -111,3 +135,5 @@ def register(read, full, store: Store, config) -> None:
         server.tool()(science_kernels)
     full.tool()(science_run)
     full.tool()(science_set_cell)
+    full.tool()(science_insert_cell)
+    full.tool()(science_new)

@@ -1,16 +1,22 @@
-// Science: LEFT = files by day with a live-kernel dot · MIDDLE = the selected notebook as a Lab-style editor: command and edit modes, the JupyterLab keys, every change written straight to the file.
+// Science: LEFT = the root's directory tree, a live dot on a running file, py · ipynb · folder creation into the open folder · MIDDLE = a notebook as a Lab-style editor (command and edit modes, the JupyterLab keys, every change written straight to the file) or a script highlighted whole with its last run's output, and the owner's schedule for either.
 import { Component } from '../vendor/preact.mjs';
-import { html, T, mono13, Row, GroupHeader, Icon, Button, Empty } from '../rows.js';
+import { html, T, mono13, Row, Icon, Button, Empty, interval, stamp } from '../rows.js';
 import { get, post } from '../api.js';
+import hljs from '../vendor/highlight/core.min.js';
+import python from '../vendor/highlight/python.min.js';
+
+hljs.registerLanguage('python', python);
 
 const RED = '#cf7b7b';
 const CHORD_MS = 1000;   // JupyterLab's window for the second key of d,d · i,i · 0,0
 const INDENT = '    ';
+const SCRIPT = 'script';  // the `cell` every script event carries
 const trimNl = (s) => s.replace(/^\n+/, '').replace(/\n+$/, '');   // Lab trims both halves of a split
-const HINT = {
-  command: 'enter · a b · dd · x c v · z · y m r · shift+m · shift+- · ii · 00',
-  edit: 'esc · shift+enter · alt+enter · ctrl+shift+- · ctrl+/ · tab',
-};
+// VS Code Dark Modern's Python colours, on the artboard's panel.
+const CODE_CSS = '.hl{color:#cccccc}.hl .hljs-keyword,.hl .hljs-literal{color:#569cd6}.hl .hljs-built_in,.hl .hljs-title.function_,.hl .hljs-meta{color:#dcdcaa}.hl .hljs-title.class_,.hl .hljs-type{color:#4ec9b0}.hl .hljs-string{color:#ce9178}.hl .hljs-number{color:#b5cea8}.hl .hljs-comment{color:#6a9955}.hl .hljs-params,.hl .hljs-variable,.hl .hljs-property{color:#9cdcfe}.hl .hljs-operator{color:#d4d4d4}';
+
+const open = new Set();   // expanded folders, page-local
+let folder = '';          // the folder the creation chips write into; '' is the root
 
 export async function load(app) {
   const [left, blank] = await Promise.all([get('/api/science/left'), get('/api/science/blank')]);
@@ -24,25 +30,44 @@ export function meta(app) {
 
 export function Left({ app, data, mod, fmt }) {
   const sel = app.state.sel;
-  const create = async () => {
-    const name = window.prompt('New notebook name');
+  const toggle = (id) => { if (open.has(id)) open.delete(id); else open.add(id); folder = id; app.setState({}); };
+  const create = async (kind) => {
+    const name = window.prompt(`New ${kind} in /${folder}`);
     if (!name) return;
     try {
-      const r = await post('/api/science/action/new', { name });
+      const r = await post('/api/science/action/new', { path: folder ? `${folder}/${name}` : name, kind });
       app.setState({ error: null });
+      if (kind === 'folder') { open.add(r.id); folder = r.id; }
       await app.refresh();
-      app.select({ module: 'science', id: r.id });
+      if (kind !== 'folder') app.select({ module: 'science', id: r.id });
     } catch (e) { app.setState({ error: e.message }); }
   };
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-    ${data.left.groups.length === 0 && html`<${Empty} text="no notebooks in root" />`}
-    ${data.left.groups.map((g) => html`<div key=${g.label} style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <${GroupHeader} label=${g.label} count=${g.count} />
-      ${g.rows.map((r) => html`<${Row} key=${r.id} row=${r} hue=${mod.hue} fmt=${fmt} selected=${!!sel && String(sel.id) === String(r.id)} onSelect=${() => app.select({ module: 'science', id: r.id })} />`)}
-    </div>`)}
-    <div style=${{ display: 'flex', alignItems: 'center', gap: 16, height: 32, padding: '0 12px', ...mono13, color: T.dim }}>${data.left.showing}
-      <span class="ring" onClick=${create} style=${{ cursor: 'pointer', color: T.muted, padding: '3px 8px', borderRadius: 6 }}>new</span>
+  const chip = (kind) => html`<span class="ring" onClick=${() => create(kind)} style=${{ cursor: 'pointer', color: T.muted, padding: '3px 8px', borderRadius: 6 }}>${kind}</span>`;
+  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    ${data.left.tree.length === 0 && html`<${Empty} text="nothing in root" />`}
+    ${data.left.tree.map((n) => html`<${Node} key=${n.id} node=${n} depth=${0} sel=${sel} hue=${mod.hue} fmt=${fmt} onToggle=${toggle} onSelect=${(id) => app.select({ module: 'science', id })} />`)}
+    <div style=${{ display: 'flex', alignItems: 'center', gap: 8, height: 32, marginTop: 18, padding: '0 12px', ...mono13, color: T.dim }}>${data.left.showing}
+      <span style=${{ marginLeft: 'auto' }} />${chip('py')}${chip('ipynb')}${chip('folder')}
     </div>
+  </div>`;
+}
+
+// A folder row opens on click and becomes the target of the creation chips; a file row is the shared Row, indented under it.
+function Node({ node, depth, sel, hue, fmt, onToggle, onSelect }) {
+  const pad = { paddingLeft: depth * 16 };
+  if (node.kind !== 'dir') {
+    const row = { id: node.id, text: node.name, stamp: node.mtime, leading: { dot: node.live ? hue : null }, mono: true };
+    return html`<div style=${pad}><${Row} row=${row} hue=${hue} fmt=${fmt} selected=${!!sel && String(sel.id) === node.id} onSelect=${() => onSelect(node.id)} /></div>`;
+  }
+  const isOpen = open.has(node.id), current = folder === node.id;
+  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <div style=${pad}>
+      <div class="row" onClick=${() => onToggle(node.id)} style=${{ display: 'flex', alignItems: 'center', gap: 12, height: 36, padding: '0 12px', borderRadius: 6, cursor: 'pointer', ...mono13, color: current ? T.text : T.muted }}>
+        <span style=${{ width: 6, flex: 'none', color: T.dim }}>${isOpen ? '▾' : '▸'}</span>
+        <span style=${{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${node.name}/</span>
+      </div>
+    </div>
+    ${isOpen && node.children.map((c) => html`<${Node} key=${c.id} node=${c} depth=${depth + 1} sel=${sel} hue=${hue} fmt=${fmt} onToggle=${onToggle} onSelect=${onSelect} />`)}
   </div>`;
 }
 
@@ -52,11 +77,11 @@ export function Middle(props) {
   return html`<${Notebook} ...${props} />`;
 }
 
-// The notebook. Command mode: the notebook element holds focus and keys act on cells. Edit mode: a cell's editor holds focus.
+// The notebook. Command mode: the notebook element holds focus and keys act on cells. Edit mode: a cell's editor holds focus. A script uses the same frame with one run.
 class Notebook extends Component {
   constructor(props) {
     super(props);
-    this.state = { live: {}, sel: { anchor: 0, head: 0 }, mode: 'command' };   // live[cell id] = outputs streamed for a running cell · sel = selected span, head is the active cell
+    this.state = { live: {}, sel: { anchor: 0, head: 0 }, mode: 'command' };   // live[cell id] = outputs streamed for a running cell (or the script) · sel = selected span, head is the active cell
     this.nbId = props.app.state.sel && props.app.state.sel.id;
     this.hadItem = false;
     this.draft = null;      // {index, source} of the cell being typed in; an instance field so a blur after a structural op cannot resave a stale index
@@ -314,9 +339,27 @@ class Notebook extends Component {
     this.select(advance === 'next' ? last + 1 : this.head(), 'command');
   }
 
+  // The script as one run; its output streams in under `live.script` and lands in the item's `last` when done.
+  async runScript() {
+    if (await this.act('run')) this.setState({ live: { ...this.state.live, [SCRIPT]: [] } });
+  }
+
   async kernel(verb) {
-    if (!this.props.app.state.item.kernel) return;
+    const item = this.props.app.state.item;
+    if (item.kind === 'ipynb' && !item.kernel) return;
     if (await this.act(verb)) this.props.app.refresh();
+  }
+
+  async schedule() {
+    const every = window.prompt('Run every (30m, 6h, 1d)', '1d');
+    if (!every) return;
+    const at = window.prompt('First run at HH:MM local (blank: one interval from now)', '');
+    if (at === null) return;
+    if (await this.act('schedule', { every: every.trim(), at: at.trim() || null })) this.reload();
+  }
+
+  async unschedule() {
+    if (await this.act('unschedule')) this.reload();
   }
 
   chord(key, fire) {
@@ -327,6 +370,7 @@ class Notebook extends Component {
   }
 
   key(e) {
+    if (this.props.app.state.item.kind !== 'ipynb') return;
     if (e.target.tagName === 'TEXTAREA') this.editKey(e, +e.target.dataset.index);
     else this.commandKey(e);
   }
@@ -361,7 +405,6 @@ class Notebook extends Component {
     else if (k === 'y') this.setType('code');
     else if (k === 'm') { if (sh) this.merge(); else this.setType('markdown'); }
     else if (k === 'r') this.setType('raw');
-    else if (k === '_' || (k === '-' && sh)) { const t = this.areas[head]; this.split(head, t ? t.selectionStart : 0); }
     else if (k >= '1' && k <= '6') this.heading(+k);
     else if (k === 'd') this.chord('d', () => this.remove(false));
     else if (k === 'i') this.chord('i', () => this.kernel('interrupt'));
@@ -404,52 +447,63 @@ class Notebook extends Component {
     this.typed(i, t.value);
   }
 
-  render({ app, mod }, { live, mode }) {
+  render({ app, mod, fmt }, { live }) {
     const item = app.state.item;
     const hue = mod.hue;
     if (!item) return html`<div style=${{ ...mono13, color: T.dim }}>loading…</div>`;
     if (item.error) return html`<div style=${{ ...mono13, color: RED }}>${item.error}</div>`;
+    const py = item.kind === 'py';
     const k = item.kernel;
-    const label = item.kind === 'py' ? 'module' : k ? `python3 · ${k.state}` : 'python3 · no kernel';
+    const running = py && (item.running || live[SCRIPT] !== undefined);
+    const label = py ? `script · ${running ? 'running' : 'idle'}` : k ? `python3 · ${k.state}` : 'python3 · no kernel';
     const n = item.cells.length, head = this.head(), [a, b] = this.range();
     const d = this.draft;
+    const s = item.schedule;
+    const chip = (text, onClick) => html`<span class="ring" onClick=${onClick} style=${{ cursor: 'pointer', color: T.muted, padding: '2px 8px', borderRadius: 6 }}>${text}</span>`;
     return html`<div ref=${(el) => { this.box = el; }} tabIndex="0" onKeyDown=${(e) => this.key(e)} style=${{ display: 'flex', flexDirection: 'column', gap: 24, outline: 'none' }}>
-      <style>${'.nb-html table{border-collapse:collapse;font-family:inherit}.nb-html th,.nb-html td{height:28px;padding:0 16px 0 0;text-align:left;border-top:1px solid rgba(230,231,234,.08);font-weight:400}.nb-html th{color:#5f636c}'}</style>
+      <style>${'.nb-html table{border-collapse:collapse;font-family:inherit}.nb-html th,.nb-html td{height:28px;padding:0 16px 0 0;text-align:left;border-top:1px solid rgba(230,231,234,.08);font-weight:400}.nb-html th{color:#5f636c}' + CODE_CSS}</style>
       <div style=${{ display: 'flex', alignItems: 'center', gap: 12, ...mono13 }}>
         <span style=${{ display: 'grid', placeItems: 'center', width: 16, height: 16, color: hue }}><${Icon} svg=${mod.icon} /></span>
         <span style=${{ color: T.text }}>${item.text}</span>
         <span style=${{ color: T.dim }}>${label}</span>
         <span class="bright-hover" onClick=${() => app.select(null)} style=${{ marginLeft: 'auto', cursor: 'pointer', color: T.dim, padding: '0 4px', lineHeight: 1 }}>×</span>
       </div>
-      ${item.kind === 'ipynb' && html`<div style=${{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <${Button} label="Run all" primary=${true} hue=${hue} onClick=${() => this.run(item.cells.map((c) => c.index))} />
-        ${k && html`<${Button} label="Interrupt" onClick=${() => this.kernel('interrupt')} />`}
-        ${k && html`<${Button} label="Restart" onClick=${() => this.kernel('restart')} />`}
-        ${k && html`<${Button} label="Shut down" onClick=${() => this.kernel('shutdown')} />`}
-        <${Button} label="+ cell" onClick=${() => this.insert(n)} />
-        <${Button} label="Send to session" right=${true} onClick=${() => app.sendToSession(`About the selected notebook (science ${item.id}, cell ${head} of ${n}):\n\n`)} />
-      </div>`}
-      ${item.kind === 'py'
-        ? html`<pre style=${{ margin: 0, background: T.panel, borderRadius: 6, padding: '10px 14px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', ...mono13, lineHeight: 1.6 }}>${item.source}</pre>`
+      <div style=${{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        ${py
+          ? html`${running
+              ? html`<${Button} label="Interrupt" onClick=${() => this.kernel('interrupt')} />`
+              : html`<${Button} label="Run" primary=${true} hue=${hue} onClick=${() => this.runScript()} />`}`
+          : html`<${Button} label="Run all" primary=${true} hue=${hue} onClick=${() => this.run(item.cells.map((c) => c.index))} />
+            ${k && html`<${Button} label="Interrupt" onClick=${() => this.kernel('interrupt')} />`}
+            ${k && html`<${Button} label="Restart" onClick=${() => this.kernel('restart')} />`}
+            ${k && html`<${Button} label="Shut down" onClick=${() => this.kernel('shutdown')} />`}
+            <${Button} label="+ cell" onClick=${() => this.insert(n)} />`}
+        <${Button} label="Send to session" right=${true} onClick=${() => app.sendToSession(py ? `About the selected script (science ${item.id}):\n\n` : `About the selected notebook (science ${item.id}, cell ${head} of ${n}):\n\n`)} />
+      </div>
+      <div style=${{ display: 'flex', alignItems: 'center', gap: 12, ...mono13, color: T.dim }}>
+        ${s
+          ? html`<span>every ${interval(s.every_seconds)}${s.at ? ` at ${s.at}` : ''} · next ${stamp(s.next_run, fmt)} · last ${s.last_status ? `${s.last_status} ${stamp(s.last_run, fmt)}` : 'never'}</span>${chip('unschedule', () => this.unschedule())}`
+          : chip('schedule', () => this.schedule())}
+      </div>
+      ${py
+        ? html`<${Script} source=${item.source} last=${item.last} live=${live[SCRIPT]} fmt=${fmt} />`
         : item.cells.map((c, i) => html`<${Cell} key=${c.id || i} cell=${c} i=${i} hue=${hue} live=${live[c.id]}
             source=${d && d.index === i ? d.source : c.source}
-            active=${i === head} selected=${i >= a && i <= b} hint=${i === head ? HINT[mode] : null}
+            active=${i === head} selected=${i >= a && i <= b}
             area=${(el) => { this.areas[i] = el; }}
             onFocus=${() => this.focusCell(i)} onBlur=${() => this.commit()}
-            onInput=${(v) => this.typed(i, v)} onPick=${() => this.select(i, 'command')}
-            onInsert=${(type) => this.insert(i + 1, type)} />`)}
+            onInput=${(v) => this.typed(i, v)} onPick=${() => this.select(i, 'command')} />`)}
     </div>`;
   }
 }
 
-// One cell: a left bar marks the selection · the gutter or the margin picks it · the source is always an editor · insert chips at the foot of the active cell.
-function Cell({ cell, i, hue, live, source, active, selected, hint, area, onFocus, onBlur, onInput, onPick, onInsert }) {
+// One cell: a left bar marks the selection · the gutter or the margin picks it · the source is always an editor. Nothing under a cell depends on the selection, so the list never shifts.
+function Cell({ cell, i, hue, live, source, active, selected, area, onFocus, onBlur, onInput, onPick }) {
   const code = cell.type === 'code';
   const running = cell.running || live !== undefined;
   const outputs = live !== undefined ? live : cell.outputs;
   const n = running ? '[*]' : cell.execution_count != null ? `[${cell.execution_count}]` : '[ ]';
   const bar = active ? hue : selected ? T.dim : 'transparent';
-  const chip = (label, onClick) => html`<span class="ring" onClick=${onClick} style=${{ flex: 'none', whiteSpace: 'nowrap', padding: '2px 8px', borderRadius: 6, cursor: 'pointer', color: T.muted }}>${label}</span>`;
   return html`<div data-cell onMouseDown=${(e) => { if (e.target.tagName !== 'TEXTAREA') onPick(); }}
       style=${{ display: 'grid', gridTemplateColumns: '40px minmax(0,1fr)', gap: '0 12px', paddingLeft: 8, boxShadow: `inset 2px 0 0 ${bar}`, ...mono13, lineHeight: 1.6 }}>
     <span style=${{ color: running ? hue : T.dim, paddingTop: 10, userSelect: 'none', cursor: 'default' }}>${code ? n : ''}</span>
@@ -458,12 +512,23 @@ function Cell({ cell, i, hue, live, source, active, selected, hint, area, onFocu
         onFocus=${onFocus} onBlur=${onBlur} onInput=${(e) => onInput(e.target.value)}
         style=${{ display: 'block', width: '100%', minHeight: 40, margin: 0, padding: '10px 14px', border: 0, borderRadius: 6, resize: 'none', fieldSizing: 'content', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', fontSize: 'inherit', lineHeight: 'inherit', background: code ? T.panel : 'transparent', color: code ? T.text : cell.type === 'markdown' ? T.muted : T.dim, '--hue': hue }} />
       ${outputs.map((o, j) => html`<${Output} key=${j} o=${o} />`)}
-      ${active && html`<div style=${{ display: 'flex', alignItems: 'center', gap: 8, height: 28, color: T.dim }}>
-        ${chip('+ code', () => onInsert('code'))}
-        ${chip('+ markdown', () => onInsert('markdown'))}
-        <span style=${{ marginLeft: 'auto', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>${hint}</span>
-      </div>`}
     </div>
+  </div>`;
+}
+
+// The whole script, highlighted, with a line-number gutter; under it the run streaming now, or the last run's status and output.
+function Script({ source, last, live, fmt }) {
+  const lines = source.split('\n');
+  if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
+  const code = hljs.highlight(source, { language: 'python' }).value;
+  const text = live !== undefined ? live.map((o) => o.text).join('') : last ? last.output : null;
+  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style=${{ display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr)', background: T.panel, borderRadius: 6, ...mono13, lineHeight: 1.6, overflowX: 'auto' }}>
+      <pre style=${{ margin: 0, padding: '10px 0 10px 14px', color: T.dim, textAlign: 'right', userSelect: 'none', fontFamily: 'inherit' }}>${lines.map((_, i) => i + 1).join('\n')}</pre>
+      <pre class="hl" style=${{ margin: 0, padding: '10px 14px', fontFamily: 'inherit' }} dangerouslySetInnerHTML=${{ __html: code }} />
+    </div>
+    ${last && live === undefined && html`<div style=${{ ...mono13, color: last.status === 'failed' ? RED : T.dim, padding: '0 14px' }}>${last.status} · ${stamp(last.started_at, fmt)}${last.exit_code != null ? ` · exit ${last.exit_code}` : ''}</div>`}
+    ${text ? html`<${Output} o=${{ kind: 'stream', text }} />` : null}
   </div>`;
 }
 
