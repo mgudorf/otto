@@ -59,6 +59,8 @@ client_file = "data/secrets/google_client.json"   # Google OAuth web client
 token_file = "data/secrets/token.json"            # the owner's Gmail token, scope gmail.modify, refreshed in place
 backfill_days = 90            # the first sync mirrors mail newer than this
 triage_batch = 40             # messages the nightly triage prioritizes per run
+read_on_open = true           # opening an unread message marks it read in Gmail
+consent_warn_days = 2         # days before the refresh token dies that Home starts warning
 
 [web_search]
 max_findings = 3            # findings the nightly search may queue per run

@@ -40,11 +40,24 @@ class GmailError(Exception):
 
 def save_token(path: Path, old: dict, fresh: dict) -> dict:
     """Merge a token response into the file. A stale refresh-token lifetime never survives a refresh."""
-    data = {k: v for k, v in old.items() if k != "refresh_token_expires_in"}
+    data = {k: v for k, v in old.items() if k not in ("refresh_token_expires_in", "refresh_expires_at")}
     data.update(fresh)
     data["expires_at"] = iso(now() + timedelta(seconds=int(fresh["expires_in"])))
+    # Absolute, so anything can ask when consent dies without knowing when the file was written.
+    # A token issued outside Testing carries no lifetime and never expires; the key stays absent.
+    if "refresh_token_expires_in" in fresh:
+        data["refresh_expires_at"] = iso(now() + timedelta(seconds=int(fresh["refresh_token_expires_in"])))
     path.write_text(json.dumps(data, indent=1), "utf-8")
     return data
+
+
+def consent_expires(token_file: Path) -> datetime | None:
+    """When re-consent is due, or None when the token has no expiry or has never been written."""
+    try:
+        stamp = json.loads(token_file.read_text("utf-8")).get("refresh_expires_at")
+    except (OSError, ValueError):
+        return None
+    return datetime.fromisoformat(stamp) if stamp else None
 
 
 class Token:

@@ -13,7 +13,7 @@ from app.store import Store, now_iso
 
 def register(read, full, store: Store, config) -> None:
     def email_search(query: str = "", chip: str = "All", limit: int = 20) -> list[dict]:
-        """Search the inbox mirror by sender, address, subject or snippet. chip narrows to All, Unread or Flagged. Newest first."""
+        """Search the inbox mirror by sender, address, subject or snippet. Newest first."""
         where, params = _where(query, chip if chip in CHIPS else "All")
         rows = store.query(
             f"SELECT m.id, m.from_name, m.from_addr, m.subject, m.snippet, m.internal_date, m.labels FROM email_messages m {where} "
@@ -61,6 +61,9 @@ def register(read, full, store: Store, config) -> None:
             )
         store.event("email", "flagged", f"{priority} (agent): {r['subject'][:100]}", ref=id)
         return {"id": id, "priority": priority}
+
+    # Built from CHIPS, so the description the agent reads cannot drift from the chips the route serves.
+    email_search.__doc__ += f" chip narrows to {', '.join(CHIPS[:-1])} or {CHIPS[-1]}."
 
     for server in (read, full):
         server.tool()(email_search)

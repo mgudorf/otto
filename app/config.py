@@ -94,6 +94,8 @@ class Email:
     token_file: Path
     backfill_days: int
     triage_batch: int
+    read_on_open: bool
+    consent_warn_days: int
 
 
 @dataclass(frozen=True)
@@ -164,10 +166,11 @@ def load(root: Path = ROOT) -> Config:
         science=Science(**{**raw["science"], "root": root / raw["science"]["root"]}),
         education=Education(**raw["education"]),
         database=Database(**raw["database"]),
-        email=Email(
-            client_file=root / raw["email"]["client_file"], token_file=root / raw["email"]["token_file"],
-            backfill_days=raw["email"]["backfill_days"], triage_batch=raw["email"]["triage_batch"],
-        ),
+        email=Email(**{
+            **raw["email"],
+            "client_file": root / raw["email"]["client_file"],
+            "token_file": root / raw["email"]["token_file"],
+        }),
         web_search=WebSearch(**raw["web_search"]),
         social=Social(**{**raw["social"], "cities": tuple(raw["social"]["cities"])}),
         feedback=Feedback(**raw["feedback"]),

@@ -32,7 +32,7 @@ function pageFromHash() {
 class App extends Component {
   constructor() {
     super();
-    this.state = { shell: null, page: null, data: null, sel: null, item: null, query: '', chip: 'All', more: 0, op: 1, loading: 0, error: null, prefill: null, section: 'General', feedback: null };
+    this.state = { shell: null, page: null, data: null, sel: null, item: null, picked: [], query: '', chip: 'All', more: 0, op: 1, loading: 0, error: null, prefill: null, section: 'General', feedback: null };
   }
 
   async componentDidMount() {
@@ -61,7 +61,7 @@ class App extends Component {
   async go(page, fromHash) {
     if (!fromHash) location.hash = `#/${page}`;
     this.setState({ op: 0 });
-    setTimeout(() => this.setState({ page, sel: null, item: null, query: '', chip: 'All', more: 0, data: null, op: 1, prefill: null }, () => this.refresh()), 120);
+    setTimeout(() => this.setState({ page, sel: null, item: null, picked: [], query: '', chip: 'All', more: 0, data: null, op: 1, prefill: null }, () => this.refresh()), 120);
   }
 
   async refresh() {

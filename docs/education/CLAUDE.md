@@ -74,3 +74,16 @@ What happens: no module, task or page picks a technology or asks about it; the E
 Expected: a decision on where the technology comes from (the nightly search's `work` findings are the obvious feed), how one is picked, and how the owner's understanding is checked.
 
 Fix: the owner decides whether it is a mode of Education or of Search; then one change through `/feature-flow`.
+
+### Education page actions fail silently
+
+- Kind: bug
+- Where: `app/static/pages/education.js` `act` for `Start` and `Skip` (unguarded `await post`, while `answer` and `generate` in the same file do catch); `app/static/api.js` `api` throws on a non-2xx
+- Found: 2026-09-12, email organization session; carried here 2026-09-13 when Email's half was fixed
+- Status: open
+
+What happens: `api.js` throws when a route answers 4xx or 5xx. `act` does not catch it, so the rejection is unhandled: nothing is drawn, no refresh runs, and the page looks identical whether the question changed or the route refused. A 409 because the tutor already graded or skipped the question is invisible this way.
+
+Expected: an action that fails says so where it was pressed, in the module hue.
+
+Fix: catch around the post and render the message, the way `answer` and `generate` in the same file already do. Email's bar took the same fix on 2026-09-13: the error goes in a fixed line under the controls so nothing moves when it appears.

@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from app.modules.email import MANIFEST
-from app.modules.email.gmail import read_client, write_client
-from app.store import Store, iso, parse
+from app.modules.email.gmail import consent_expires, read_client, write_client
+from app.store import Store, iso, now, parse
 
 router = APIRouter(prefix="/api/email")
 
 RESOURCE = "gmail"
-CHIPS = ("All", "Unread", "Flagged", "Priority")
-CHIP_LABELS = {"All": (), "Unread": ("UNREAD",), "Flagged": ("STARRED",)}
+CHIPS = ("All", "Flagged", "Priority")
+CHIP_LABELS = {"All": (), "Flagged": ("STARRED",)}
+CONFIG = None   # set by setup(); the queue hook is handed only the store
 PRIORITIES = ("high", "normal", "low")
 HAS = "EXISTS (SELECT 1 FROM json_each(m.labels) WHERE value = ?)"
 HIGH = "m.id IN (SELECT message_id FROM email_triage WHERE priority = 'high')"
@@ -53,12 +54,16 @@ def _labels(r: dict) -> list[str]:
 
 
 def _row(r: dict) -> dict:
+    labels = _labels(r)
+    unread = "UNREAD" in labels
     return {
         "id": r["id"],
         "module": "email",
         "text": f"{r['from_name'] or r['from_addr']}: {r['subject']}",
         "stamp": r["internal_date"],
-        "leading": {"dot": MANIFEST.hue if "UNREAD" in _labels(r) else "transparent"},
+        "leading": {"dot": MANIFEST.hue if unread else "transparent"},
+        "unread": unread,
+        "starred": "STARRED" in labels,
     }
 
 
@@ -100,6 +105,7 @@ def left(request: Request, query: str = "", chip: str = "All", page: int = 0) ->
         "showing": f"{min(limit, total):,} / {total:,}",
         "more": total > limit,
         "total": total,
+        "read_on_open": bool(CONFIG.email.read_on_open) if CONFIG else False,
     }
 
 
@@ -111,7 +117,7 @@ def blank(request: Request) -> dict:
         "unread": _count(store, "INBOX", "UNREAD"),
         "flagged": _count(store, "INBOX", "STARRED"),
         "priority": store.scalar(f"SELECT COUNT(*) FROM email_messages m WHERE {HAS} AND {HIGH}", ("INBOX",)),
-        "last_sync": store.scalar("SELECT last_run FROM tasks WHERE name = 'email.sync'"),
+        "last_sync": store.cursor("email.synced_at"),
     }
 
 
@@ -170,8 +176,8 @@ def item(store: Store, message_id: str) -> dict:
 
 def _resolve(store: Store, body: dict) -> tuple[list[str], str]:
     """The ids an action applies to, and how to describe them in the event."""
-    if body.get("ids"):
-        ids = [str(i) for i in body["ids"]]
+    if body.get("ids") or body.get("id"):
+        ids = [str(i) for i in body["ids"]] if body.get("ids") else [str(body["id"])]
         if len(ids) == 1:
             return ids, _get(store, ids[0])["subject"][:120]
         return ids, f"{len(ids)} messages"
@@ -182,6 +188,16 @@ def _resolve(store: Store, body: dict) -> tuple[list[str], str]:
     where, params = _where(query, chip)
     ids = [r["id"] for r in store.query(f"SELECT m.id FROM email_messages m {where}", tuple(params))]
     return ids, f"{len(ids)} messages matching '{query}' · {chip}" if query.strip() else f"{len(ids)} messages · {chip}"
+
+
+@router.post("/action/sync")
+async def sync_now(request: Request) -> dict:
+    """The scheduler's own task, on the scheduler's own lock: a manual sync and a due one can never overlap."""
+    from app.modules.email import tasks  # deferred: tasks.py imports this module
+
+    st = request.app.state
+    result = await st.runner.run_action("email.sync", "email", RESOURCE, tasks.sync)
+    return {"result": str(result)}
 
 
 @router.post("/action/{verb}")
@@ -227,9 +243,28 @@ def today(store: Store) -> list[dict]:
     return [_row(r) for r in rows]
 
 
+def queue(store: Store) -> list[dict]:
+    """Re-consent is the owner's to run and nothing else can do it, so it waits on them like any other queue row."""
+    if CONFIG is None:
+        return []
+    due = consent_expires(CONFIG.email.token_file)
+    if due is None or due - timedelta(days=CONFIG.email.consent_warn_days) > now():
+        return []
+    gone = due <= now()
+    return [{
+        "id": "consent",
+        "module": "email",
+        "text": "Gmail consent has expired; run: python -m app.modules.email.gmail consent" if gone
+                else "Gmail consent expires soon; run: python -m app.modules.email.gmail consent",
+        "stamp": iso(due),
+        "leading": {"dot": MANIFEST.hue},
+        "mono": True,
+    }]
+
+
 def context(store: Store, registry) -> str:
     b = {"inbox": _count(store, "INBOX"), "unread": _count(store, "INBOX", "UNREAD"), "flagged": _count(store, "INBOX", "STARRED")}
-    last = store.scalar("SELECT last_run FROM tasks WHERE name = 'email.sync'")
+    last = store.cursor("email.synced_at")
     newest = store.query(f"SELECT m.id, m.from_name, m.subject FROM email_messages m WHERE {HAS} ORDER BY m.internal_date DESC LIMIT 10", ("INBOX",))
     high = store.query(
         f"SELECT m.id, m.subject, t.reason FROM email_messages m JOIN email_triage t ON t.message_id = m.id "

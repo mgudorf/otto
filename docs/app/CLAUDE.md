@@ -330,3 +330,16 @@ What happens: the Data section offers `Back up now` and `Vacuum`. `Export` is ab
 Expected: either an export with a defined target (a copy of the database, or a JSON dump of chosen tables), or the button dropped from the design.
 
 Fix: decide the target, then one action route and one button.
+
+### Ultrawide screens leave the surplus as margin between the three tracks
+
+- Kind: defect
+- Where: `docs/app/CLAUDE.md` Frame contract, the `Tracks` and `MIDDLE` rows; `app/static/shell.js` (the grid) and each page's centred content. Reported from the Email page with a message open
+- Found: 2026-09-13, feedback #4
+- Status: open, needs an owner decision
+
+What happens: the owner reports, "The email window still is not scaling well on my ultrawide monitor; there is just a ton of margin between left/middle/right winwos". The frame behaves as the contract states: past about 1950px the sides stop at `ui.side_max` and MIDDLE takes every extra pixel, but MIDDLE's content is capped at `min(100%, ui.middle_max)` and centred, and a reader holds `72ch` inside that. On an ultrawide the surplus therefore lands as empty ground either side of the content, so three panels read as three narrow strips with a gulf between them. Nothing is behaving against the code; the sizing rule is wrong for this monitor.
+
+Expected: on a very wide window the space goes to the panels, not to blank ground between them.
+
+Fix: the owner picks what absorbs the surplus, then one grid rule and MIDDLE's centring change to match. Options: let the sides keep growing (the settings route already allows `ui.side_max` to 900px), cap the MIDDLE track rather than only its content so the three tracks sit together and the extra width falls outside the frame, or keep the `72ch` measure but left-align it in a wider MIDDLE. Confirm on the owner's ultrawide before landing, since `ui.side_max` and `ui.middle_max` are live settings and the fix must hold across their whole range.

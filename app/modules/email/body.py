@@ -1,7 +1,8 @@
 """The body of one message: text for the agent, sanitized HTML for the reader, attachment names for both.
 
 Nothing the reader receives can be clicked, fetched or run. sanitize() keeps text and structure only: no
-anchor, image, style, script, form or attribute survives, and a link becomes its text followed by the raw URL.
+anchor, image, style, script, form or attribute survives; a link becomes its text with the raw URL on hover,
+and an image contributes its alt text only when that text says something the owner cannot already see.
 A part that carries a filename is an attachment, inline or not: its name is listed and its content never read.
 """
 
@@ -26,6 +27,9 @@ SKIP = {  # dropped with everything inside
 }
 VOID = {"br", "hr", "wbr", "img", "area", "base", "col", "embed", "input", "link", "meta", "param", "source", "track", "keygen", "frame"}
 SHOWN = ("http://", "https://", "mailto:", "tel:")  # the only link targets written out; anything else is dropped
+# Alt text that exists for a client that blocks images. Otto never fetches one, so the sentence tells the owner nothing.
+BOILERPLATE = re.compile(r"^(enable images|click here|image|photo|logo|icon|spacer|banner|header|footer|divider)\b|"
+                         r"to view this (e-?mail|content)|images? (are )?(off|blocked|disabled)", re.I)
 HIDDEN = re.compile(r"(display\s*:\s*none|visibility\s*:\s*hidden)", re.I)  # inline-hidden: preheaders, the mobile copy of a layout
 
 
@@ -51,8 +55,8 @@ class _Sanitizer(HTMLParser):
         if tag == "a":
             self._open_link(a.get("href", ""))
         elif tag == "img":
-            alt = a.get("alt", "").strip()
-            if alt:
+            alt = " ".join(a.get("alt", "").split())
+            if alt and not BOILERPLATE.search(alt):
                 self.out.append(f'<span class="img">[image: {html.escape(alt)}]</span>')
                 self.link_text.append(alt)
         elif tag in VOID:
@@ -100,7 +104,7 @@ class _Sanitizer(HTMLParser):
         url, text = self.link, "".join(self.link_text).strip()
         self.link = None
         if text and url.lower().startswith(SHOWN) and _bare(url) != _bare(text):
-            self.out.append(f' <span class="url">{html.escape(url)}</span>')
+            self.out.append(f'<span class="url" title="{html.escape(url, quote=True)}"></span>')
 
     def close(self) -> None:
         super().close()
@@ -109,12 +113,27 @@ class _Sanitizer(HTMLParser):
             self.out.append(f"</{self.open.pop()}>")
 
 
+EMPTY_CELL = re.compile(r"<(td|th)>(\s|&nbsp;|<br>|<wbr>)*</\1>")
+EMPTY_ROW = re.compile(r"<tr>(\s|<br>)*</tr>")
+RUN_OF_BREAKS = re.compile(r"(<br>\s*){3,}")
+
+
+def _tidy(markup: str) -> str:
+    """A template mail is mostly spacer cells and spacer rows; they carry nothing and read as blank space."""
+    for _ in range(3):  # a dropped cell can empty its row, which can empty the row above it
+        before = markup
+        markup = EMPTY_ROW.sub("", EMPTY_CELL.sub("", markup))
+        if markup == before:
+            break
+    return RUN_OF_BREAKS.sub("<br><br>", markup)
+
+
 def sanitize(raw: str) -> str:
-    """HTML the reader can show: KEEP tags bare, links as text plus URL, images as their alt text, nothing else."""
+    """HTML the reader can show: KEEP tags bare, a link as its text with the URL on hover, meaningful alt text, nothing else."""
     p = _Sanitizer()
     p.feed(raw)
     p.close()
-    return "".join(p.out)
+    return _tidy("".join(p.out))
 
 
 def to_text(raw: str) -> str:

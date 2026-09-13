@@ -17,3 +17,10 @@ MANIFEST = Manifest(
         write_tools=("email_flag",),
     ),
 )
+
+
+def setup(config) -> None:
+    """Hooks are handed only the store, and the consent warning needs the token path and the window."""
+    from app.modules.email import routes
+
+    routes.CONFIG = config

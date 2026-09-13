@@ -57,7 +57,7 @@ export function Row({ row, selected, onSelect, hue, fmt, height = 36 }) {
   else if (lead.ext !== undefined) leading = html`<span style=${{ flex: 'none', ...mono13, color: hue, width: 40 }}>${lead.ext}</span>`;
   else if (lead.pct !== undefined) leading = html`<span style=${{ width: 40, height: 2, flex: 'none', background: 'rgba(230,231,234,.1)', position: 'relative', overflow: 'hidden', borderRadius: 1 }}>
       <span style=${{ position: 'absolute', left: 0, top: 0, bottom: 0, background: hue, width: `${lead.pct}%` }} /></span>`;
-  return html`<div class="row" onClick=${onSelect} style=${{ display: 'flex', alignItems: 'center', gap: 12, height, padding: '0 12px', borderRadius: 6, cursor: 'pointer', background: selected ? T.raised : 'transparent' }}>
+  return html`<div class="row" onClick=${(e) => onSelect(e)} style=${{ display: 'flex', alignItems: 'center', gap: 12, height, padding: '0 12px', borderRadius: 6, cursor: 'pointer', background: selected ? T.raised : 'transparent' }}>
     ${leading}
     <span style=${{ flex: '1 1 auto', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: row.done ? T.dim : T.text, textDecoration: row.done ? 'line-through' : 'none', ...(row.mono ? mono13 : {}) }}>${row.text}</span>
     <span style=${{ flex: 'none', ...mono13, color: T.dim }}>${row.stampText !== undefined ? row.stampText : stamp(row.stamp, fmt)}</span>

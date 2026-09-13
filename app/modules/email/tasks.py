@@ -16,11 +16,20 @@ from app.store import now, now_iso
 FETCH_CONCURRENCY = 10   # metadata requests in flight; the client pauses them all when Gmail refuses on quota
 PAGE = 100               # messages fetched and committed together during a backfill; a kill loses at most one page
 CURSOR = "email.history"
+SYNCED = "email.synced_at"   # moved by every successful sync, scheduled or manual, so the page can say when
 BACKFILL = "email.backfill"   # "<historyId>|<started>" while a backfill is in progress; resumed by the next run
 
 UPSERT = """INSERT INTO email_messages(id, thread_id, from_name, from_addr, to_addr, subject, snippet, internal_date, labels, synced_at)
 VALUES (:id, :thread_id, :from_name, :from_addr, :to_addr, :subject, :snippet, :internal_date, :labels, :synced_at)
 ON CONFLICT(id) DO UPDATE SET labels = excluded.labels, snippet = excluded.snippet, synced_at = excluded.synced_at"""
+
+
+def _stamp_synced(conn) -> None:
+    """In the same transaction as the results, so the page never reports a sync that did not commit."""
+    conn.execute(
+        "INSERT INTO cursors(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (SYNCED, now_iso()),
+    )
 
 
 async def _fetch(gm, ids: list[str]) -> tuple[list[dict], list[str]]:
@@ -84,6 +93,7 @@ async def _backfill(ctx, gm) -> str:
         ctx.log(f"backfill {fetched}/{len(todo)}")
     with ctx.commit(cursor=(CURSOR, history_id)) as conn:
         conn.execute("DELETE FROM cursors WHERE key = ?", (BACKFILL,))
+        _stamp_synced(conn)
     return f"backfilled {fetched} messages from the last {days} days ({len(have)} already mirrored)"
 
 
@@ -102,6 +112,7 @@ async def _incremental(ctx, gm, cursor: str) -> str:
     with ctx.commit(cursor=(CURSOR, data["historyId"])) as conn:
         conn.executemany(UPSERT, [{**r, "synced_at": ts} for r in rows])
         conn.executemany("DELETE FROM email_messages WHERE id = ?", [(i,) for i in sorted(deleted)])
+        _stamp_synced(conn)
     if not rows and not deleted:
         return "no changes"
     return f"{len(rows)} updated, {len(deleted)} removed"

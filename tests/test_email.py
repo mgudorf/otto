@@ -16,6 +16,7 @@ from app.daemon import build
 from app.modules import Registry
 from app.modules.email import MANIFEST
 from app.modules.email.gmail import SCOPE, GmailRead, GmailWrite
+import app.modules.email.routes as routes
 import app.modules.email.tasks as tasks_mod
 from app.modules.email.tasks import sync, triage
 from app.modules.email.tools import register
@@ -107,7 +108,10 @@ def email_config(config, tmp_path):
         "auth_uri": "https://accounts.google.com/o/oauth2/auth", "redirect_uris": ["http://localhost:8756/m/email/api/oauth/callback"],
     }}))
     token.write_text(json.dumps({"access_token": "old", "refresh_token": "r", "scope": SCOPE, "token_type": "Bearer", "expires_at": iso(now() + timedelta(hours=1))}))
-    return dataclasses.replace(config, email=Email(client_file=client, token_file=token, backfill_days=30, triage_batch=5))
+    cfg = dataclasses.replace(config, email=Email(
+        client_file=client, token_file=token, backfill_days=30, triage_batch=5, read_on_open=True, consent_warn_days=2))
+    routes.CONFIG = cfg   # setup() does this at build; the queue hook and LEFT read it
+    return cfg
 
 
 @pytest.fixture
@@ -241,23 +245,26 @@ def test_email_actions(email_config, fake):
         await app.state.runner.start()
         async with client_for(app) as c:
             await app.state.runner.submit("email.sync", "email", "gmail", "scheduled", sync).done
-            left = (await c.get("/api/email/left?chip=Unread")).json()
-            assert [r["id"] for r in left["groups"][0]["rows"]] == ["m3", "m2"] and left["showing"] == "2 / 2"
-            assert left["groups"][0]["rows"][0]["leading"]["dot"] == MANIFEST.hue
+            left = (await c.get("/api/email/left?chip=Flagged")).json()
+            assert [r["id"] for r in left["groups"][0]["rows"]] == ["m3"] and left["showing"] == "1 / 1"
+            row = left["groups"][0]["rows"][0]
+            # the bar builds its verbs from these, so it never waits on item/{id} and never changes height
+            assert row["leading"]["dot"] == MANIFEST.hue and row["unread"] is True and row["starred"] is True
+            assert left["chips"] == ["All", "Flagged", "Priority"] and left["read_on_open"] is True
 
             r = await c.post("/api/email/action/archive", json={"ids": ["m1"]})
             assert r.status_code == 200 and r.json() == {"count": 1}, r.text
             assert fake.modified[-1] == {"ids": ["m1"], "addLabelIds": [], "removeLabelIds": ["INBOX"]}
             assert "m1" not in [x["id"] for g in (await c.get("/api/email/left")).json()["groups"] for x in g["rows"]]
 
-            r = await c.post("/api/email/action/trash", json={"filter": {"query": "lunch", "chip": "Unread"}})
+            r = await c.post("/api/email/action/trash", json={"filter": {"query": "lunch", "chip": "All"}})
             assert r.json() == {"count": 1} and fake.modified[-1] == {"ids": ["m2"], "addLabelIds": ["TRASH"], "removeLabelIds": ["INBOX"]}
             assert (await c.post("/api/email/action/trash", json={"filter": {"query": "nothing-here", "chip": "All"}})).status_code == 400
 
             item = (await c.get("/api/email/item/m3")).json()
             assert item["text"] == "Contract draft\n\nplease sign the contract" and item["starred"] is True
             assert item["body"] == "please sign the contract" and item["attachments"] == []
-            assert item["html"] == '<p>please <b>sign</b> the contract here <span class="url">https://docs.example/c</span></p>'
+            assert item["html"] == '<p>please <b>sign</b> the contract here<span class="url" title="https://docs.example/c"></span></p>'
             assert app.state.store.scalar("SELECT COUNT(*) FROM email_bodies") == 1
             assert [a["verb"] for a in item["actions"]] == ["archive", "trash", "read", "unstar", "open"]
             assert (await c.post("/api/email/action/read", json={"ids": ["m3"]})).json() == {"count": 1}
@@ -269,7 +276,7 @@ def test_email_actions(email_config, fake):
             assert next(n for n in numbers if n["module"] == "email")["value"] == 0
             ev = (await c.get("/api/events?module=email")).json()
             assert [e["verb"] for e in ev["events"]][:3] == ["marked read", "trashed", "archived"]
-            assert ev["events"][1]["text"] == "1 messages matching 'lunch' · Unread"
+            assert ev["events"][1]["text"] == "1 messages matching 'lunch' · All"
         await app.state.runner.drain(1)
         app.state.store.close()
 
@@ -347,14 +354,14 @@ def test_email_body(store, email_config, fake):
                 "style=", "width=", "alert(", "outlook only", "page title", "pixel.gif", "cid:", "javascript:", "svg link", "color:red",
                 "preheader", "mobile copy", "hidden span", "invisible"):
         assert bad not in out, bad
-    assert set(re.findall(r"<span[^>]*>", out)) == {'<span class="url">', '<span class="img">'}
+    assert {re.sub(r' title="[^"]*"', "", t) for t in re.findall(r"<span[^>]*>", out)} == {'<span class="url">', '<span class="img">'}
     assert "<h1>Big &amp; bold</h1>" in out
-    assert 'buy now <span class="url">https://shop.example/x?y=1</span>' in out
-    assert out.count("https://example.com/") == 1  # link text already is the url: written once
-    assert 'write <span class="url">mailto:ann@example.com</span>' in out and "\njs " in out
+    assert 'buy now<span class="url" title="https://shop.example/x?y=1"></span>' in out
+    assert out.count("https://example.com/") == 1  # link text already is the url: no title repeats it
+    assert 'write<span class="url" title="mailto:ann@example.com"></span>' in out and "\njs " in out
     assert '<span class="img">[image: Autumn sale]</span>' in out
     assert "share.example/icon" not in out  # an icon link with nothing to show shows no URL either
-    assert '<span class="img">[image: Twitter]</span> <span class="url">https://share.example/tw</span>' in out
+    assert '<span class="img">[image: Twitter]</span><span class="url" title="https://share.example/tw"></span>' in out
     assert '<td colspan="2">left</td>' in out
     assert "<li>one" in out and "<li>two" in out and "<pre>  code\n  block</pre>" in out
     assert "<div>unclosed <em>emphasis</em></div>" in out
@@ -399,3 +406,79 @@ def test_email_body(store, email_config, fake):
     assert got["body_text"] == "please sign the contract" and got["attachments"] == [] and "html" not in got and "error" not in got
     assert store.scalar("SELECT html FROM email_bodies WHERE message_id = 'm3'").startswith("<p>please <b>sign</b>")
     assert run(email_get("nope")) == {"error": "no message nope"}
+
+
+def test_email_actions_take_one_id_or_many(email_config, fake):
+    """The bar posts ids for a picked set and id for the open message; Home posts id for every module it shows."""
+
+    async def main():
+        app = build(email_config)
+        await app.state.runner.start()
+        async with client_for(app) as c:
+            await app.state.runner.submit("email.sync", "email", "gmail", "scheduled", sync).done
+            r = await c.post("/api/email/action/star", json={"id": "m1"})
+            assert r.status_code == 200 and r.json() == {"count": 1} and fake.modified[-1]["ids"] == ["m1"], r.text
+            r = await c.post("/api/email/action/archive", json={"ids": ["m1", "m2"]})
+            assert r.json() == {"count": 2} and fake.modified[-1]["ids"] == ["m1", "m2"]
+            assert (await c.post("/api/email/action/archive", json={})).status_code == 400
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())
+
+
+def test_email_manual_sync(email_config, fake):
+    """The button runs the scheduler's own task on the scheduler's own lock, and leaves the stamp the page reads."""
+
+    async def main():
+        app = build(email_config)
+        await app.state.runner.start()
+        async with client_for(app) as c:
+            r = await c.post("/api/email/action/sync")
+            assert r.status_code == 200 and "backfilled 3" in r.json()["result"], r.text
+            synced = app.state.store.cursor("email.synced_at")
+            assert synced and (await c.get("/api/email/blank")).json()["last_sync"] == synced
+            job = (await c.get("/api/jobs")).json()[0]
+            assert job["task"] == "email.sync" and job["resource"] == "gmail" and job["kind"] == "action"
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())
+
+
+def test_email_consent_warning(store, email_config):
+    """Re-consent is the owner's to run and nothing else can do it, so it waits on them before the outage, not after."""
+    from app.modules.email.routes import queue
+
+    token = email_config.email.token_file
+    data = json.loads(token.read_text())
+    assert queue(store) == []                                    # a token with no expiry never warns
+
+    for delta, expected in ((timedelta(days=5), None), (timedelta(hours=6), "expires soon"), (timedelta(hours=-1), "has expired")):
+        data["refresh_expires_at"] = iso(now() + delta)
+        token.write_text(json.dumps(data))
+        rows = queue(store)
+        if expected is None:
+            assert rows == [], "outside consent_warn_days"
+        else:
+            assert len(rows) == 1 and expected in rows[0]["text"] and rows[0]["module"] == "email"
+            assert "app.modules.email.gmail consent" in rows[0]["text"]
+
+
+def test_email_body_drops_what_carries_nothing():
+    """A template mail is mostly spacer cells and alt text for images Otto never fetches; both read as blank space."""
+    from app.modules.email.body import sanitize
+
+    out = sanitize(
+        "<table><tr><td>Refer a Friend</td><td>+ 2000 Points</td></tr>"
+        "<tr><td> </td><td>&nbsp;</td></tr></table>"
+        "<img alt='Enable images to view this content.' src='x'>"
+        "<img alt='spacer' src='x'><img alt='' src='x'>"
+        "<img alt='Autumn sale' src='x'><p>a<br><br><br><br>b</p>"
+    )
+    assert "<td>Refer a Friend</td><td>+ 2000 Points</td>" in out   # a row that means something keeps both cells
+    assert "<tr></tr>" not in out and "<td>" in out                 # the spacer row goes entirely, the real one stays
+    assert out.count("<tr>") == 1
+    assert "Enable images" not in out and "spacer" not in out       # alt text for a client that blocks images says nothing here
+    assert '<span class="img">[image: Autumn sale]</span>' in out   # alt text that names the picture survives
+    assert "<br><br><br>" not in out
