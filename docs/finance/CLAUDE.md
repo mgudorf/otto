@@ -30,16 +30,3 @@ What happens: every one of these modules promises that an action is validated be
 Expected: a malformed id is a 400 naming the field, like every other validation failure in those routes.
 
 Fix: one helper that reads `body.get("id")` and answers `HTTPException(400, "id required")` on a missing or non-integer value, used by every module's checks.
-
-### Recurring payments have no billing date
-
-- Kind: gap
-- Where: Finance requirement 1 (recurring subscriptions/payments); `finance_entries`, `app/modules/finance/routes.py`, `app/static/pages/finance.js`
-- Found: 2026-09-12, the owner's request
-- Status: in progress on branch `finance` (`../otto-finance`, one commit ahead of `main`)
-
-What happens: a recurring entry records what it costs and how often, not when it bills, so what comes out this week is still a question for a bank statement.
-
-Expected: one nullable `due_on` date (`YYYY-MM-DD`) on `finance_entries`, added by the module's `setup` on a database that predates it; the next occurrence projected on every read from that anchor and the cadence (a day past the end of a short month clamps to its last day), never stored; the date on recurring entries only; a new `action/due` verb rather than a field on `update`, so the amount history is untouched; LEFT stamps a dated recurring row with its next date and sorts the Recurring group by it; `today` keeps `updated_at` as its stamp; `finance_list` and `finance_get` carry `due_on` and `next_due`; no new tool, config key or setting.
-
-Fix: merge branch `finance`; this entry goes and `## Built` gains the column, the verb, the projection and the page controls in that commit.
