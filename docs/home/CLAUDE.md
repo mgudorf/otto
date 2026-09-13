@@ -5,7 +5,7 @@
 
 ## Built
 
-`GET /api/home/numbers` (one number per module with a `numbers` hook) and `GET /api/home/left`, which reads every module that is not switched off, page or not, in rail order, and puts a `Review` group per module with a `queue` hook first, every waiting row and no cut (an empty queue yields no group), then each module's `today` rows, five per module with a `+N` link into the module (an empty day still yields the group, shown as `nothing today`). Groups and numbers carry `page`; a header, `+N` or number navigates only when it is true. Three modules queue: Search's open findings, Business's open leads and Memory's open suggestions, each waiting under `Review` however old it is and decided from Home's inspector. Groups are keyed `label:module`, so one module can yield both. MIDDLE blank state is the number grid; selecting a row opens the owning module's item inspector and posts its verbs as `{id}` to that module's action route (an `href` opens a tab, `confirm` prompts, an action marked `removes` clears the selection because its row is gone from the list). The Home agent has no tools; its Current state block carries the same numbers, today rows and `Review: N waiting` lines.
+`GET /api/home/numbers` (one number per module with a `numbers` hook) and `GET /api/home/left`, which reads every module that is not switched off, page or not, in rail order, and puts a `Review` group per module with a `queue` hook first, every waiting row and no cut (an empty queue yields no group), then each module's `today` rows, five per module with a `+N` link into the module (an empty day still yields the group, shown as `nothing today`). Groups and numbers carry `page`; a header, `+N` or number navigates only when it is true. Five modules queue: Search's open findings, Business's open leads, Memory's open suggestions and Social's upcoming open events, each waiting under `Review` however old it is and decided from Home's inspector, and Email's one consent row while its refresh token is near expiry or dead, which names the command to run. Groups are keyed `label:module`, so one module can yield both. MIDDLE blank state is the number grid; selecting a row opens the owning module's item inspector and posts its verbs as `{id}` to that module's action route (an `href` opens a tab, `confirm` prompts, an action marked `removes` clears the selection because its row is gone from the list). The Home agent has no tools; its Current state block carries the same numbers, today rows and `Review: N waiting` lines.
 
 ## Nightly Process
 
@@ -21,3 +21,7 @@ MUST BE CAPPED TO SOME REASONABLE DEGREE; I am using usage associated with CLAUD
 ### Built
 
 The Search module runs the nightly web search over the owner's topics in the three kinds `money`, `work` and `learn`; `business.scout` searches for leads against the owner's plans. The `[nightly]` budget caps every scheduled LLM run.
+
+## Patches
+
+None open.
