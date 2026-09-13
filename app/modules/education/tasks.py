@@ -31,12 +31,13 @@ async def generate(ctx) -> str:
             if t is None:
                 rejected.append(f"topic {tid} not asked for")
                 continue
-            err = questions.validate_question(store, tid, it.get("title"), it.get("topic_tag"), it.get("setup_markdown"), it.get("parts"))
+            fields = (it.get("title"), it.get("topic_tag"), it.get("definitions_markdown"), it.get("premise_markdown"), it.get("parts"))
+            err = questions.validate_question(store, tid, *fields)
             if err:
                 rejected.append(f"{t['name']}: {err}")
                 continue
-            questions.insert_question(conn, tid, it["title"], it["topic_tag"], it["setup_markdown"], it["parts"], t["difficulty"], "nightly", False)
-            unbound = questions.unbound_acronyms(it["title"], it["topic_tag"], t["name"], it["setup_markdown"], it["parts"])
+            questions.insert_question(conn, tid, *fields, t["difficulty"], "nightly", False)
+            unbound = questions.unbound_acronyms(fields[0], fields[1], t["name"], fields[2], fields[3], fields[4])
             if unbound:
                 ctx.log(f"{t['name']}: header acronym(s) not bound in the question body: {', '.join(unbound)}")
             added.append(wanted.pop(tid)["name"])              # one per topic per night

@@ -2,6 +2,7 @@
 import { Component } from './vendor/preact.mjs';
 import { html, T, mono13, clock } from './rows.js';
 import { get, post } from './api.js';
+import { Markdown } from './md.js';
 
 export class Session extends Component {
   constructor() {
@@ -15,6 +16,7 @@ export class Session extends Component {
   componentWillUnmount() { this.close(); }
   componentDidUpdate(prev) {
     if (prev.module !== this.props.module) { this.close(); this.open(); }
+    else if (this.props.tick !== prev.tick) this.relist();
     if (this.props.prefill && this.props.prefill !== prev.prefill) {
       this.setState({ draft: this.props.prefill.text });
       if (this.ta) this.ta.focus();
@@ -37,6 +39,16 @@ export class Session extends Component {
     } catch (e) {
       this.setState({ error: e.message });
     }
+  }
+
+  // The tab list again on the shell's refresh: a turn a page action started (Education's Submit) lands in the newest
+  // tab, which a blank tab follows; the strip's labels and busy marks catch up.
+  async relist() {
+    try {
+      const s = await get(`/api/session/${this.props.module}`);
+      this.setState({ sessions: s.sessions, contextLabel: s.context_label });
+      if (this.state.sid === null && s.sessions.length) await this.show(s.sessions[s.sessions.length - 1].id);
+    } catch { /* the next refresh tries again */ }
   }
 
   async show(sid) {
@@ -106,7 +118,7 @@ export class Session extends Component {
         ${error && html`<div style=${{ ...mono13, color: '#cf7b7b', padding: '0 2px' }}>${error}</div>`}
         ${turns.map((t, i) => {
           if (t.role === 'user') return html`<div key=${i} style=${{ alignSelf: 'flex-end', maxWidth: '85%', background: T.raised, borderRadius: 6, padding: '10px 12px', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>${t.text}</div>`;
-          if (t.role === 'model') return html`<div key=${i} style=${{ lineHeight: 1.6, padding: '0 2px', whiteSpace: 'pre-wrap' }}>${t.text}</div>`;
+          if (t.role === 'model') return html`<div key=${i} style=${{ padding: '0 2px' }}><${Markdown} text=${t.text} /></div>`;
           if (t.role === 'tool') return html`<div key=${i} style=${{ display: 'flex', alignItems: 'center', gap: 10, height: 28, padding: '0 4px', ...mono13, color: T.muted }}><span style=${{ color: hue }}>▸</span>${t.tool}<span style=${{ marginLeft: 'auto', color: T.dim }}>${t.status || ''}</span></div>`;
           return html`<div key=${i} style=${{ ...mono13, color: T.dim, padding: '0 2px' }}>${t.text}${t.ts ? html`<span style=${{ marginLeft: 8 }}>${clock(t.ts, fmt)}</span>` : null}</div>`;
         })}

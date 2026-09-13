@@ -368,11 +368,23 @@ async def session_send(request: Request, module: str, body: dict = Body(...)) ->
         return {"cleared": True}
 
     if sess is None:
-        sid = str(uuid.uuid4())
-        store.execute("INSERT INTO sessions(id, module, opened_at) VALUES (?, ?, ?)", (sid, module, now_iso()))
-        sess = _session(store, module, sid)
+        sess = new_session(store, module)
     job = start_turn(st, mod, sess["id"], bool(sess["cli_started"]), text, text, _key(module, sess["id"]))
     return {"queued": job.id, "session": sess["id"]}
+
+
+def new_session(store: Store, module: str) -> dict:
+    sid = str(uuid.uuid4())
+    store.execute("INSERT INTO sessions(id, module, opened_at) VALUES (?, ?, ?)", (sid, module, now_iso()))
+    return _session(store, module, sid)
+
+
+def pane_turn(st, mod, text: str, prompt: str):
+    """A module route's turn of the pane (Education's answer): on the module's newest open tab, or a new one when none is
+    open, `text` shown as the owner's turn and `prompt` sent to the CLI. Returns the job and the session row."""
+    rows = _open(st.store, mod.name)
+    sess = rows[-1] if rows else new_session(st.store, mod.name)
+    return start_turn(st, mod, sess["id"], bool(sess["cli_started"]), text, prompt, _key(mod.name, sess["id"])), sess
 
 
 def start_turn(st, mod, sid: str, started: bool, text: str, prompt: str, key: str, replay: str | None = None, on_done=None):

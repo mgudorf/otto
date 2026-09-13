@@ -1,10 +1,10 @@
 """The questions data and the generator.
 
 The reads shared by the routes, the tools, the task and the grader live here. The generator is one prompt,
-prompts/generate.md, written for the owner's previous project: one titled question per listed topic, a shared
-setup in markdown and LaTeX, lettered parts each with a hidden rubric, as many as the setup supports on one theme
-and never a count. Every writer (the nightly task, a page press, the tutor's hand) passes validate_question; the two LLM writers also share render, parse_array and
-unbound_acronyms.
+prompts/generate.md: one titled question per listed topic, its definitions (every relation and variable, up front)
+and premise in markdown and LaTeX, lettered parts each with a reference title and a hidden rubric, as many as the
+setup supports on one theme and never a count. Every writer (the nightly task, a page press, the tutor's hand) passes
+validate_question; the two LLM writers also share render, parse_array and unbound_acronyms.
 """
 
 from __future__ import annotations
@@ -17,7 +17,9 @@ from app.store import Store, now_iso
 
 PROMPTS = Path(__file__).parent / "prompts"
 RECENT = 5                                                     # scores listed per topic, items listed in the agent's state
-OPEN = "q.graded_at IS NULL AND q.skipped_at IS NULL"
+DIFFICULTY_MAX = 10                                            # 1-2 introduction, 3-5 intro course, 6-8 advanced/masters, 9-10 expert
+TAG_CHARS = 40
+ACTIVE = "q.completed_at IS NULL"
 SELECT = """SELECT q.*, t.name AS topic,
   (SELECT COUNT(*) FROM question_parts p WHERE p.question_id = q.id) AS parts,
   (SELECT COUNT(*) FROM question_parts p WHERE p.question_id = q.id AND p.score IS NOT NULL) AS graded_parts
@@ -38,13 +40,36 @@ def label(n: int) -> str:
     return out
 
 
+def part_title(p: dict) -> str:
+    """The part's reference title; a row older than v2 has none and shows the start of its prompt."""
+    if p.get("title"):
+        return p["title"]
+    words = re.sub(r"\s+", " ", p.get("text") or "").split()
+    return " ".join(words[:6]) + ("…" if len(words) > 6 else "")
+
+
+def tags_of(q: dict) -> list[str]:
+    try:
+        return [str(t) for t in json.loads(q.get("tags") or "[]")]
+    except ValueError:
+        return []
+
+
+def clean_tags(tags) -> list[str]:
+    """Trimmed, non-empty, unique, in the order given; anything else is not a tag list."""
+    if not isinstance(tags, (list, tuple)):
+        raise ValueError("tags must be a list")
+    out: list[str] = []
+    for t in tags:
+        s = str(t or "").strip()[:TAG_CHARS]
+        if s and s not in out:
+            out.append(s)
+    return out
+
+
 # ---- reads ---------------------------------------------------------------------------------------
 def status_of(q: dict) -> str:
-    if q["graded_at"]:
-        return "graded"
-    if q["skipped_at"]:
-        return "skipped"
-    return "started" if q["started_at"] else "open"
+    return "completed" if q["completed_at"] else "active"
 
 
 def question(store: Store, question_id: int) -> dict | None:
@@ -60,20 +85,26 @@ def feedback_of(store: Store, question_id: int) -> list[str]:
 
 
 def due_queue(store: Store) -> list[dict]:
-    return store.query(f"{SELECT} WHERE {OPEN} ORDER BY q.started_at IS NULL, q.created_at")
+    """Active questions, the ones with an answer in progress first, then oldest first."""
+    return store.query(f"{SELECT} WHERE {ACTIVE} ORDER BY q.started_at IS NULL, q.created_at")
 
 
 def due_count(store: Store) -> int:
-    return store.scalar(f"SELECT COUNT(*) FROM questions q WHERE {OPEN}")
+    return store.scalar(f"SELECT COUNT(*) FROM questions q WHERE {ACTIVE}")
+
+
+def open_question(store: Store) -> dict | None:
+    """The question the page opened last, whatever its state: the tutor's context."""
+    return store.one(f"{SELECT} WHERE q.opened_at IS NOT NULL ORDER BY q.opened_at DESC, q.id DESC LIMIT 1")
 
 
 def topic_rows(store: Store) -> list[dict]:
-    """Progress per topic: difficulty, graded/asked, average, the last RECENT scores, last asked."""
+    """Progress per topic: difficulty, completed/asked, average, the last RECENT scores, last asked."""
     rows = store.query(
         """SELECT t.id, t.name, t.description, t.difficulty,
              (SELECT COUNT(*) FROM questions q WHERE q.topic_id = t.id) AS asked,
-             (SELECT COUNT(*) FROM questions q WHERE q.topic_id = t.id AND q.graded_at IS NOT NULL) AS graded,
-             (SELECT AVG(score) FROM questions q WHERE q.topic_id = t.id AND q.graded_at IS NOT NULL) AS average,
+             (SELECT COUNT(*) FROM questions q WHERE q.topic_id = t.id AND q.completed_at IS NOT NULL) AS completed,
+             (SELECT AVG(score) FROM questions q WHERE q.topic_id = t.id AND q.completed_at IS NOT NULL) AS average,
              (SELECT MAX(created_at) FROM questions q WHERE q.topic_id = t.id) AS last_asked
            FROM topics t WHERE t.retired_at IS NULL ORDER BY t.name"""
     )
@@ -81,7 +112,7 @@ def topic_rows(store: Store) -> list[dict]:
         t["average"] = None if t["average"] is None else round(t["average"])
         t["recent"] = [
             r["score"] for r in store.query(
-                "SELECT score FROM questions WHERE topic_id = ? AND graded_at IS NOT NULL ORDER BY graded_at DESC LIMIT ?", (t["id"], RECENT)
+                "SELECT score FROM questions WHERE topic_id = ? AND completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT ?", (t["id"], RECENT)
             )
         ]
     return rows
@@ -118,20 +149,26 @@ def feedback_lines(store: Store, topic_id: int | None = None) -> str:
     return "\n".join(f'- "{r["text"][:300]}"' for r in rows) or "(none yet)"
 
 
+def _asked_line(store: Store, q: dict) -> str:
+    """A title and its part titles: what "never repeat" covers."""
+    parts = [p["title"] for p in parts_of(store, q["id"]) if p["title"]]
+    return q["title"] + (f" ({', '.join(parts)})" if parts else "")
+
+
 def _topic_block(store: Store, t: dict) -> str:
-    lines = [f"Topic {t['id']}: {t['name']} — difficulty {t['difficulty']}/5"]
+    lines = [f"Topic {t['id']}: {t['name']} — difficulty {t['difficulty']}/{DIFFICULTY_MAX}"]
     if t.get("description"):
         lines.append(f"  What the owner wants: {t['description'][:300]}")
-    asked = store.query("SELECT title FROM questions WHERE topic_id = ? ORDER BY created_at DESC", (t["id"],))
-    lines.append("  Already asked, never repeat: " + ("; ".join(a["title"] for a in asked) if asked else "nothing yet"))
+    asked = store.query("SELECT id, title FROM questions WHERE topic_id = ? ORDER BY created_at DESC", (t["id"],))
+    lines.append("  Already asked, never repeat: " + ("; ".join(_asked_line(store, a) for a in asked) if asked else "nothing yet"))
     last = store.one(
-        "SELECT id, title, score FROM questions WHERE topic_id = ? AND graded_at IS NOT NULL ORDER BY graded_at DESC LIMIT 1", (t["id"],)
+        "SELECT id, title, score FROM questions WHERE topic_id = ? AND completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT 1", (t["id"],)
     )
     if last:
         graded = [p for p in parts_of(store, last["id"]) if p["score"] is not None]
         lines.append(
-            f'  Last graded, {last["score"]}/100 on "{last["title"]}": '
-            + "; ".join(f"({label(p['n'])}) {p['verdict'] or '-'} {p['score']}" for p in graded)
+            f'  Last completed, {last["score"]}/100 on "{last["title"]}": '
+            + "; ".join(f"({label(p['n'])}) {part_title(p)}: {p['verdict'] or '-'} {p['score']}" for p in graded)
         )
     fb = store.query("SELECT text FROM education_feedback WHERE topic_id = ? ORDER BY id DESC LIMIT ?", (t["id"], RECENT))
     if fb:
@@ -142,7 +179,7 @@ def _topic_block(store: Store, t: dict) -> str:
 def generate_prompt(store: Store, topics: list[dict]) -> str:
     """The generator for these topics: the learner summary, one block per topic, the owner's general feedback."""
     summary = "\n".join(
-        f"- {t['name']}: difficulty {t['difficulty']}/5, {t['graded']}/{t['asked']} graded, "
+        f"- {t['name']}: difficulty {t['difficulty']}/{DIFFICULTY_MAX}, {t['completed']}/{t['asked']} completed, "
         f"average {'-' if t['average'] is None else t['average']}, recent {' '.join(map(str, t['recent'])) or '-'}"
         for t in topic_rows(store)
     ) or "(no topics yet)"
@@ -165,17 +202,17 @@ def parse_array(raw: str) -> list:
 
 
 def clean_parts(parts) -> list[dict]:
-    """Parts as {prompt, rubric} with stripped text; anything else becomes an empty field the validator names."""
+    """Parts as {title, prompt, rubric} with stripped text; anything else becomes an empty field the validator names."""
     out = []
     for p in parts if isinstance(parts, (list, tuple)) else []:
         if isinstance(p, dict):
-            out.append({"prompt": str(p.get("prompt") or "").strip(), "rubric": str(p.get("rubric") or "").strip()})
+            out.append({k: str(p.get(k) or "").strip() for k in ("title", "prompt", "rubric")})
         else:
-            out.append({"prompt": str(p or "").strip(), "rubric": ""})
+            out.append({"title": "", "prompt": str(p or "").strip(), "rubric": ""})
     return out
 
 
-def validate_question(store: Store, topic_id, title, topic_tag, setup, parts) -> str | None:
+def validate_question(store: Store, topic_id, title, topic_tag, definitions, premise, parts) -> str | None:
     """The rules every new question meets, whoever wrote it. Returns the problem, or None."""
     if store.one("SELECT id FROM topics WHERE id = ? AND retired_at IS NULL", (topic_id,)) is None:
         return f"no active topic {topic_id}"
@@ -185,10 +222,12 @@ def validate_question(store: Store, topic_id, title, topic_tag, setup, parts) ->
     if not clean:
         return "a question needs at least one part"
     for i, p in enumerate(clean, 1):
-        if not p["prompt"] or not p["rubric"]:
-            return f"part ({label(i)}) needs a prompt and a rubric"
-    if not str(title or "").strip() or not str(topic_tag or "").strip() or not str(setup or "").strip():
-        return "title, topic_tag and setup are required"
+        if not p["title"] or not p["prompt"] or not p["rubric"]:
+            return f"part ({label(i)}) needs a title, a prompt and a rubric"
+    if not str(title or "").strip() or not str(topic_tag or "").strip():
+        return "title and topic_tag are required"
+    if not str(definitions or "").strip() or not str(premise or "").strip():
+        return "definitions and premise are required"
     if store.one("SELECT id FROM questions WHERE topic_id = ? AND title = ?", (topic_id, str(title).strip())):
         return f"a question titled {str(title).strip()!r} already exists on topic {topic_id}"
     return None
@@ -203,37 +242,37 @@ def acronyms_in(text: str | None) -> set[str]:
     return out
 
 
-def unbound_acronyms(title, topic_tag, topic_name, setup, parts) -> list[str]:
+def unbound_acronyms(title, topic_tag, topic_name, definitions, premise, parts) -> list[str]:
     """Acronyms of the header (title, tag, topic name) bound nowhere in the setup or a prompt. Sorted, for stable text."""
     header = " ".join([title or "", topic_tag or "", topic_name or ""])
-    body = " ".join([setup or ""] + [p["prompt"] for p in clean_parts(parts)])
+    body = " ".join([definitions or "", premise or ""] + [p["prompt"] for p in clean_parts(parts)])
     return sorted(a for a in acronyms_in(header) if not re.search(rf"\b{re.escape(a)}s?\b", body))
 
 
-def insert_question(conn, topic_id, title, topic_tag, setup, parts, difficulty, source: str, start: bool) -> int:
-    """Write one validated question and its parts on an open connection. A started one un-starts any other."""
+def insert_question(conn, topic_id, title, topic_tag, definitions, premise, parts, difficulty, source: str, opened: bool) -> int:
+    """Write one validated question and its parts on an open connection. `opened` makes it the tutor's context at once."""
     ts = now_iso()
-    if start:
-        conn.execute("UPDATE questions SET started_at = NULL WHERE started_at IS NOT NULL AND graded_at IS NULL AND skipped_at IS NULL")
     cur = conn.execute(
-        "INSERT INTO questions(topic_id, title, topic_tag, premise, difficulty, source, created_at, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (topic_id, str(title).strip(), str(topic_tag).strip(), str(setup).strip(), int(difficulty), source, ts, ts if start else None),
+        "INSERT INTO questions(topic_id, title, topic_tag, definitions, premise, difficulty, source, created_at, opened_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (topic_id, str(title).strip(), str(topic_tag).strip(), str(definitions).strip(), str(premise).strip(), int(difficulty), source, ts, ts if opened else None),
     )
     for n, p in enumerate(clean_parts(parts), 1):
-        conn.execute("INSERT INTO question_parts(question_id, n, text, rubric) VALUES (?, ?, ?, ?)", (cur.lastrowid, n, p["prompt"], p["rubric"]))
+        conn.execute(
+            "INSERT INTO question_parts(question_id, n, title, text, rubric) VALUES (?, ?, ?, ?, ?)", (cur.lastrowid, n, p["title"], p["prompt"], p["rubric"])
+        )
     return cur.lastrowid
 
 
-def add_question(store: Store, topic_id, title, topic_tag, setup, parts, source: str, start: bool) -> dict:
+def add_question(store: Store, topic_id, title, topic_tag, definitions, premise, parts, source: str, opened: bool) -> dict:
     """One validated question at the topic's difficulty: the tutor's path, and the tests'."""
-    err = validate_question(store, topic_id, title, topic_tag, setup, parts)
+    err = validate_question(store, topic_id, title, topic_tag, definitions, premise, parts)
     if err:
         return {"error": err}
     t = store.one("SELECT name, difficulty FROM topics WHERE id = ?", (topic_id,))
     with store.tx() as conn:
-        qid = insert_question(conn, topic_id, title, topic_tag, setup, parts, t["difficulty"], source, start)
+        qid = insert_question(conn, topic_id, title, topic_tag, definitions, premise, parts, t["difficulty"], source, opened)
     out = {"id": qid, "parts": len(clean_parts(parts))}
-    unbound = unbound_acronyms(title, topic_tag, t["name"], setup, parts)
+    unbound = unbound_acronyms(title, topic_tag, t["name"], definitions, premise, parts)
     if unbound:
         out["warning"] = "header acronym(s) not bound in the question body: " + ", ".join(unbound)
     return out

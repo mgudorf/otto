@@ -81,7 +81,7 @@ class App extends Component {
     if (!impl) { this.setState({ data: { empty: true } }); return; }
     try {
       const data = await impl.load(this);
-      if (this.state.page === page) this.setState({ data, error: null });
+      if (this.state.page === page) this.setState({ data, error: null, tick: (this.state.tick || 0) + 1 });   // the pane re-lists its tabs on each tick
     } catch (e) {
       this.setState({ error: e.message });
     }
@@ -151,7 +151,7 @@ class App extends Component {
           ${impl && impl.Right
             ? impl.Right({ app: this, data: s.data, mod, fmt })
             : mod.agent
-            ? html`<${Session} module=${s.page} hue=${mod.hue} fmt=${fmt} selected=${!!s.sel} prefill=${s.prefill} onIdle=${() => this.refresh()} />`
+            ? html`<${Session} module=${s.page} hue=${mod.hue} fmt=${fmt} selected=${!!s.sel} prefill=${s.prefill} tick=${s.tick} onIdle=${() => this.refresh()} />`
             : html`<div style=${{ minWidth: 0, minHeight: 0, background: T.panel, borderRadius: 6, padding: '16px 12px 12px', ...mono13, color: T.dim }}>no agent on this page</div>`}
         </div>
       </div>

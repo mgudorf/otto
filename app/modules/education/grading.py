@@ -1,52 +1,43 @@
-"""Grading one answer on the page: prompts/grade.md through oneshot, one turn, then the write every grader shares.
-
-The grader scores 0 to 2 in halves, as the owner's previous project did; the store keeps 0 to 100 (SCALE), so the
-flow band, the LEFT bars and the topic table read what they always did. The tutor's education_grade lands here too.
-"""
+"""Grading: the tutor grades in the session. prompts/grade.md is the brief a submitted answer sends there, the tutor
+writes the grade back through education_grade (the write every grader shares, `grade`), and explains in its reply.
+Complete quiz is the owner's press, and the only thing that moves a topic's difficulty."""
 
 from __future__ import annotations
 
-import json
-
-from app.modules.education.questions import feedback_lines, question, render, status_of
+from app.modules.education.questions import DIFFICULTY_MAX, feedback_lines, label, part_title, question, render
 from app.store import Store, now_iso
 
-SCALE = 50                                                     # halves of two -> percent
-HALVES = (0, 0.5, 1, 1.5, 2)
-VERDICTS = ("correct", "partial", "incorrect")
 NO_RUBRIC = "(none — grade against the prompt and the setup alone)"   # v0 rows have no rubric
+NO_DEFINITIONS = "(none — the premise carries every definition)"      # rows older than v2
 
 
-def grade_prompt(store: Store, q: dict, part: dict) -> str:
+def grade_brief(store: Store, q: dict, part: dict, previous: dict | None) -> str:
+    """The turn that asks the tutor to grade one answer: the whole question, the rubric, the answer, the earlier attempt if any."""
     t = store.one("SELECT name, description FROM topics WHERE id = ?", (q["topic_id"],))
+    earlier = "(none: this is the first answer to this part)"
+    if previous:
+        earlier = (
+            f"Scored {previous['score']}/100, {previous['verdict']}. Your note then: {previous['note'] or '-'}\n"
+            f"The answer then:\n{previous['answer'] or '-'}"
+        )
     return render("grade", {
+        "id": str(q["id"]),
+        "n": str(part["n"]),
+        "label": label(part["n"]),
+        "title": q["title"],
+        "part_title": part_title(part),
         "topic": t["name"],
         "description": t["description"] or "(none)",
         "difficulty": str(q["difficulty"]),
-        "setup": q["premise"],
+        "max": str(DIFFICULTY_MAX),
+        "definitions": q["definitions"] or NO_DEFINITIONS,
+        "premise": q["premise"],
         "prompt": part["text"],
         "rubric": part["rubric"] or NO_RUBRIC,
         "answer": part["answer"],
+        "earlier": earlier,
         "feedback": feedback_lines(store, q["topic_id"]),
     })
-
-
-def parse_grade(raw: str) -> tuple[str, int, str]:
-    """(verdict, score 0 to 100, explanation) from the grader's reply, or ValueError naming what is wrong."""
-    start, end = raw.find("{"), raw.rfind("}")
-    if start < 0 or end < 0:
-        raise ValueError(f"no JSON object in reply: {raw[:200]!r}")
-    data = json.loads(raw[start:end + 1])
-    verdict = data.get("verdict")
-    if verdict not in VERDICTS:
-        raise ValueError(f"verdict must be one of {', '.join(VERDICTS)}, got {verdict!r}")
-    score = data.get("score")
-    if isinstance(score, bool) or not isinstance(score, (int, float)) or score not in HALVES:
-        raise ValueError(f"score must be one of {HALVES}, got {score!r}")
-    explanation = str(data.get("explanation") or "").strip()
-    if not explanation:
-        raise ValueError("explanation is required")
-    return verdict, int(score * SCALE), explanation
 
 
 def verdict_for(score: int) -> str:
@@ -54,12 +45,11 @@ def verdict_for(score: int) -> str:
     return "correct" if score >= 100 else "incorrect" if score <= 0 else "partial"
 
 
-def apply_grade(conn, config, q: dict, n: int, score: int, note: str | None, verdict: str) -> dict:
-    """Score one part on an open connection. The last part completes the question and moves the topic's difficulty by the flow band, once."""
-    ts = now_iso()
+def apply_grade(conn, q: dict, n: int, score: int, note: str | None, verdict: str) -> dict:
+    """Score one part on an open connection. Once every part is scored the question's mean is kept; completion is the owner's press."""
     conn.execute(
         "UPDATE question_parts SET verdict = ?, score = ?, note = ?, graded_at = ? WHERE question_id = ? AND n = ?",
-        (verdict, score, (note or "").strip() or None, ts, q["id"], n),
+        (verdict, score, (note or "").strip() or None, now_iso(), q["id"], n),
     )
     out: dict = {"question_id": q["id"], "part": n, "verdict": verdict, "score": score}
     out["remaining"] = conn.execute("SELECT COUNT(*) FROM question_parts WHERE question_id = ? AND score IS NULL", (q["id"],)).fetchone()[0]
@@ -67,26 +57,31 @@ def apply_grade(conn, config, q: dict, n: int, score: int, note: str | None, ver
         mean = round(conn.execute("SELECT AVG(score) FROM question_parts WHERE question_id = ?", (q["id"],)).fetchone()[0])
         conn.execute("UPDATE questions SET score = ? WHERE id = ?", (mean, q["id"]))
         out["question_score"] = mean
-        if q["graded_at"] is None:
-            band = config.education
-            conn.execute("UPDATE questions SET graded_at = ? WHERE id = ?", (ts, q["id"]))
-            d = conn.execute("SELECT difficulty FROM topics WHERE id = ?", (q["topic_id"],)).fetchone()[0]
-            nd = min(5, d + 1) if mean > band.flow_high else max(1, d - 1) if mean < band.flow_low else d
-            if nd != d:
-                conn.execute("UPDATE topics SET difficulty = ? WHERE id = ?", (nd, q["topic_id"]))
-            out["topic_difficulty"] = nd
-            out["completed"] = True
     return out
 
 
-def grade(store: Store, config, question_id, part, score, note) -> dict:
-    """The tutor's grade: 0 to 100 and the explanation, on a part of a question that was not skipped."""
+def complete(conn, config, q: dict) -> dict:
+    """Close the quiz on an open connection: every part scored, the mean kept, the topic's difficulty moved by the flow band once."""
+    remaining = conn.execute("SELECT COUNT(*) FROM question_parts WHERE question_id = ? AND score IS NULL", (q["id"],)).fetchone()[0]
+    if remaining:
+        raise ValueError(f"{remaining} part(s) not graded yet")
+    mean = round(conn.execute("SELECT AVG(score) FROM question_parts WHERE question_id = ?", (q["id"],)).fetchone()[0])
+    conn.execute("UPDATE questions SET completed_at = ?, score = ? WHERE id = ?", (now_iso(), mean, q["id"]))
+    band = config.education
+    d = conn.execute("SELECT difficulty FROM topics WHERE id = ?", (q["topic_id"],)).fetchone()[0]
+    nd = min(DIFFICULTY_MAX, d + 1) if mean > band.flow_high else max(1, d - 1) if mean < band.flow_low else d
+    if nd != d:
+        conn.execute("UPDATE topics SET difficulty = ? WHERE id = ?", (nd, q["topic_id"]))
+    return {"id": q["id"], "score": mean, "topic_difficulty": nd}
+
+
+def grade(store: Store, question_id, part, score, note) -> dict:
+    """The tutor's grade: 0 to 100 and a note for the record, on one part. A completed question's grade may still be revised; its mean follows."""
     q = question(store, int(question_id))
     if q is None:
         return {"error": f"no question {question_id}"}
-    if status_of(q) == "skipped":
-        return {"error": f"question {question_id} was skipped"}
-    if store.one("SELECT 1 FROM question_parts WHERE question_id = ? AND n = ?", (q["id"], int(part))) is None:
+    row = store.one("SELECT * FROM question_parts WHERE question_id = ? AND n = ?", (q["id"], int(part)))
+    if row is None:
         return {"error": f"question {question_id} has no part {part}"}
     try:
         s = int(score)
@@ -95,7 +90,6 @@ def grade(store: Store, config, question_id, part, score, note) -> dict:
     if not 0 <= s <= 100:
         return {"error": "score is 0 to 100"}
     with store.tx() as conn:
-        out = apply_grade(conn, config, q, int(part), s, note, verdict_for(s))
-    if out.get("completed"):
-        store.event("education", "graded", f"Q{q['id']} {q['title'][:100]}: {out['question_score']}", ref=str(q["id"]))
+        out = apply_grade(conn, q, int(part), s, note, verdict_for(s))
+    store.event("education", "graded", f"Q{q['id']} ({label(row['n'])}) {part_title(row)[:80]}: {s}", ref=str(q["id"]))
     return out

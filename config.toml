@@ -48,8 +48,8 @@ tool_output_chars = 2000         # per-output cap in what the agent's tools retu
 
 [education]
 per_night = 3               # new questions the nightly run writes, one for each topic that has waited longest
-start_difficulty = 3        # 1 to 5 for a new topic
-flow_low = 60               # a completed question below this lowers the topic's difficulty one step
+start_difficulty = 5        # 1 to 10 for a new topic: 1-2 introduction, 3-5 intro course, 6-8 advanced/masters, 9-10 expert
+flow_low = 60               # a completed quiz scoring below this lowers the topic's difficulty one step
 flow_high = 85              # above this raises it one step
 
 [database]
