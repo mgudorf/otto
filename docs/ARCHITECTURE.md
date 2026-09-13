@@ -98,6 +98,7 @@ The UI is a view of daemon state. Pages render from the store and poll or subscr
 | database | max_rows, max_seconds |
 | email | client_file, token_file, backfill_days, triage_batch |
 | web_search | max_findings |
+| social | cities (the towns the scout covers), radius_miles, horizon_days, events_per_run |
 | feedback | max_turns |
 | ui | start_page, refresh_seconds, time_format (`24h` or `12h`), page_size, side_max, middle_max |
 
@@ -172,6 +173,7 @@ One doc per module, `docs/<module>/CLAUDE.md`: the owner's requirements, `## Bui
 | Graph [7] | `docs/graph/CLAUDE.md` |
 | Database [8] | `docs/database/CLAUDE.md` |
 | Search [9, no page] | `docs/web_search/CLAUDE.md` |
+| Social [10] | `docs/social/CLAUDE.md` |
 | System [99, no page] | `docs/system/CLAUDE.md` |
 | Feedback [99, no page] | `docs/feedback/CLAUDE.md` |
 
