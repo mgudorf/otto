@@ -7,6 +7,7 @@ import httpx
 
 from app.daemon import build
 from app.modules import Manifest, Module
+from app.store import now_iso
 from tests.conftest import fake_spawn, run
 
 INIT = json.dumps({"type": "system", "subtype": "init", "session_id": "s1", "tools": ["mcp__otto__memory_search"]})
@@ -83,6 +84,23 @@ def test_memory_end_to_end(config):
             assert (f["ui.side_max"], f["ui.middle_max"]) == (520, 1800)
             assert (await c.put("/api/settings", json={"ui.side_max": 100})).status_code == 400
             assert (await c.put("/api/settings", json={"ui.middle_max": 9000})).status_code == 400
+            # a module's own model and effort: one of the configured choices or default
+            assert (await c.put("/api/settings", json={"modules.memory.model": "gpt"})).status_code == 400
+            assert (await c.put("/api/settings", json={"modules.memory.effort": "extreme"})).status_code == 400
+            f = (await c.put("/api/settings", json={"modules.memory.model": config.claude.models[0], "modules.memory.effort": "low"})).json()
+            assert f["modules.memory.model"] == config.claude.models[0] and f["modules.memory.effort"] == "low"
+            mem = next(m for m in (await c.get("/api/shell")).json()["modules"] if m["name"] == "memory")
+            assert mem["model"] == config.claude.models[0] and mem["effort"] == "low"
+            assert shell["claude"]["models"] == list(config.claude.models) and shell["claude"]["efforts"] == list(config.claude.efforts)
+            # an export is every table as JSON rows
+            r = (await c.post("/api/data/export")).json()
+            dump = json.loads(Path(r["path"]).read_text("utf-8"))
+            assert dump["settings"] and "memories" in dump and (await c.get("/api/data")).json()["exports"] == 1
+            # every static file revalidates, so a restarted daemon never serves stale modules
+            assert (await c.get("/shell.js")).headers["cache-control"] == "no-cache"
+            # a run counts against the nightly budget from the moment it starts, so concurrent runs see each other
+            app.state.store.execute("INSERT INTO llm_runs(ts, module, task, status, budgeted) VALUES (?, 'memory', 'memory.suggest', 'running', 1)", (now_iso(),))
+            assert (await c.get("/api/shell")).json()["budget"]["used"] == 1
         await app.state.runner.drain(1)
         app.state.store.close()
 
@@ -96,32 +114,44 @@ def test_session_turn_and_clear(config):
         app = build(config, spawn_fn=fake_spawn([INIT, TOOL, TOOL_OK, TEXT, RESULT], calls))
         await app.state.runner.start()
         async with client_for(app) as c:
+            app.state.store.set_setting("modules.memory.model", "sonnet")
+            app.state.store.set_setting("modules.memory.effort", "low")
             r = await c.post("/api/session/memory/send", json={"text": "anything about x?"})
             assert r.status_code == 200, r.text
+            sid = r.json()["session"]
             await settle(app)
-            s = (await c.get("/api/session/memory")).json()
+            tabs = (await c.get("/api/session/memory")).json()
+            assert [(t["id"], t["label"], t["busy"]) for t in tabs["sessions"]] == [(sid, "anything about x?", False)]
+            s = (await c.get(f"/api/session/memory/{sid}")).json()
             roles = [(t["role"], t.get("tool"), t.get("status")) for t in s["turns"]]
             assert roles == [("user", None, None), ("tool", "memory_search", "done"), ("model", None, None)]
             assert s["session"]["cli_started"] == 1 and s["busy"] is False
             args = calls[0]["args"]
             assert "--session-id" in args and "--restricted" in args and "--permission-prompts" in args and "--include-partial-messages" in args
+            assert args[args.index("--model") + 1] == "sonnet" and args[args.index("--effort") + 1] == "low"   # the module's own picks
             assert "--tools" in args and "Write" not in args[args.index("--tools") + 1]
             assert "mcp__otto__memory_add" in args[args.index("--allowedTools") + 1]
             assert not any(k.startswith("ANTHROPIC_") or k.startswith("CLAUDECODE") for k in calls[0]["env"])
-            # second turn resumes
-            await c.post("/api/session/memory/send", json={"text": "and y?"})
+            # second turn on the same tab resumes; a turn without an id opens a second tab
+            await c.post("/api/session/memory/send", json={"text": "and y?", "id": sid})
             await settle(app)
             assert "--resume" in calls[1]["args"]
-            # /clear closes with title and tags from the one-shot tagger
+            sid2 = (await c.post("/api/session/memory/send", json={"text": "another thread"})).json()["session"]
+            await settle(app)
+            assert sid2 != sid and "--session-id" in calls[2]["args"]
+            assert [t["id"] for t in (await c.get("/api/session/memory")).json()["sessions"]] == [sid, sid2]
+            assert (await c.get("/api/session/memory/nope")).status_code == 404
+            # /clear closes one tab with title and tags from the one-shot tagger; the other stays open
             app.state.claude.spawn = fake_spawn([CLOSE], calls)
-            r = await c.post("/api/session/memory/send", json={"text": "/clear"})
+            r = await c.post("/api/session/memory/send", json={"text": "/clear", "id": sid})
             assert r.json() == {"cleared": True}
             await settle(app)
-            row = app.state.store.one("SELECT * FROM sessions")
+            row = app.state.store.one("SELECT * FROM sessions WHERE id = ?", (sid,))
             assert row["closed_at"] and row["title"] == "Search for x" and json.loads(row["tags"]) == ["memory", "search"]
-            assert calls[2]["args"][calls[2]["args"].index("--max-turns") + 1] == "2"
-            assert (await c.get("/api/session/memory")).json()["session"] is None
+            assert calls[3]["args"][calls[3]["args"].index("--max-turns") + 1] == "2"
+            assert [t["id"] for t in (await c.get("/api/session/memory")).json()["sessions"]] == [sid2]
             assert (await c.post("/api/session/memory/send", json={"text": "/clear"})).json() == {"cleared": False}
+            assert (await c.post("/api/session/memory/send", json={"text": "/clear", "id": sid})).status_code == 404
         await app.state.runner.drain(1)
         app.state.store.close()
 
@@ -136,8 +166,7 @@ def test_failed_first_turn_retires_session(config):
         async with client_for(app) as c:
             await c.post("/api/session/memory/send", json={"text": "hi"})
             await settle(app)
-            s = (await c.get("/api/session/memory")).json()
-            assert s["session"] is None
+            assert (await c.get("/api/session/memory")).json()["sessions"] == []
             rows = app.state.store.query("SELECT * FROM sessions")
             assert rows[0]["closed_at"] and rows[0]["title"] == "(failed to start)"
         await app.state.runner.drain(1)
@@ -154,9 +183,9 @@ def test_huge_stream_line_survives(config):
         app = build(config, spawn_fn=fake_spawn([INIT, TOOL, big, TEXT, RESULT]))
         await app.state.runner.start()
         async with client_for(app) as c:
-            await c.post("/api/session/memory/send", json={"text": "read the big one"})
+            sid = (await c.post("/api/session/memory/send", json={"text": "read the big one"})).json()["session"]
             await settle(app)
-            s = (await c.get("/api/session/memory")).json()
+            s = (await c.get(f"/api/session/memory/{sid}")).json()
             assert [t["role"] for t in s["turns"]] == ["user", "tool", "model"]
             assert s["turns"][1]["status"] == "done" and s["busy"] is False
         await app.state.runner.drain(1)
@@ -279,7 +308,20 @@ def test_feedback_end_to_end(config):
             assert (await c.post("/api/feedback/action/retry", json={"id": bad})).status_code == 200
             await settle(app)
             assert (await c.get("/api/feedback/recent?page=activity")).json()["rows"][0]["status"] == "filed"
+            # a note sent during a drain is refused before any row exists
+            app.state.runner.draining = True
+            assert (await c.post("/api/feedback/action/add", json={"page": "memory", "text": "late"})).status_code == 503
+            assert app.state.store.scalar("SELECT COUNT(*) FROM feedback") == 2
         await app.state.runner.drain(1)
+        app.state.store.close()
+        # a note whose filing job died with the last daemon reads failed at the next boot, so retry is offered
+        app = build(config)
+        st = app.state
+        st.store.execute("INSERT INTO feedback(created_at, page, text) VALUES ('2026-09-13T00:00:00+00:00', 'memory', 'orphan')")
+        st.store.close()
+        app = build(config)
+        row = app.state.store.one("SELECT status, error FROM feedback WHERE text = 'orphan'")
+        assert row == {"status": "failed", "error": "daemon restarted"}
         app.state.store.close()
 
     run(main())

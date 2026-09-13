@@ -35,6 +35,15 @@ HERE = Path(__file__).parent
 log = logging.getLogger("otto")
 
 
+class Static(StaticFiles):
+    """Every file revalidates against its etag, so a restarted daemon never serves a page from the old revision."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 def build(config: Config, spawn_fn=None) -> FastAPI:
     store = Store(config.data.db)
     store.migrate((HERE / "schema.sql").read_text("utf-8"))
@@ -94,7 +103,7 @@ def build(config: Config, spawn_fn=None) -> FastAPI:
             app.include_router(m.router)
     app.router.routes.extend(read_app.routes)
     app.router.routes.extend(full_app.routes)
-    app.mount("/", StaticFiles(directory=HERE / "static", html=True), name="static")
+    app.mount("/", Static(directory=HERE / "static", html=True), name="static")
     return app
 
 

@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager, contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Iterator
 
+from app.claude import BudgetExceeded
 from app.store import Store, now_iso
 
 JobFn = Callable[["JobContext"], Awaitable[Any]]
@@ -137,6 +138,8 @@ class Runner:
                 status, error, why = "failed", "cancelled", "cancelled"
                 self._finish(job, status, result, error, why)
                 raise
+            except BudgetExceeded as e:   # a refusal is a skip, whichever task ran into it
+                status, result = "skipped", str(e)
             except Exception as e:
                 status, error, why = "failed", traceback.format_exc(), reason(e)
             finally:

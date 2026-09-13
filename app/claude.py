@@ -115,7 +115,7 @@ class ClaudeRunner:
         local = datetime.now().astimezone()
         day_start = iso(local.replace(hour=0, minute=0, second=0, microsecond=0))
         used = self.store.scalar(
-            "SELECT COUNT(*) FROM llm_runs WHERE ts >= ? AND budgeted = 1 AND status IN ('done', 'failed')", (day_start,)
+            "SELECT COUNT(*) FROM llm_runs WHERE ts >= ? AND budgeted = 1 AND status IN ('running', 'done', 'failed')", (day_start,)
         )
         start, end = self.config.nightly.bounds()
         from app.scheduler import in_window
@@ -129,7 +129,12 @@ class ClaudeRunner:
         }
 
     # ---- argument building --------------------------------------------------------------
-    def _args(self, system_prompt: str, server: str, allowed: list[str], extra: list[str], builtins: tuple[str, ...] = READ_BUILTINS) -> list[str]:
+    def _choice(self, mod, key: str, fallback: str) -> str:
+        """The module's own pick on its page (`modules.<name>.<key>`), or the fallback when it has none or says `default`."""
+        value = self.store.setting(f"modules.{mod.name}.{key}") if mod else None
+        return value if value and value != "default" else fallback
+
+    def _args(self, mod, system_prompt: str, server: str, allowed: list[str], extra: list[str], builtins: tuple[str, ...] = READ_BUILTINS) -> list[str]:
         mcp = {"mcpServers": {server: {"type": "http", "url": f"{self.mcp_url}/mcp/{'read' if server == READ_SERVER else 'full'}"}}}
         args = [
             self.config.claude.binary, "-p",
@@ -142,8 +147,12 @@ class ClaudeRunner:
             "--permission-prompts", "none",
             "--system-prompt", system_prompt,
         ]
-        if self.config.claude.model != "default":
-            args += ["--model", self.config.claude.model]
+        model = self._choice(mod, "model", self.config.claude.model)
+        if model != "default":
+            args += ["--model", model]
+        effort = self._choice(mod, "effort", "default")
+        if effort != "default":
+            args += ["--effort", effort]
         return args + extra
 
     async def _stream(self, args: list[str], prompt: str, timeout: float, on_event: OnEvent | None) -> dict:
@@ -204,27 +213,32 @@ class ClaudeRunner:
         mod = ctx.registry.modules.get(module)
         system = self._system_prompt(mod, scheduled=True)
         allowed = [f"mcp__{READ_SERVER}__{t}" for t in tools]
-        args = self._args(system, READ_SERVER, allowed, ["--max-turns", str(self.config.nightly.max_turns), "--no-session-persistence"])
+        args = self._args(mod, system, READ_SERVER, allowed, ["--max-turns", str(self.config.nightly.max_turns), "--no-session-persistence"])
         started = now()
         ctx.log(f"claude run_task tools={list(tools)}")
+        run_id = self._record(ctx, "running", 0, None)   # counted from now, so concurrent runs see each other
         try:
             final = await self._stream(args, prompt, self.config.nightly.max_minutes * 60, None)
         except Exception:
-            self._record(ctx, "failed", (now() - started).total_seconds() / 60, None)
+            self._finish(run_id, "failed", (now() - started).total_seconds() / 60, None)
             raise
-        self._record(ctx, "done", (now() - started).total_seconds() / 60, final.get("session_id"))
+        self._finish(run_id, "done", (now() - started).total_seconds() / 60, final.get("session_id"))
         return final.get("text", "")
 
-    def _record(self, ctx, status: str, minutes: float, session_id: str | None, budgeted: bool = True) -> None:
-        self.store.execute(
+    def _record(self, ctx, status: str, minutes: float, session_id: str | None, budgeted: bool = True) -> int:
+        cur = self.store.execute(
             "INSERT INTO llm_runs(ts, module, task, job_id, status, minutes, session_id, budgeted) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (now_iso(), ctx.job.module, ctx.job.task, ctx.job.id, status, minutes, session_id, int(budgeted)),
         )
+        return cur.lastrowid
+
+    def _finish(self, run_id: int, status: str, minutes: float, session_id: str | None) -> None:
+        self.store.execute("UPDATE llm_runs SET status = ?, minutes = ?, session_id = ? WHERE id = ?", (status, minutes, session_id, run_id))
 
     async def oneshot(self, ctx, mod, prompt: str, tools: tuple[str, ...] = (), max_turns: int = 2) -> str:
         """User-triggered, read-only, unbudgeted single answer (session tagging, feedback filing)."""
         allowed = [f"mcp__{READ_SERVER}__{t}" for t in tools]
-        args = self._args(self._system_prompt(mod, scheduled=True), READ_SERVER, allowed, ["--max-turns", str(max_turns), "--no-session-persistence"])
+        args = self._args(mod, self._system_prompt(mod, scheduled=True), READ_SERVER, allowed, ["--max-turns", str(max_turns), "--no-session-persistence"])
         started = now()
         try:
             final = await self._stream(args, prompt, self.config.nightly.max_minutes * 60, None)
@@ -241,7 +255,7 @@ class ClaudeRunner:
         allowed = [f"mcp__{FULL_SERVER}__{t}" for t in tools]
         extra = (["--session-id", session_id] if is_new else ["--resume", session_id]) + ["--include-partial-messages"]
         builtins = READ_BUILTINS + tuple(agent.builtins)
-        args = self._args(self._system_prompt(mod, scheduled=False), FULL_SERVER, allowed, extra, builtins)
+        args = self._args(mod, self._system_prompt(mod, scheduled=False), FULL_SERVER, allowed, extra, builtins)
         return await self._stream(args, text, self.config.nightly.max_minutes * 60, on_event)
 
     # ---- prompts ---------------------------------------------------------------------------

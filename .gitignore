@@ -12,5 +12,7 @@ app/.browser-profile/
 data/sessions/
 data/backups/
 data/*.log
+data/*.log.*
+data/exports/
 data/workspace/
 app/.chrome-profile/

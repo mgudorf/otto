@@ -22,10 +22,12 @@ MANIFEST = Manifest(
 
 
 def setup(config) -> None:
-    """Called once by daemon.build after the schemas: `cleared_at` on a feedback table that predates it."""
+    """Called once by daemon.build after the schemas: `cleared_at` on a feedback table that predates it, and a note whose
+    filing job died with the last daemon reads `failed` so the panel offers `retry` instead of `filing…` forever."""
     conn = sqlite3.connect(config.data.db, timeout=5)
     try:
         add_cleared_at(conn)
+        conn.execute("UPDATE feedback SET status = 'failed', error = 'daemon restarted' WHERE status = 'queued'")
         conn.commit()
     finally:
         conn.close()

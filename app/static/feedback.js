@@ -45,8 +45,8 @@ export class Feedback extends Component {
     const context = sel ? `${page} · item ${sel.id}` : page;
     return html`<span style=${{ position: 'relative' }}>
       <span class="ring" onClick=${() => this.setState({ open: !open })} style=${{ ...mono13, color: open ? T.text : T.muted, cursor: 'pointer', padding: '3px 8px', borderRadius: 6 }}>feedback</span>
-      ${open && html`<div style=${{ position: 'absolute', top: 30, right: 0, width: 360, zIndex: 10, display: 'flex', flexDirection: 'column', gap: 8, padding: 12, background: T.panel, borderRadius: 6, boxShadow: `inset 0 0 0 1px ${T.hair}`, '--hue': hue }}>
-        <textarea ref=${(el) => (this.ta = el)} value=${draft} rows="3" placeholder="What should change here?" spellcheck="false"
+      ${open && html`<div style=${{ position: 'absolute', top: 30, right: 0, width: 520, zIndex: 10, display: 'flex', flexDirection: 'column', gap: 8, padding: 12, background: T.panel, borderRadius: 6, boxShadow: `inset 0 0 0 1px ${T.hair}`, '--hue': hue }}>
+        <textarea ref=${(el) => (this.ta = el)} value=${draft} rows="8" placeholder="What should change here?" spellcheck="false"
           onInput=${(e) => this.setState({ draft: e.target.value })}
           onKeyDown=${(e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); }

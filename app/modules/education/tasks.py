@@ -5,7 +5,6 @@ The queue is never topped up to a size: a night that finds unanswered questions 
 
 from __future__ import annotations
 
-from app.claude import BudgetExceeded
 from app.modules.education import questions
 from app.runner import Skipped
 from app.store import now_iso
@@ -16,10 +15,7 @@ async def generate(ctx) -> str:
     topics = questions.waiting_topics(store, ctx.config.education.per_night)
     if not topics:
         return Skipped("no topics")
-    try:
-        raw = await ctx.run_task(questions.generate_prompt(store, topics))
-    except BudgetExceeded as e:
-        return Skipped(str(e))
+    raw = await ctx.run_task(questions.generate_prompt(store, topics))
     items = questions.parse_array(raw)
     wanted = {t["id"]: t for t in topics}
     added: list[str] = []

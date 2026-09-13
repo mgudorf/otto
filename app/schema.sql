@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS llm_runs (
   module     TEXT NOT NULL,
   task       TEXT NOT NULL,
   job_id     INTEGER,
-  status     TEXT NOT NULL,        -- done | failed | skipped
+  status     TEXT NOT NULL,        -- running | done | failed | skipped
   minutes    REAL,
   session_id TEXT,
   budgeted   INTEGER NOT NULL DEFAULT 1   -- 0 for user-triggered runs (session close tagging)

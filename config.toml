@@ -13,7 +13,9 @@ drain_seconds = 30
 
 [claude]
 binary = "C:/Users/gudo/.local/bin/claude.exe"
-model = "default"            # "default" leaves the CLI's own model choice alone
+model = "default"            # "default" leaves the CLI's own model choice alone; a module can pick its own on its page
+models = ["fable", "opus", "sonnet", "haiku"]           # what a module may pick, besides "default"
+efforts = ["low", "medium", "high", "xhigh", "max"]     # --effort levels a module may pick, besides "default"
 sessions_kept_days = 30
 
 [data]

@@ -7,7 +7,7 @@ The middle is the main interaction/use of the module, which displays the main ou
 
 ### What runs today
 
-Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps every module's state current on a schedule; the window renders that state and holds none of it. Each module pane holds one open session; `/clear` closes it, tags it, and starts a fresh one. Chat keeps as many conversations as the owner starts, each tagged after its first turn and never closed. Each module is described in `docs/<module>/CLAUDE.md`; this file, `docs/app/CLAUDE.md`, is the platform's. Open findings live in each doc's `## Patches` section.
+Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps every module's state current on a schedule; the window renders that state and holds none of it. Each module pane holds any number of open sessions, one tab each; closing a tab tags its session and ends it. Chat keeps as many conversations as the owner starts, each tagged after its first turn and never closed. Each module is described in `docs/<module>/CLAUDE.md`; this file, `docs/app/CLAUDE.md`, is the platform's. Open findings live in each doc's `## Patches` section.
 
 | Piece | What it is |
 |---|---|
@@ -32,7 +32,7 @@ app/revision.py   sha256 of app/** and config.toml, served by /health
 app/claude.py     CLI spawn, event stream, read-only allowlist, nightly budget
 app/modules/      registry, agent_base.md, one package per module (contract under Daemon)
 app/static/       index.html, shell.js, session.js, rows.js, api.js, feedback.js, md.js, pages/<name>.js, vendor/
-data/             otto.db, daemon.log and its rotations, secrets/, workspace/ (science/, business/, chat/<id>/), backups/; .gitignore covers data/*.log, the db, secrets, workspace and backups
+data/             otto.db, daemon.log and its rotations, secrets/, workspace/ (science/, business/, chat/<id>/), backups/, exports/; .gitignore covers data/*.log and data/*.log.*, the db, secrets, workspace, backups and exports
 .claude/          skills/ (feature-flow, feedback-queue, sync-architecture): the repo's own workflows
 ```
 
@@ -76,18 +76,18 @@ The UI is a view of daemon state. Pages render from the store and poll or subscr
 | Resources in the daemon | tokens under `data/secrets/`, cursors in `cursors`, Claude runs as child processes of the daemon, Jupyter kernels as child processes held in Science's module state and shut down at lifespan exit; the page holds nothing | `test_science_reap` |
 | Idempotent, kill-safe tasks | a task's only write path is `ctx.commit(cursor=...)`: results and the new cursor in one transaction | `test_skipped_and_logs_and_commit` |
 | Scheduled agent only reads | `ctx.run_task` is the only Claude entry point a task can reach: read server, read-only built-ins, budget. `session_turn` and `oneshot` are reachable from routes only. Science's `tasks.py` names neither `execute` nor `write` | `test_tasks_never_reach_interactive_claude`, `test_read_builtins_exclude_writers`, `test_science_tasks_never_execute_or_write` |
-| Failure is local, and says why | the runner catches per job: the `jobs` row is failed with the full traceback in `error`, the `events` row reads `<task>: <exception type and message folded to one line>`, and a scheduled task's `last_result` holds the last 500 characters of the traceback, so a multi-line message keeps its reason. The registry records a module that fails to import or whose `setup` raises in `module_errors`, and the rail shows it disabled with the error | `test_failure_is_local`, `test_registry_skips_broken_module` |
-| UI is a view | pages fetch `/api/...` on the refresh interval and after every action; the loading line reflects in-flight fetches; the session pane and a running notebook cell subscribe to server-sent events | `test_memory_end_to_end`, `test_science_run_streams_and_saves` |
+| Failure is local, and says why | the runner catches per job: a `BudgetExceeded` from `run_task` records the job `skipped` with the reason, whichever task raised it; any other exception fails the job: the `jobs` row is failed with the full traceback in `error`, the `events` row reads `<task>: <exception type and message folded to one line>`, and a scheduled task's `last_result` holds the last 500 characters of the traceback, so a multi-line message keeps its reason. The registry records a module that fails to import or whose `setup` raises in `module_errors`, and the rail shows it disabled with the error | `test_failure_is_local`, `test_budget_refusal_is_skipped`, `test_registry_skips_broken_module` |
+| UI is a view | pages fetch `/api/...` on the refresh interval and after every action; the loading line reflects in-flight fetches; the session pane and a running notebook cell subscribe to server-sent events. Static files go out with `Cache-Control: no-cache`, so the browser revalidates every module against its etag, and the shell reloads the window once when `/api/shell` reports a `rev` other than the one it loaded under | `test_memory_end_to_end`, `test_science_run_streams_and_saves` |
 
 ### Config
 
-`config.toml` holds boot values; changing one means relaunching. Live settings are seeded from `[ui]` into the `settings` table on first start (`INSERT OR IGNORE`, so a new key reaches an old database on the next boot) and edited on the Settings page afterwards (`PUT /api/settings`, keys `ui.*`, `modules.<name>.enabled` and `modules.<name>.scheduled`; a value outside its range is a 400: refresh 5 to 3600 s, rows per page 10 to 200, `ui.side_max` 280 to 900 px, `ui.middle_max` 640 to 3000 px).
+`config.toml` holds boot values; changing one means relaunching. Live settings are seeded from `[ui]` into the `settings` table on first start (`INSERT OR IGNORE`, so a new key reaches an old database on the next boot) and edited on the Settings page afterwards (`PUT /api/settings`, keys `ui.*`, `modules.<name>.enabled`, `modules.<name>.scheduled`, `modules.<name>.model` and `modules.<name>.effort`; a value outside its range is a 400: refresh 5 to 3600 s, rows per page 10 to 200, `ui.side_max` 280 to 900 px, `ui.middle_max` 640 to 3000 px, model and effort `default` or one of `claude.models` / `claude.efforts`). `enabled` and `scheduled` are seeded true; `model` and `effort` are absent until the owner picks one, which reads as `default`.
 
 | Section | Keys |
 |---|---|
 | server | host, port |
 | scheduler | tick_seconds, max_concurrent, drain_seconds |
-| claude | binary, model (`default` keeps the CLI's own choice), sessions_kept_days |
+| claude | binary, model (`default` keeps the CLI's own choice; a module's own pick overrides it), models and efforts (what a module may pick on its page, besides `default`), sessions_kept_days |
 | data | db, workspace (working directory of every Claude run; file tools are confined to it) |
 | nightly | window (local time), max_sessions per day (at least one per nightly LLM task), max_turns and max_minutes per run, stagger_minutes between one nightly run and the next |
 | chat | upload_max_mb (an attachment past it is a 413), replay_chars (tail of the stored transcript replayed when the CLI has lost a conversation) |
@@ -104,7 +104,7 @@ The UI is a view of daemon state. Pages render from the store and poll or subscr
 
 ### Claude
 
-Every run is one CLI process with the prompt on stdin and `--output-format stream-json --verbose`, launched with `--setting-sources ""`, `--restricted`, `--strict-mcp-config`, `--permission-prompts none`, `--tools` with the read built-ins `Read,Grep,Glob,WebSearch,WebFetch` (a session turn adds the module agent's `builtins`: `Write` and `Edit` for Chat, confined to the workspace by `--restricted`), `--allowedTools` for those plus the module's MCP tools, and `--system-prompt`. The environment is scrubbed of every `ANTHROPIC_*`, `CLAUDECODE*` and `CLAUDE_CODE_*` variable. Stdout is read in 64 KiB chunks and split on newlines by the daemon itself, so one message carrying a whole file as a tool result never truncates the run. Any run past `max_minutes` is killed. Verified on this machine: the CLI answers with no API key set, WebSearch works headless under these flags, and the owner's global CLAUDE.md does not reach these runs.
+Every run is one CLI process with the prompt on stdin and `--output-format stream-json --verbose`, launched with `--setting-sources ""`, `--restricted`, `--strict-mcp-config`, `--permission-prompts none`, `--tools` with the read built-ins `Read,Grep,Glob,WebSearch,WebFetch` (a session turn adds the module agent's `builtins`: `Write` and `Edit` for Chat, confined to the workspace by `--restricted`), `--allowedTools` for those plus the module's MCP tools, `--system-prompt`, then `--model` and `--effort` when the module's own settings (or, for the model, `claude.model`) say something other than `default`. The environment is scrubbed of every `ANTHROPIC_*`, `CLAUDECODE*` and `CLAUDE_CODE_*` variable. Stdout is read in 64 KiB chunks and split on newlines by the daemon itself, so one message carrying a whole file as a tool result never truncates the run. Any run past `max_minutes` is killed. Verified on this machine: the CLI answers with no API key set, WebSearch works headless under these flags, and the owner's global CLAUDE.md does not reach these runs.
 
 | Path | Who | MCP server | Extra flags |
 |---|---|---|---|
@@ -114,9 +114,9 @@ Every run is one CLI process with the prompt on stdin and `--output-format strea
 
 System prompt: `app/modules/agent_base.md` (shared rules) + the module's `agent.md` + a Current state block from the module's `context(store, registry)` hook, rendered fresh every turn.
 
-Budget: when a task run starts, `llm_runs` rows of the local day with `budgeted = 1` and status `done` or `failed` are counted against `max_sessions`; a refusal writes a `skipped` row. Activity shows runs used, the window, and whether it is open now.
+Budget: when a task run starts, `llm_runs` rows of the local day with `budgeted = 1` and status `running`, `done` or `failed` are counted against `max_sessions`; the run then writes its own `running` row before the CLI spawns and updates it to `done` or `failed` after, so concurrent runs see each other; a refusal writes a `skipped` row and the runner records the job `skipped`. Activity shows runs used, the window, and whether it is open now.
 
-Sessions: `sessions(id, module, opened_at, closed_at, title, tags, cli_started)` and `session_turns(role user|model|tool|system, text, tool, status)`. Two helpers in `api.py` are the only paths. `start_turn(st, mod, sid, started, text, prompt, key, replay, on_done)` stores the owner's words, marks the session busy (busy is per session id) and queues a job of kind `session` on resource `session:<sid>`, so one session's turns serialize and different sessions run concurrently; `text` is stored, `prompt` is what the CLI gets. `tag_session(st, mod, sid, key, close)` queues a `oneshot` whose `{"title", "tags"}` is written to the row (fallback: first user line, no tags) with `closed_at` set only when `close` is true, then event `closed` or `tagged` and a `tagged` broadcast; Graph reads `sessions.tags`. The module panes keep one open session per module, stream on key `<module>` over `GET /api/session/<module>/events`, and `/clear` tags and closes; Chat keeps many, streams on `chat:<id>`, and tags after the first completed turn without closing. Events: `user`, `model`, `delta` (text as it is written, never stored; the panes ignore it), `tool`, `tool_result`, `result`, `error`, `idle`, `tagged`. A first turn that fails retires its session row so the next turn starts clean. A resumed turn the CLI answers with `error_during_execution`, no turns and stderr `No conversation found with session ID` (`ClaudeError.lost_transcript`) is re-sent under the same id as a new session with the caller's `replay` preamble when one was given, after a `system` turn `resumed from Otto's record`. Any other message starting with `/` is passed to the CLI unchanged, so Claude Code commands and skills work from the pane.
+Sessions: `sessions(id, module, opened_at, closed_at, title, tags, cli_started)` and `session_turns(role user|model|tool|system, text, tool, status)`. Two helpers in `api.py` are the only paths. `start_turn(st, mod, sid, started, text, prompt, key, replay, on_done)` stores the owner's words, marks the session busy (busy is per session id) and queues a job of kind `session` on resource `session:<sid>`, so one session's turns serialize and different sessions run concurrently; `text` is stored, `prompt` is what the CLI gets. `tag_session(st, mod, sid, key, close)` queues a `oneshot` whose `{"title", "tags"}` is written to the row (fallback: first user line, no tags) with `closed_at` set only when `close` is true, then event `closed` or `tagged` and a `tagged` broadcast; Graph reads `sessions.tags`. The module panes keep any number of open sessions per module: `GET /api/session/<module>` lists them oldest first with a label (the title once tagged, until then the first user line), `GET /api/session/<module>/<id>` gives one with its turns and busy state, `POST /api/session/<module>/send` takes `{text, id?}` (no `id` opens a new session; an unknown or closed one is a 404), each streams on key `<module>:<id>` over `GET /api/session/<module>/<id>/events`, and `/clear` with an `id` tags and closes that one. Chat keeps many on its own page, streams on `chat:<id>`, and tags after the first completed turn without closing. Events: `user`, `model`, `delta` (text as it is written, never stored; the panes ignore it), `tool`, `tool_result`, `result`, `error`, `idle`, `tagged`. A first turn that fails retires its session row so the next turn starts clean. A resumed turn the CLI answers with `error_during_execution`, no turns and stderr `No conversation found with session ID` (`ClaudeError.lost_transcript`) is re-sent under the same id as a new session with the caller's `replay` preamble when one was given, after a `system` turn `resumed from Otto's record`. Any other message starting with `/` is passed to the CLI unchanged, so Claude Code commands and skills work from the pane.
 
 MCP servers are `mcp` 2.2.0 `MCPServer` instances mounted stateless with JSON responses; module `tools.py` files register read tools on both servers and write tools on `otto` only.
 
@@ -126,9 +126,9 @@ A module is a package `app/modules/<name>/` plus `app/static/pages/<name>.js`. T
 
 | File | Obligation |
 |---|---|
-| `__init__.py` | `MANIFEST = Manifest(name, title, hue, icon (SVG inner markup, 20x20), order, schedules=(Schedule(task, every "60s\|15m\|24h", resource, llm),), agent=Agent(placeholder, skills, read_tools, write_tools, builtins), page=True)`; `builtins` are CLI tools beyond the read set, given to session turns only. A module with `page=False` (System, Feedback, Search) is still listed by `/api/shell` with `page: false` so its hue and icon resolve, read by Home's hooks, and shown on Settings with its `runs` toggle only. Optionally `setup(config)`, called once at build after every schema is applied (a raise records the module in `module_errors` and drops it), and `async shutdown()`, awaited at lifespan exit after the drain, for a module holding process resources |
+| `__init__.py` | `MANIFEST = Manifest(name, title, hue, icon (SVG inner markup, 20x20), order, schedules=(Schedule(task, every "60s\|15m\|24h", resource, llm),), agent=Agent(placeholder, skills, read_tools, write_tools, builtins), page=True)`; `builtins` are CLI tools beyond the read set, given to session turns only. A module with `page=False` (System, Feedback, Search) is still listed by `/api/shell` with `page: false` so its hue and icon resolve, read by Home's hooks, and keeps its `runs`, `model` and `effort` on Settings > Modules, since it has no page to hold them. Optionally `setup(config)`, called once at build after every schema is applied (a raise records the module in `module_errors` and drops it), and `async shutdown()`, awaited at lifespan exit after the drain, for a module holding process resources |
 | `schema.sql` | the module's tables, applied at boot (optional; `Store.migrate` only creates, so a column added to an existing table is the module's `setup` to add) |
-| `tasks.py` | `async def <task>(ctx)` per schedule; `ctx.store` (read), `ctx.commit(cursor=...)` (the only write), `ctx.log`, `ctx.event`, `ctx.run_task(prompt, tools)`; return a string, or `Skipped("why")` |
+| `tasks.py` | `async def <task>(ctx)` per schedule; `ctx.store` (read), `ctx.commit(cursor=...)` (the only write), `ctx.log`, `ctx.event`, `ctx.run_task(prompt, tools)`; return a string, or `Skipped("why")`; a `BudgetExceeded` out of `run_task` needs no catch, the runner records it as skipped |
 | `routes.py` | `router = APIRouter(prefix="/api/<name>")` with `GET left`, `GET item/{id}`, `POST action/{verb}` (through `runner.run_action`), plus hooks `numbers(store) -> {value, label}`, `today(store) -> rows`, `queue(store) -> rows` (everything still waiting on the owner; Home lists every one), `item(store, id)`, `context(store, registry) -> str`. Route handlers must not share a hook's name |
 | `tools.py` | `register(read, full, store, config)`: read tools on both servers, write tools on `full` |
 | `agent.md` | the agent's job in the owner's terms |
@@ -138,16 +138,15 @@ Wire shape for LEFT: `{groups: [{label, count, rows: [{id, module, text, stamp, 
 
 ### Platform tables
 
-`tasks`, `jobs`, `job_logs`, `settings` (JSON values), `cursors`, `events(ts, module, verb, text, job_id, ref)`, `sessions`, `session_turns`, `module_errors`, `llm_runs(ts, module, task, job_id, status, minutes, session_id, budgeted)`.
+`tasks`, `jobs`, `job_logs`, `settings` (JSON values), `cursors`, `events(ts, module, verb, text, job_id, ref)`, `sessions`, `session_turns`, `module_errors`, `llm_runs(ts, module, task, job_id, status running|done|failed|skipped, minutes, session_id, budgeted)`.
 
 ### Dependencies
 
 | Item | Version / location |
 |---|---|
 | Python | 3.14.7, `.venv` from the user-wide install at `C:\Users\gudo\AppData\Local\Python\pythoncore-3.14-64\python.exe`, which is also `science.python` |
-| fastapi, uvicorn, mcp, httpx, pytest, jupyter_client, nbformat | 0.141.1, 0.52.4, 2.2.0, 0.28.1, 9.1.1, 8.10.0, 5.11.1 (`requirements.txt`) |
+| fastapi, uvicorn, mcp, httpx, pytest, jupyter_client, nbformat, python-multipart | 0.141.1, 0.52.4, 2.2.0, 0.28.1, 9.1.1, 8.10.0, 5.11.1, 0.0.32 (`requirements.txt`) |
 | ipykernel | 7.3.0 in the user-wide Python; the kernel process Science launches |
-| python-multipart | 0.0.32 in `.venv`; FastAPI needs it for Chat's `upload` route |
 | Claude Code CLI | 2.1.263 at `C:\Users\gudo\.local\bin\claude.exe`, claude.ai login, subscription max |
 | Google Chrome | found through the `App Paths\chrome.exe` registry key |
 | SQLite with FTS5 and JSON | 3.50.4, stdlib |
@@ -188,11 +187,11 @@ Every page uses three fixed tracks. Selection swaps what renders inside MIDDLE a
 | Region | Spec |
 |---|---|
 | Rail | 56px wide, 32px icon buttons (20px SVG, stroke 1.5), 6px gap, 14px top padding; active background `#23262c`; Activity and Settings pinned at the foot |
-| Header | 48px, padding `14px 32px 0`, 20px/600 title, mono 13px meta in `#5f636c` |
+| Header | 48px, padding `14px 32px 0`, 20px/600 title, mono 13px meta in `#5f636c`; at the right edge, on a module page, `settings` (the module's `runs` toggle when it has tasks, `model` and `effort` selects, in a 280px panel) beside `feedback` |
 | Loading line | 1px, margin `0 32px`; a 30% `#8b8f98` bar animates `translateX(-100% to 340%)` over 1.2s while a fetch is in flight |
-| Tracks | `clamp(220px,22.8%,ui.side_max) minmax(300px,1fr) clamp(220px,22.8%,ui.side_max)`, gap `0 24px`, padding `19px 24px 24px`; opacity fades out and in over 120ms on page switch. 22.8% is the artboard's 4/17 side share, so the tracks match it until the ceiling bites (~1950px wide); past that the sides hold and MIDDLE takes the surplus |
+| Tracks | `minmax(clamp(220px,22.8%,ui.side_max),1fr) minmax(300px,ui.middle_max) minmax(clamp(220px,22.8%,ui.side_max),1fr)`, gap `0 24px`, padding `19px 24px 24px`; opacity fades out and in over 120ms on page switch. 22.8% is the artboard's 4/17 side share, so the tracks match it until the ceiling bites (~1950px wide); past that the sides hold at `ui.side_max` while MIDDLE grows to `ui.middle_max`, and only then does the surplus go to the sides, so on an ultrawide the three panels sit together and no ground opens between them |
 | LEFT | panel `#1a1c21`, radius 6, padding `12px 8px 24px`: search (36px, `#23262c`, 1px focus ring in the hue), chips, groups of one-line rows with a stamp |
-| MIDDLE | ground, padding `8px 16px 40px`, content `min(100%, ui.middle_max)` centred: the module's blank state or the item inspector. Prose (the inspector, Activity's detail, Education's question, Email's reader) holds a `72ch` measure inside that; Home's number grid holds 640px, Finance's totals strip 720px and each Settings section 560px |
+| MIDDLE | ground, padding `8px 16px 40px`, content fills the track (the track itself is capped at `ui.middle_max`): the module's blank state or the item inspector. Prose (the inspector, Activity's detail, Education's question, Email's reader) holds a `72ch` measure inside that; Home's number grid holds 640px, Finance's totals strip 720px and each Settings section 560px |
 | RIGHT | panel, padding `16px 12px 12px`: the session pane, identical on every page |
 
 | Token | Value |
@@ -208,89 +207,23 @@ Every page uses three fixed tracks. Selection swaps what renders inside MIDDLE a
 | Stamps | same day shows the time (`ui.time_format`), otherwise `05 Sep`; group labels are `05 Sep` |
 | Markdown | `md.js`: marked with `breaks` and `gfm`, math lifted out first and rendered by KaTeX (`$…$` inline, `$$…$$` display), the `.md` rules and the KaTeX stylesheet added to the document once |
 
-Session pane: header is a 6px hue dot plus `claude · <module>`; skill chips; user turns are raised bubbles aligned right at max 85% width, model turns plain text at line-height 1.6, tool calls one mono line `▸ tool` with the status at the right edge; a 3-row composer with the context label, `new` (sends `/clear`) and a send button; Enter sends, Shift+Enter breaks a line.
+Session pane: header is a 6px hue dot plus `claude · <module>`; a tab strip, one mono tab per open session (its label, ellipsized at 140px, `…` appended while another tab's turn runs; the active tab raised), `+` for a blank `new` tab whose first send opens the session, and `×` at the right edge to close the active tab (sends `/clear`: the tagger names it, the tab disappears once `tagged` arrives and a blank tab opens); skill chips; user turns are raised bubbles aligned right at max 85% width, model turns plain text at line-height 1.6, tool calls one mono line `▸ tool` with the status at the right edge; a 3-row composer with the context label and a send button; Enter sends, Shift+Enter breaks a line. The newest open tab is shown on arrival.
 
 Item inspector: 16px hue glyph, kind and time in mono, `×` to clear, the body, then a primary action in the hue, secondary actions, and `Send to session` right-aligned, which prefills the composer with the item's reference. Email's reader keeps the glyph, time, `×` and `Send to session` and carries no actions; those sit in its LEFT bar.
 
 ### Activity and Settings
 
-Activity: LEFT is the `events` log by day with a chip per module; MIDDLE blank state is the task table with its toggles, the nightly budget line (runs used, window, the stagger gap), and the last fifty jobs; selecting an event shows its job's result, error and log. Settings: General (start page among the modules with a page, refresh, time format, rows per page, side panel max, middle max), Modules (every module, page or not: `shown` in the rail for a module with a page, `runs` for one with scheduled tasks, a dash otherwise; a failed module shows its error), Claude (binary, model, agents dir, workspace, sessions kept, background jobs; read-only), Data (database path and size, last backup, `Back up now` through the SQLite backup API into `data/backups/`, `Vacuum`).
+Activity: LEFT is the `events` log by day with a chip per module; MIDDLE blank state is the task table with its toggles, the nightly budget line (runs used, window, the stagger gap), and the last fifty jobs; selecting an event shows its job's result, error and log. Settings: General (start page among the modules with a page, refresh, time format, rows per page, side panel max, middle max), Modules (every module, page or not: `shown` in the rail for a module with a page, kept here because a hidden module's page cannot be reached to show it again; `runs`, `model` and `effort` read `on its page` for a module with a page and are editable here for one without; a failed module shows its error), Claude (binary, model, the models and efforts a module may pick, agents dir, workspace, sessions kept, background jobs; read-only), Data (database path and size, last backup and last export, `Back up now` through the SQLite backup API into `data/backups/`, `Export`: every table as JSON rows in one file under `data/exports/`, `Vacuum`).
 
 ### Departures from the artboard
 
-- One session per module, no tab strip.
 - Activity's MIDDLE blank state is the task table, required by the Daemon section.
-- Settings, Data: `Export` is not built.
 - Finance and Business are separate modules; the artboard had one `Money` entry.
 - The rail shows only built modules with a page.
+- The header carries `settings` and `feedback` controls the artboard does not have; module settings live there instead of on the Settings page.
 - Each module's own departures are the `Departures` row of its doc's `## Built` table.
 
 ## Patches
-
-### Static files carry no Cache-Control, so an edited page silently does not appear
-
-- Kind: bug
-- Where: `app/daemon.py:97` `app.mount("/", StaticFiles(...))`
-- Found: 2026-09-13, the owner looking for the Finance due date box after the finance merge
-- Status: open
-
-What happens: the static mount answers with `etag` and `last-modified` and no `Cache-Control`, so Chrome caches every module heuristically and may serve `pages/<name>.js` from cache without revalidating. The shell is a hash router, so the document never reloads on its own either. After a merge and a daemon restart the window keeps running the old module: the Finance due date box was absent in the owner's window while the same click produced it in a clean browser against the same daemon. Only `Ctrl+Shift+R` clears it, which no part of the app tells anyone.
-
-Expected: a restarted daemon serves a page whose code matches the revision it reports, without the owner knowing to force a reload.
-
-Fix: send `Cache-Control: no-cache` on the static mount (a `StaticFiles` subclass overriding `file_response`, or middleware on the mount), so the browser still caches but always revalidates against the etag. `/health` already carries `rev`; the shell could compare it with the revision it loaded under and reload once on a mismatch.
-
-### Nightly budget counts finished runs only, so concurrent runs slip past the cap
-
-- Kind: bug
-- Where: `app/claude.py` `ClaudeRunner.budget` and `run_task`; `app/runner.py` worker count
-- Found: 2026-09-10, sync-architecture
-- Status: open
-
-What happens: `budget()` counts `llm_runs` rows with status `done` or `failed`, and `run_task` writes its row only after the CLI exits. The scheduler submits every nightly task in the same tick and the runner starts `max_concurrent` of them at once, so each sees `used = 0`. On 2026-09-09 three runs started at 02:00:02 local and a fourth at 02:00:05 after the first finished; all four completed against `max_sessions = 3`. The cap holds only when runs happen to serialize.
-
-Expected: at most `max_sessions` budgeted runs start per local day, whatever the concurrency.
-
-Fix: write the `llm_runs` row with status `running` before spawning and count `running` too, updating the row to `done` or `failed` afterwards; or hand every `llm=True` schedule the same resource so they serialize and the count is exact.
-
-### Budget refusal marks the job failed instead of skipped
-
-- Kind: bug
-- Where: `app/claude.py` `run_task`; `app/modules/memory/tasks.py` `suggest`, `app/modules/email/tasks.py` `triage`, `app/modules/business/tasks.py` `scout`, `app/modules/web_search/tasks.py` `nightly`
-- Found: 2026-09-07, sync-architecture
-- Status: open
-
-What happens: outside the nightly window or past `max_sessions`, `run_task` writes a `skipped` row to `llm_runs` and raises `BudgetExceeded`; the runner records the job as `failed` with a traceback and writes a `failed` event, so Activity shows a refusal as a failure. `app/modules/education/tasks.py` `generate` is the only task that catches it and returns `Skipped`; the other four do not. `[nightly] max_sessions` is now five, one per nightly LLM task, so a refusal is no longer due every night; it still reads as a failure whenever one happens.
-
-Expected: the job reads `skipped` with the reason and no `failed` event is written.
-
-Fix: have the runner treat `BudgetExceeded` like `Skipped` (one `except` in `Runner._run`), which covers every task at once and lets the education task stop repeating the catch.
-
-### `python-multipart` is required by Chat's upload route but not in requirements.txt
-
-- Kind: bug
-- Where: `requirements.txt`; `app/modules/chat/routes.py` `upload` (`UploadFile = File(...)`)
-- Found: 2026-09-12, sync-architecture
-- Status: open
-
-What happens: FastAPI needs `python-multipart` to parse a multipart form, and the Chat upload route declares one. The package is installed in the current `.venv` (0.0.32) because it was added by hand, but `requirements.txt` pins seven packages and not this one. A venv rebuilt from the file boots a daemon whose Chat module fails at import with FastAPI's `Form data requires "python-multipart"` error, and the registry drops Chat with that error in `module_errors`.
-
-Expected: `pip install -r requirements.txt` yields a venv on which every module loads.
-
-Fix: add `python-multipart==0.0.32` to `requirements.txt`.
-
-### A rotated daemon log is tracked in git
-
-- Kind: bug
-- Where: `.gitignore` (`data/*.log`); `app/daemon.py` `RotatingFileHandler(maxBytes=1_000_000, backupCount=3)`
-- Found: 2026-09-10, sync-architecture
-- Status: open
-
-What happens: the daemon rotates `data/daemon.log` to `daemon.log.1`, `.2`, `.3`. The ignore pattern `data/*.log` does not match those names, so `git add` picked up `data/daemon.log.1` (4,866 lines) in commit `9593a2c`. Every later rotation leaves a modified tracked file in the working tree and a diff in every commit that adds it.
-
-Expected: no file under `data/` other than `.gitkeep` is tracked; the log and its rotations stay local.
-
-Fix: add `data/*.log.*` to `.gitignore` and run `git rm --cached data/daemon.log.1` once.
 
 ### Daemon does not start at logon on this machine
 
@@ -299,47 +232,8 @@ Fix: add `data/*.log.*` to `.gitignore` and run `git rm --cached data/daemon.log
 - Found: 2026-09-07, sync-architecture
 - Status: open, owner action
 
-What happens: `python -m app setup` registers the Task Scheduler entry `Otto`, but it has not been run; the daemon starts only when `python -m app` is run.
+What happens: `python -m app setup` registers the Task Scheduler entry `Otto`, but it has not been run; the daemon starts only when `python -m app` is run. The 2026-09-13 patch session could not run it: registering a scheduled task is outside what an agent session may do on this machine.
 
 Expected: the daemon is running after every logon.
 
 Fix: run `python -m app setup` once from the repo root, then confirm with `Get-ScheduledTask -TaskName Otto`.
-
-### One session per module; tabs not built
-
-- Kind: gap
-- Where: Summary requirement "Multiple conversations should be spawnable/selectable via tabs"; `app/api.py` sessions, `app/static/session.js`
-- Found: 2026-09-07, sync-architecture
-- Status: deferred by the owner
-
-What happens: one open session per module pane; `/clear` closes it, tags it and starts a fresh one. Closed sessions keep their title, tags and turns. Chat (merged 2026-09-12) keeps many conversations on its own page through the same `start_turn` seam with busy state per session id, so the platform now supports several open sessions per module; the panes still show one.
-
-Expected: several open sessions per module, selectable by tab.
-
-Fix: `sessions` already allows several open rows per module; add a tab strip to the pane header, a session id on the send and events routes, and per-session busy state.
-
-### Settings, Data: Export button not built
-
-- Kind: gap
-- Where: artboard Settings > Data (`Back up now`, `Export`, `Vacuum`); `app/static/pages/settings.js`
-- Found: 2026-09-07, sync-architecture
-- Status: open, needs a decision
-
-What happens: the Data section offers `Back up now` and `Vacuum`. `Export` is absent because nothing defines what it exports.
-
-Expected: either an export with a defined target (a copy of the database, or a JSON dump of chosen tables), or the button dropped from the design.
-
-Fix: decide the target, then one action route and one button.
-
-### Ultrawide screens leave the surplus as margin between the three tracks
-
-- Kind: defect
-- Where: `docs/app/CLAUDE.md` Frame contract, the `Tracks` and `MIDDLE` rows; `app/static/shell.js` (the grid) and each page's centred content. Reported from the Email page with a message open
-- Found: 2026-09-13, feedback #4
-- Status: open, needs an owner decision
-
-What happens: the owner reports, "The email window still is not scaling well on my ultrawide monitor; there is just a ton of margin between left/middle/right winwos". The frame behaves as the contract states: past about 1950px the sides stop at `ui.side_max` and MIDDLE takes every extra pixel, but MIDDLE's content is capped at `min(100%, ui.middle_max)` and centred, and a reader holds `72ch` inside that. On an ultrawide the surplus therefore lands as empty ground either side of the content, so three panels read as three narrow strips with a gulf between them. Nothing is behaving against the code; the sizing rule is wrong for this monitor.
-
-Expected: on a very wide window the space goes to the panels, not to blank ground between them.
-
-Fix: the owner picks what absorbs the surplus, then one grid rule and MIDDLE's centring change to match. Options: let the sides keep growing (the settings route already allows `ui.side_max` to 900px), cap the MIDDLE track rather than only its content so the three tracks sit together and the extra width falls outside the frame, or keep the `72ch` measure but left-align it in a wider MIDDLE. Confirm on the owner's ultrawide before landing, since `ui.side_max` and `ui.middle_max` are live settings and the fix must hold across their whole range.

@@ -1,5 +1,6 @@
 import asyncio
 
+from app.claude import BudgetExceeded
 from app.runner import JobFailed, Runner, Skipped
 from tests.conftest import run
 
@@ -85,6 +86,22 @@ def test_failure_is_local(store, config):
     event = store.one("SELECT * FROM events WHERE verb = 'failed'")["text"]
     assert event.startswith("bad: ValueError: kaput 401:") and "invalid_grant" in event
     assert "invalid_grant" in store.one("SELECT last_result FROM tasks WHERE name = 'bad'")["last_result"]
+
+
+def test_budget_refusal_is_skipped(store, config):
+    async def fn(ctx):
+        raise BudgetExceeded("nightly budget used (5/5)")
+
+    async def main():
+        r = make_runner(store, config, cap=1)
+        await r.start()
+        assert await r.submit("s", "m", None, "scheduled", fn).done == "nightly budget used (5/5)"
+        await r.drain(1)
+
+    run(main())
+    job = store.one("SELECT * FROM jobs")
+    assert job["status"] == "skipped" and job["result"] == "nightly budget used (5/5)" and job["error"] is None
+    assert store.scalar("SELECT COUNT(*) FROM events WHERE verb = 'failed'") == 0
 
 
 def test_skipped_and_logs_and_commit(store, config):

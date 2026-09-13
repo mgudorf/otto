@@ -87,12 +87,13 @@ def shell(request: Request) -> dict:
             "name": m.name, "title": m.manifest.title, "hue": m.manifest.hue, "icon": m.manifest.icon,
             "order": m.manifest.order, "page": m.manifest.page, "enabled": settings.get(f"modules.{m.name}.enabled", True) is not False,
             "scheduled": settings.get(f"modules.{m.name}.scheduled", True) is not False, "tasks": len(m.manifest.schedules),
+            "model": settings.get(f"modules.{m.name}.model") or "default", "effort": settings.get(f"modules.{m.name}.effort") or "default",
             "agent": {"placeholder": a.placeholder, "skills": list(a.skills)} if a else None, "error": None,
         })
     for name, err in st.registry.errors.items():
         modules.append({
             "name": name, "title": name, "hue": "#5f636c", "icon": "", "order": 98, "page": True, "enabled": False,
-            "scheduled": False, "tasks": 0, "agent": None, "error": err.strip().splitlines()[-1][:300],
+            "scheduled": False, "tasks": 0, "model": "default", "effort": "default", "agent": None, "error": err.strip().splitlines()[-1][:300],
         })
     c = st.config
     return {
@@ -100,7 +101,7 @@ def shell(request: Request) -> dict:
         "modules": modules,
         "settings": settings,
         "claude": {
-            "binary": c.claude.binary, "model": c.claude.model, "workspace": str(c.data.workspace),
+            "binary": c.claude.binary, "model": c.claude.model, "models": list(c.claude.models), "efforts": list(c.claude.efforts), "workspace": str(c.data.workspace),
             "agents_dir": str(c.root / "app" / "modules"), "sessions_kept_days": c.claude.sessions_kept_days,
             "background_jobs": [r["name"] for r in st.store.query("SELECT name FROM tasks WHERE llm = 1 ORDER BY name")],
         },
@@ -180,6 +181,10 @@ def settings_put(request: Request, body: dict = Body(...)) -> dict:
                 raise HTTPException(400, "unknown start page")
         elif key.startswith("modules.") and key.rsplit(".", 1)[-1] in ("enabled", "scheduled"):
             value = bool(value)   # .enabled = shown in the rail; .scheduled = its tasks run
+        elif key.startswith("modules.") and key.rsplit(".", 1)[-1] in ("model", "effort"):
+            choices = st.config.claude.models if key.endswith(".model") else st.config.claude.efforts
+            if value not in ("default", *choices):   # .model and .effort go on every CLI run the module makes
+                raise HTTPException(400, f"{key.rsplit('.', 1)[-1]} must be default or one of {', '.join(choices)}")
         else:
             raise HTTPException(400, f"unknown setting {key}")
         store.set_setting(key, value)
@@ -191,6 +196,15 @@ def _backups_dir(request: Request):
     return request.app.state.config.data.db.parent / "backups"
 
 
+def _exports_dir(request: Request):
+    return request.app.state.config.data.db.parent / "exports"
+
+
+def _latest(paths) -> str | None:
+    last = paths[-1] if paths else None
+    return datetime.fromtimestamp(last.stat().st_mtime).astimezone().isoformat(timespec="seconds") if last else None
+
+
 def _db_size(request: Request) -> int:
     db = request.app.state.config.data.db
     return sum(p.stat().st_size for p in (db, db.with_name(db.name + "-wal")) if p.exists())
@@ -198,15 +212,36 @@ def _db_size(request: Request) -> int:
 
 @router.get("/api/data")
 def data(request: Request) -> dict:
-    d = _backups_dir(request)
+    d, e = _backups_dir(request), _exports_dir(request)
     backups = sorted(d.glob("otto-*.db")) if d.exists() else []
-    last = backups[-1] if backups else None
+    exports = sorted(e.glob("otto-*.json")) if e.exists() else []
     return {
         "db": str(request.app.state.config.data.db),
         "size_bytes": _db_size(request),
-        "last_backup": datetime.fromtimestamp(last.stat().st_mtime).astimezone().isoformat(timespec="seconds") if last else None,
+        "last_backup": _latest(backups),
         "backups": len(backups),
+        "last_export": _latest(exports),
+        "exports": len(exports),
     }
+
+
+@router.post("/api/data/export")
+async def export(request: Request) -> dict:
+    """Every table as JSON rows in one file under data/exports/, so the record can leave SQLite."""
+    st = request.app.state
+    dest = _exports_dir(request) / f"otto-{datetime.now():%Y%m%d-%H%M%S}.json"
+
+    async def run(ctx):
+        store: Store = st.store
+        names = [r["name"] for r in store.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+        dump = {name: store.query(f'SELECT * FROM "{name}"') for name in names}
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(json.dumps(dump, ensure_ascii=False, default=str), "utf-8")
+        ctx.event("exported", dest.name, ref=str(dest))
+        return str(dest)
+
+    await st.runner.run_action("data.export", "system", "db", run)
+    return {"path": str(dest), "size_bytes": dest.stat().st_size}
 
 
 @router.post("/api/data/backup")
@@ -237,9 +272,9 @@ async def vacuum(request: Request) -> dict:
 
 
 # ---- sessions --------------------------------------------------------------------------------
-# A session is one CLI conversation. The module panes keep one open per module; Chat keeps many.
-# start_turn and tag_session are the two paths every session goes through; a module's routes call
-# them with its own broadcast key. Busy state is per session id.
+# A session is one CLI conversation. The module panes keep any number open per module, one tab each,
+# streaming on key `<module>:<id>`; Chat keeps many on its own page. start_turn and tag_session are the two
+# paths every session goes through; a module's routes call them with its own broadcast key. Busy state is per session id.
 def _module(request: Request, name: str):
     mod = request.app.state.registry.modules.get(name)
     if mod is None or mod.manifest.agent is None:
@@ -247,8 +282,27 @@ def _module(request: Request, name: str):
     return mod
 
 
-def _session(store: Store, module: str) -> dict | None:
-    return store.one("SELECT * FROM sessions WHERE module = ? AND closed_at IS NULL ORDER BY opened_at DESC LIMIT 1", (module,))
+def _open(store: Store, module: str) -> list[dict]:
+    return store.query("SELECT * FROM sessions WHERE module = ? AND closed_at IS NULL ORDER BY opened_at", (module,))
+
+
+def _session(store: Store, module: str, sid: str) -> dict:
+    row = store.one("SELECT * FROM sessions WHERE module = ? AND id = ? AND closed_at IS NULL", (module, sid))
+    if row is None:
+        raise HTTPException(404, "no open session with that id")
+    return row
+
+
+def _label(store: Store, row: dict) -> str:
+    """The tab's name: the tagger's title once it has run, until then the owner's first line."""
+    if row["title"]:
+        return row["title"]
+    first = store.scalar("SELECT text FROM session_turns WHERE session_id = ? AND role = 'user' ORDER BY id LIMIT 1", (row["id"],))
+    return (first or "new").splitlines()[0][:80]
+
+
+def _key(module: str, sid: str) -> str:
+    return f"{module}:{sid}"
 
 
 def turns(store: Store, session_id: str) -> list[dict]:
@@ -273,43 +327,51 @@ def _context_label(st, mod) -> str:
 
 @router.get("/api/session/{module}")
 def session(request: Request, module: str) -> dict:
+    """The pane's tabs: every open session of the module, oldest first."""
     st = request.app.state
     mod = _module(request, module)
-    sess = _session(st.store, module)
     a = mod.manifest.agent
     return {
-        "session": sess,
-        "turns": turns(st.store, sess["id"]) if sess else [],
-        "busy": sess is not None and sess["id"] in st.session_busy,
+        "sessions": [{"id": r["id"], "label": _label(st.store, r), "opened_at": r["opened_at"], "busy": r["id"] in st.session_busy} for r in _open(st.store, module)],
         "context_label": _context_label(st, mod),
         "agent": {"cmd": f"claude · {module}", "placeholder": a.placeholder, "skills": list(a.skills)},
     }
 
 
+@router.get("/api/session/{module}/{sid}")
+def session_one(request: Request, module: str, sid: str) -> dict:
+    st = request.app.state
+    _module(request, module)
+    sess = _session(st.store, module, sid)
+    return {"session": sess, "turns": turns(st.store, sid), "busy": sid in st.session_busy}
+
+
 @router.post("/api/session/{module}/send")
 async def session_send(request: Request, module: str, body: dict = Body(...)) -> dict:
+    """`id` names the tab; without one the turn opens a new session. `/clear` tags and closes the tab it names."""
     st = request.app.state
     store: Store = st.store
     mod = _module(request, module)
     text = (body.get("text") or "").strip()
     if not text:
         raise HTTPException(400, "empty message")
-    sess = _session(store, module)
+    sid = body.get("id")
+    sess = _session(store, module, str(sid)) if sid else None
     if sess is not None and sess["id"] in st.session_busy:
         raise HTTPException(409, "a turn is still running")
 
     if text == "/clear":
         if sess is None:
             return {"cleared": False}
-        tag_session(st, mod, sess["id"], module, close=True)
-        st.broadcast.publish(module, {"role": "system", "text": "session cleared", "ts": now_iso()})
+        tag_session(st, mod, sess["id"], _key(module, sess["id"]), close=True)
+        st.broadcast.publish(_key(module, sess["id"]), {"role": "system", "text": "session cleared", "ts": now_iso()})
         return {"cleared": True}
 
     if sess is None:
         sid = str(uuid.uuid4())
         store.execute("INSERT INTO sessions(id, module, opened_at) VALUES (?, ?, ?)", (sid, module, now_iso()))
-        sess = _session(store, module)
-    job = start_turn(st, mod, sess["id"], bool(sess["cli_started"]), text, text, module)
+        sess = _session(store, module, sid)
+    job = start_turn(st, mod, sess["id"], bool(sess["cli_started"]), text, text, _key(module, sess["id"]))
     return {"queued": job.id, "session": sess["id"]}
 
 
@@ -402,10 +464,11 @@ def tag_session(st, mod, sid: str, key: str, close: bool):
     return st.runner.submit(f"{mod.name}.{'close' if close else 'tag'}", mod.name, f"session:{sid}", "session", tag, notify=True)
 
 
-@router.get("/api/session/{module}/events")
-async def session_events(request: Request, module: str) -> StreamingResponse:
+@router.get("/api/session/{module}/{sid}/events")
+async def session_events(request: Request, module: str, sid: str) -> StreamingResponse:
     _module(request, module)
-    return event_stream(request, module)
+    _session(request.app.state.store, module, sid)
+    return event_stream(request, _key(module, sid))
 
 
 def event_stream(request: Request, key: str) -> StreamingResponse:

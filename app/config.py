@@ -26,7 +26,9 @@ class Scheduler:
 @dataclass(frozen=True)
 class Claude:
     binary: str
-    model: str
+    model: str                    # the CLI's --model unless a module picks its own; "default" leaves the CLI's choice alone
+    models: tuple[str, ...]       # what a module may pick on its page, besides "default"
+    efforts: tuple[str, ...]      # --effort levels a module may pick, besides "default"
     sessions_kept_days: int
 
 
@@ -157,7 +159,7 @@ def load(root: Path = ROOT) -> Config:
         root=root,
         server=Server(**raw["server"]),
         scheduler=Scheduler(**raw["scheduler"]),
-        claude=Claude(**raw["claude"]),
+        claude=Claude(**{**raw["claude"], "models": tuple(raw["claude"]["models"]), "efforts": tuple(raw["claude"]["efforts"])}),
         data=Data(db=root / raw["data"]["db"], workspace=root / raw["data"]["workspace"]),
         nightly=Nightly(**raw["nightly"]),
         chat=Chat(**raw["chat"]),

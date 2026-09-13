@@ -97,6 +97,8 @@ async def action(request: Request, verb: str, body: dict = Body(default={})) -> 
         text = (body.get("text") or "").strip()
         if not page or not text:
             raise HTTPException(400, "page and text are required")
+        if st.runner.draining:   # refused before the row exists; nothing would resubmit it after the restart
+            raise HTTPException(503, "daemon is restarting; send it again in a moment")
         item = body.get("item") or {}
         with store.tx() as conn:
             cur = conn.execute(

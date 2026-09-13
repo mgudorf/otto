@@ -4,6 +4,7 @@ import { html, T, Icon, mono13, Button, dayLabel } from './rows.js';
 import { get, inflight } from './api.js';
 import { Session } from './session.js';
 import { Feedback } from './feedback.js';
+import { ModuleSettings } from './module_settings.js';
 import * as home from './pages/home.js';
 import * as chat from './pages/chat.js';
 import * as email from './pages/email.js';
@@ -46,6 +47,8 @@ class App extends Component {
   async loadShell() {
     try {
       const shell = await get('/api/shell');
+      if (this.rev && shell.rev !== this.rev) location.reload();   // the daemon restarted on new code: this window runs the old modules
+      this.rev = shell.rev;
       this.setState({ shell, error: null });
       return shell;
     } catch (e) {
@@ -131,20 +134,19 @@ class App extends Component {
           <span style=${{ ...mono13, color: T.dim }}>${meta}</span>
           <span style=${{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: 12 }}>
             ${s.error && html`<span style=${{ ...mono13, color: '#cf7b7b' }}>${s.error}</span>`}
+            ${mod.page && !mod.error && html`<${ModuleSettings} mod=${mod} claude=${s.shell.claude} onSaved=${() => this.refresh()} />`}
             <${Feedback} page=${s.page} hue=${mod.hue} sel=${s.sel} item=${s.item} recent=${s.feedback} onSent=${() => this.refresh()} />
           </span>
         </div>
         <div style=${{ height: 1, margin: '0 32px', position: 'relative', overflow: 'hidden', flex: 'none' }}>
           ${s.loading > 0 && html`<div style=${{ position: 'absolute', top: 0, left: 0, height: 1, width: '30%', background: T.muted, animation: 'otto-load 1.2s ease-in-out infinite' }} />`}
         </div>
-        <div style=${{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: `${side} minmax(300px,1fr) ${side}`, gap: '0 24px', padding: '19px 24px 24px', opacity: s.op, transition: 'opacity 120ms ease' }}>
+        <div style=${{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: `minmax(${side},1fr) minmax(300px,${middleMax}px) minmax(${side},1fr)`, gap: '0 24px', padding: '19px 24px 24px', opacity: s.op, transition: 'opacity 120ms ease' }}>
           <div style=${{ minWidth: 0, minHeight: 0, overflow: 'auto', background: T.panel, borderRadius: 6, padding: '12px 8px 24px' }}>
             ${impl && s.data ? impl.Left({ app: this, data: s.data, mod, fmt }) : null}
           </div>
           <div style=${{ minWidth: 0, minHeight: 0, overflow: 'auto', padding: '8px 16px 40px' }}>
-            <div style=${{ maxWidth: `min(100%, ${middleMax}px)`, margin: '0 auto' }}>
-              ${impl && s.data ? impl.Middle({ app: this, data: s.data, mod, fmt }) : null}
-            </div>
+            ${impl && s.data ? impl.Middle({ app: this, data: s.data, mod, fmt }) : null}
           </div>
           ${impl && impl.Right
             ? impl.Right({ app: this, data: s.data, mod, fmt })
