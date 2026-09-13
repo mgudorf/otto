@@ -11,12 +11,12 @@ Otto, a personification of the word "auto" is a PERSONALIZED dashboard applicati
 
 ## Development
 
-1. Use worktrees for branches for each independent module.
-2. **Every module touches the same shared seams, so every merge conflicts there.** The seams: `app/config.py` (a dataclass, a `Config` field, a `load` line), `config.toml` (a section), `app/static/shell.js` (an import and the `PAGES` map), the module contract docstring in `app/modules/__init__.py`, and shared tests that reach into Home. Each branch adds adjacent lines at the same spot, so git cannot auto-merge them.
+1. **Module work goes through `/feature-flow <what to change>`.** One worktree per change (`git worktree add ../wt-<slug> -b feat/<slug>` from `main`), the module doc updated in the same commit as the code, the suite green, my approval before the merge. Nothing is implemented on `main`.
+2. **Before new work, list what is already owed and ask.** `/feedback-queue <module>` (feature-flow's step 0) prints my uncleared feedback and the open `## Patches` entries for the module; show me both and ask which outstanding patches this work should resolve first. Do not start until I answer.
+3. **Every module touches the same shared seams, so every merge conflicts there.** The seams: `app/config.py` (a dataclass, a `Config` field, a `load` line), `config.toml` (a section), `app/static/shell.js` (an import and the `PAGES` map), the module contract docstring in `app/modules/__init__.py`, and shared tests that reach into Home. Each branch adds adjacent lines at the same spot, so git cannot auto-merge them.
    - On a branch: add your entries in rail order (the `order` in the manifest), one line each, never reflow neighbours. Tests find a module by name, never by index.
    - Before merging: `git merge main` into the branch first; the branch resolves, `main` stays clean.
-   - Resolving: keep both sides in rail order. The contract docstring and shared tests take `main`'s side, then re-add anything only the branch had. Run the suite on `main` before committing the merge, then `/sync-architecture`.
-
+   - Resolving: keep both sides in rail order. The contract docstring and shared tests take `main`'s side, then re-add anything only the branch had. Run the suite on `main` before committing the merge.
 
 ## Layout
 
@@ -25,18 +25,17 @@ Otto, a personification of the word "auto" is a PERSONALIZED dashboard applicati
 3. `app/static/` is the browser side, no build step. `shell.js` is the frame and the `PAGES` map, `pages/<name>.js` one file per module page plus `activity.js` and `settings.js`, `rows.js` tokens and shared components, `session.js` the agent pane, `vendor/` pinned copies of Preact, htm, marked, KaTeX and the fonts.
 4. `tests/` is one file per module plus `test_app.py`, `test_platform.py`, `test_runner.py` and `test_scheduler.py` for the platform. `conftest.py` mocks the Claude and Gmail seams so the suite runs offline.
 5. `data/` is runtime state, gitignored: the SQLite file, the daemon log, `secrets/` for the Google OAuth files, `workspace/` as the working directory every Claude session is confined to.
-6. `.claude/skills/` and `.claude/agents/` are the repo's own workflows: roadmap items, architecture sync, worktree triage, merge order and vacuum, finding consolidation.
+6. `.claude/skills/` are the repo's own workflows: `feature-flow` (worktree, change, module doc, merge), `feedback-queue` (my feedback and the open patches for a module, listed and cleared), `sync-architecture` (the docs checked against `main` when a change bypassed feature-flow).
 
 ## Documentation
 
-1. `docs/ARCHITECTURE.md` is the one description of what `main` does today, periodically synced against the code base by `/sync-architecture`. This will TYPICALLY be up to date, but may be subject to changes from active worktrees.
-2. `docs/roadmap/<slug>/PLAN.md` is the plan for one unit of work, written by `/create-roadmap-item` before any code and built in its own worktree. One directory per item, forever; the plan file is temporary. **Roadmap files are only ever added or consolidated, never edited.** A plan that needs a change gets a new plan, written from `ARCHITECTURE.md`, that replaces the old file whole; the sync removes a plan once its branch has landed and never writes into one. A plan is never documentation: anything worth keeping goes into `ARCHITECTURE.md` before the plan goes. `patches/PLAN.md`, rewritten whole by the consolidate-patches agent from the findings below, is the one consolidation.
-3. `docs/bugs/`, `docs/defects/` and `docs/gaps/` hold one file per open finding, filed by the sync and sorted by what closes it: code, an owner decision, or a roadmap item or owner action.
-4. `docs/design/` is the imported Claude Design artboard and its runtime; open the html in a browser. It is the source for hues, icons and each page's LEFT and MIDDLE shape.
+1. `docs/ARCHITECTURE.md` describes the platform on `main`: daemon, config, Claude, module contract, UI frame, the shell pages, an index of the module docs, and the platform's own `## Patches`.
+2. `docs/<module>/CLAUDE.md` is the one description of a module on `main`: my requirements, `## Built` (tables, routes, hooks, tools, schedules, page, departures from the artboard) and `## Patches`. It changes in the same commit as the module's code and states current functionality only, nothing about history or plans. `/sync-architecture` catches what slipped.
+3. `docs/design/` is the imported Claude Design artboard and its runtime; open the html in a browser. It is the source for hues, icons and each page's LEFT and MIDDLE shape.
 
-## Findings
+## Patches
 
-1. **A bug, defect or gap seen during unrelated work is filed as its own markdown before the work continues.** It goes in `docs/bugs/`, `docs/defects/` or `docs/gaps/`, chosen by what closes it as above. Naming it only in a reply loses it; a reply is not a record. File it in whatever tree you are working in, so it merges with the branch.
-2. **Expand an existing finding rather than duplicating it.** Read all three folders first. When an open file already covers the same cause, add what you saw to that file — another `Where:` path, a sentence in `What happens:` — instead of writing a second one. A related but separate cause gets its own file.
-3. **Shape is the sync's shape**, so the two are indistinguishable: `# <Title>`, then `- Where:`, `- Found: <date>, <what saw it>`, `- Status: open`, then one paragraph each for `What happens:`, `Expected:` and `Fix:`.
-4. **Filing is not fixing.** Do not detour to repair what you filed; the fix is a patch plan or the owner's call. Something inside the scope of the current change is fixed in that change and needs no file.
+1. **A bug, defect, gap or request seen during any work is recorded before the work continues**, as an entry under `## Patches` in the doc of the module whose code closes it (`docs/ARCHITECTURE.md` for the platform). Naming it only in a reply loses it; a reply is not a record. Record it in whatever tree you are working in, so it merges with the branch.
+2. **Expand an existing entry rather than duplicating it.** `/feedback-queue <module>` lists the open entries, including those in other docs that name the module's code. When one covers the same cause, add what you saw to it: another path in `Where:`, a sentence in `What happens:`. A related but separate cause gets its own entry.
+3. **Shape**: `### <Title>`, then `- Kind: bug | defect | gap | roadmap`, `- Where:`, `- Found: <date>, <what saw it>`, `- Status: open`, then one paragraph each for `What happens:`, `Expected:` and `Fix:`. bug: the code does something it was not meant to do. defect: built as designed, but wrong for me or against the artboard or a tenet. gap: a requirement or artboard element not met. roadmap: something new I asked for. When two fit, the earlier one wins.
+4. **Filing is not fixing.** Do not detour to repair what you filed; it waits for feature-flow's step 0. Something inside the scope of the current change is fixed in that change and needs no entry. An entry the change closes is removed in the same commit, and feedback the change does not resolve becomes an entry before its queue is cleared.

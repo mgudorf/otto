@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS feedback (
   draft       TEXT,                          -- markdown body ready for that file
   filed_at    TEXT,
   job_id      INTEGER,
-  error       TEXT
+  error       TEXT,
+  cleared_at  TEXT                       -- stamped by `python -m app.modules.feedback clear` once a work session has read the row
 );
 CREATE INDEX IF NOT EXISTS feedback_status ON feedback(status, created_at);

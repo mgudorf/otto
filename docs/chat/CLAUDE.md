@@ -1,0 +1,19 @@
+# Chat
+
+## Built
+
+The owner's general conversations with Claude inside Otto: any topic, web search on demand, files in and out, every conversation kept until the owner deletes it. The nightly search's topics are edited here through the agent. Not in the artboard.
+
+| Piece | Current state |
+|---|---|
+| Data | no table of its own: a conversation is a `sessions` row with module `chat`, never closed, its turns in `session_turns`; its files live in `data/workspace/chat/<id>/`, created on the first turn, upload or `new` |
+| Routes | `left` (query as one `LIKE` per word over the title and every turn's text, all required; page; rows by day of last activity, newest first, text the tagger's title or the first user line), `item/{id}` (title, tags, opened_at, busy, turns, files), `new` (an empty conversation, so files can be attached before the first message), `send` `{id?, text, files?}` → `{id, queued}` (no id creates the conversation; 400 on empty text or an attachment name not in the folder; 409 while a turn runs), `delete` `{id}` (row, turns by cascade and folder; 409 while busy), `upload/{id}` (multipart `file`, a plain name only, a duplicate name gets ` (2)`, 413 over `upload_max_mb`), `files/{id}`, `file/{id}/{name}`, `events/{id}` (server-sent events on key `chat:<id>`) |
+| Turns | `send` stores the owner's words and hands the CLI the text plus a trailer naming the folder and the attached paths; the turn is a `session` job on resource `session:<id>`, so conversations run concurrently and one conversation's turns, tag job, upload and delete serialize. After the first completed turn of an untitled conversation `tag_session` runs without closing; the `tagged` event carries the title and tags and Graph counts the conversation from then on. Every resumed turn carries a replay preamble of the last `replay_chars` characters of the stored transcript, used only when the CLI has lost the conversation. Events `attached`, `deleted`, `tagged` |
+| Hooks | `numbers` (conversations), `context` (count, the five most recent titles, the folder rule). No `today`, `queue` or `item`: a conversation opens on its own page |
+| Agent | `builtins` `Write` and `Edit` on top of the read set; no Bash. MCP read `search_findings`, `search_topics`; write `search_topic_add(kind, text)`, `search_topic_remove(id)`, which edit `search_topics` and write a `web_search` event, an error coming back as `{error}`. Skills `web`, `files`, `topics`; placeholder `Ask anything…`. Adding a built-in later is a word in `Agent.builtins`; any Otto tool is its name in the manifest |
+| Page | LEFT: search, rows by day, `showing`, `more`, `new` (clears the selection). MIDDLE with nothing selected: the composer alone, sending starts a conversation. MIDDLE selected: header (icon, title, opened stamp, tag chips, `delete` with confirm, `×`), the transcript (user turns as raised bubbles right-aligned at 85%, model turns through `Markdown`, tool calls as `▸ tool` with the status at the right, system lines dim mono), text deltas appended as they arrive and `thinking…` before the first, the composer pinned below with `attach` (file picker and drop), Enter sends, Shift+Enter breaks a line; a draft and its pending attachments survive a selection change. RIGHT: `files · n`, one row per file (`name · bytes · stamp`), a click opens it in a tab; `pick or start a conversation` when nothing is selected |
+| Departures | title, hue `#d9915b` (Search's, which followed the function), speech-bubble icon and rail order 1 (ties with Email; the registry loads packages alphabetically and sorts stably, so Chat sits first after Home) are Otto's; RIGHT is the conversation's folder instead of the session pane and MIDDLE is the transcript in the pane's own shapes; the attach control and drop target are drawn nowhere. From the Summary: a chat is tagged after its first turn, not at a close it never has |
+
+## Patches
+
+None open.

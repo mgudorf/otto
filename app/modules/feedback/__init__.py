@@ -1,6 +1,11 @@
 """Feedback: the owner records a change from any page; a standalone agent classifies and files it as a row."""
 
+from __future__ import annotations
+
+import sqlite3
+
 from app.modules import Agent, Manifest
+from app.modules.feedback.queue import add_cleared_at
 
 MANIFEST = Manifest(
     name="feedback",
@@ -14,3 +19,13 @@ MANIFEST = Manifest(
         read_tools=("docs_list", "docs_read", "feedback_list"),
     ),
 )
+
+
+def setup(config) -> None:
+    """Called once by daemon.build after the schemas: `cleared_at` on a feedback table that predates it."""
+    conn = sqlite3.connect(config.data.db, timeout=5)
+    try:
+        add_cleared_at(conn)
+        conn.commit()
+    finally:
+        conn.close()

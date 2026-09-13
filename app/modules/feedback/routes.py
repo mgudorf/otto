@@ -7,6 +7,7 @@ import json
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from app.config import ROOT
+from app.modules.feedback.queue import open_counts
 from app.store import Store, now_iso
 
 router = APIRouter(prefix="/api/feedback")
@@ -134,12 +135,6 @@ def list_route(request: Request, status: str = "", limit: int = 100) -> list[dic
 
 # ---- shell hooks ---------------------------------------------------------------------------
 def context(store: Store, registry) -> str:
-    docs = ROOT / "docs"
     built = ", ".join(m.name for m in registry.ordered()) or "none"
-    slugs = sorted(p.parent.name for p in docs.glob("roadmap/*/PLAN.md"))
-    counts = ", ".join(f"{len(list((docs / k).glob('*.md')))} {k}" for k in ("bugs", "defects", "gaps"))
-    return "\n".join([
-        f"Built modules: {built}",
-        f"Roadmap plans on disk: {', '.join(slugs) or 'none'}",
-        f"Findings on disk: {counts}",
-    ])
+    patches = ", ".join(f"{doc} {n}" for doc, n in open_counts(ROOT).items()) or "none"
+    return "\n".join([f"Built modules: {built}", f"Open patches by doc: {patches}"])

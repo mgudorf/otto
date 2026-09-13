@@ -7,7 +7,7 @@ The middle is the main interaction/use of the module, which displays the main ou
 
 ### What runs today
 
-Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps every module's state current on a schedule; the window renders that state and holds none of it. Each module pane holds one open session; `/clear` closes it, tags it, and starts a fresh one. Chat keeps as many conversations as the owner starts, each tagged after its first turn and never closed. Known findings live one file each in `docs/bugs/` (code does the wrong thing), `docs/defects/` (built as designed, but wrong for the owner) and `docs/gaps/` (requirement or artboard element not met yet).
+Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps every module's state current on a schedule; the window renders that state and holds none of it. Each module pane holds one open session; `/clear` closes it, tags it, and starts a fresh one. Chat keeps as many conversations as the owner starts, each tagged after its first turn and never closed. Each module is described in `docs/<module>/CLAUDE.md`; open findings live in that doc's `## Patches` section, the platform's in this file's.
 
 | Piece | What it is |
 |---|---|
@@ -33,7 +33,7 @@ app/claude.py     CLI spawn, event stream, read-only allowlist, nightly budget
 app/modules/      registry, agent_base.md, one package per module (contract under Daemon)
 app/static/       index.html, shell.js, session.js, rows.js, api.js, feedback.js, md.js, pages/<name>.js, vendor/
 data/             otto.db, daemon.log and its rotations, secrets/, workspace/ (science/, business/, chat/<id>/), backups/; .gitignore covers data/*.log, the db, secrets, workspace and backups
-.claude/          skills/ (create-roadmap-item, sync-architecture, triage-worktrees, order-merges, vacuum-worktrees) and agents/ (consolidate-patches): the repo's own workflows
+.claude/          skills/ (feature-flow, feedback-queue, sync-architecture): the repo's own workflows
 ```
 
 ## Daemon
@@ -155,249 +155,25 @@ Wire shape for LEFT: `{groups: [{label, count, rows: [{id, module, text, stamp, 
 
 Not used: Node, APScheduler, pywebview, `claude-agent-sdk`, nbclient, an Anthropic API key, paid search APIs, a graph database, Microsoft Edge.
 
-## High level module Functionality
+## Modules
 
-### Home page
+One doc per module, `docs/<module>/CLAUDE.md`: the owner's requirements, `## Built` and `## Patches`. Rail order in brackets; a module without a page has no rail entry.
 
-1. Shows very high summaries
-2. Shows any web search items found via nightly search which are immediately relevant; adds to a queue and creates a record once agreed/disagreed with; i.e. nightly search could return 3 results; at the end of the week there are 21 items to review. 
-
-Built: `GET /api/home/numbers` (one number per module with a `numbers` hook) and `GET /api/home/left`, which reads every module that is not switched off, page or not, in rail order, and puts a `Review` group per module with a `queue` hook first, every waiting row and no cut (an empty queue yields no group), then each module's `today` rows, five per module with a `+N` link into the module (an empty day still yields the group, shown as `nothing today`). Groups and numbers carry `page`; a header, `+N` or number navigates only when it is true. Search's open findings are the `Review` group today and are decided from Home's inspector. Groups are keyed `label:module`, so one module can yield both. MIDDLE blank state is the number grid; selecting a row opens the owning module's item inspector and posts its verbs as `{id}` to that module's action route (an `href` opens a tab, `confirm` prompts, `forget` clears the selection). The Home agent has no tools; its Current state block carries the same numbers, today rows and `Review: N waiting` lines.
-
-#### Nightly Process
-
-Web search to gather data on anything that could potentially help me in my life; obvious ones; items displayed on homepage.
-
-1. Previously scheduled follow ups
-2. Investment news/sector news/legislation etc. Should track potential follow-ups and schedule them for the future. 
-3. New techniques/algorithms/research relevant to my research, career, etc. 
-4. Topics of learning/question sources 
-
-MUST BE CAPPED TO SOME REASONABLE DEGREE; I am using usage associated with CLAUDE MAX account, but do not want to incur any other api charges, nor do I want to use all of my weekly tokens in 2 days. 
-
-Built: the Search module runs the nightly web search over the owner's topics in the three kinds `money`, `work` and `learn`; `business.scout` searches for leads against the owner's plans. The `[nightly]` budget caps every scheduled LLM run.
-
-### Chat
-
-The owner's general conversations with Claude inside Otto: any topic, web search on demand, files in and out, every conversation kept until the owner deletes it. The nightly search's topics are edited here through the agent. Not in the artboard.
-
-| Piece | Current state |
+| Module | Doc |
 |---|---|
-| Data | no table of its own: a conversation is a `sessions` row with module `chat`, never closed, its turns in `session_turns`; its files live in `data/workspace/chat/<id>/`, created on the first turn, upload or `new` |
-| Routes | `left` (query as one `LIKE` per word over the title and every turn's text, all required; page; rows by day of last activity, newest first, text the tagger's title or the first user line), `item/{id}` (title, tags, opened_at, busy, turns, files), `new` (an empty conversation, so files can be attached before the first message), `send` `{id?, text, files?}` → `{id, queued}` (no id creates the conversation; 400 on empty text or an attachment name not in the folder; 409 while a turn runs), `delete` `{id}` (row, turns by cascade and folder; 409 while busy), `upload/{id}` (multipart `file`, a plain name only, a duplicate name gets ` (2)`, 413 over `upload_max_mb`), `files/{id}`, `file/{id}/{name}`, `events/{id}` (server-sent events on key `chat:<id>`) |
-| Turns | `send` stores the owner's words and hands the CLI the text plus a trailer naming the folder and the attached paths; the turn is a `session` job on resource `session:<id>`, so conversations run concurrently and one conversation's turns, tag job, upload and delete serialize. After the first completed turn of an untitled conversation `tag_session` runs without closing; the `tagged` event carries the title and tags and Graph counts the conversation from then on. Every resumed turn carries a replay preamble of the last `replay_chars` characters of the stored transcript, used only when the CLI has lost the conversation. Events `attached`, `deleted`, `tagged` |
-| Hooks | `numbers` (conversations), `context` (count, the five most recent titles, the folder rule). No `today`, `queue` or `item`: a conversation opens on its own page |
-| Agent | `builtins` `Write` and `Edit` on top of the read set; no Bash. MCP read `search_findings`, `search_topics`; write `search_topic_add(kind, text)`, `search_topic_remove(id)`, which edit `search_topics` and write a `web_search` event, an error coming back as `{error}`. Skills `web`, `files`, `topics`; placeholder `Ask anything…`. Adding a built-in later is a word in `Agent.builtins`; any Otto tool is its name in the manifest |
-| Page | LEFT: search, rows by day, `showing`, `more`, `new` (clears the selection). MIDDLE with nothing selected: the composer alone, sending starts a conversation. MIDDLE selected: header (icon, title, opened stamp, tag chips, `delete` with confirm, `×`), the transcript (user turns as raised bubbles right-aligned at 85%, model turns through `Markdown`, tool calls as `▸ tool` with the status at the right, system lines dim mono), text deltas appended as they arrive and `thinking…` before the first, the composer pinned below with `attach` (file picker and drop), Enter sends, Shift+Enter breaks a line; a draft and its pending attachments survive a selection change. RIGHT: `files · n`, one row per file (`name · bytes · stamp`), a click opens it in a tab; `pick or start a conversation` when nothing is selected |
-| Departures | title, hue `#d9915b` (Search's, which followed the function), speech-bubble icon and rail order 1 (ties with Email; the registry loads packages alphabetically and sorts stably, so Chat sits first after Home) are Otto's; RIGHT is the conversation's folder instead of the session pane; the attach control and drop target are drawn nowhere. From the Summary: a chat is tagged after its first turn, not at a close it never has |
-
-### E-mail
-
-1. Uses gmail OAuth
-2. Search bar/full ability to interact with inbox (Google chrome behaves very strangely when trying to do bulk deletes; I would like to resolve by explicitly using API here)
-3. Agent only performs triage&sorting, prioritization and flagging of relevant items
-4. Agent does NOT have the ability to write nor delete on its own. This needs to be a HARD CONSTRAINT determined by tooling or gmail api implementation. 
-
-Built:
-
-| Piece | Current state |
-|---|---|
-| Tables | `email_messages(n rowid, id Gmail id, thread_id, from_name, from_addr, to_addr, subject, snippet, internal_date, labels JSON, synced_at)`, `email_bodies(message_id, text, html, attachments JSON filenames)` filled on first open, `email_triage(message_id, priority high\|normal\|low, reason, ts, source scheduled\|session)`, `email_fts` (FTS5 over sender, subject and snippet, trigger-maintained) |
-| Routes | `left` (query: each word a quoted FTS phrase, all required; chips All/Unread/Flagged/Priority over the inbox: `UNREAD`, `STARRED`, triage `high`; page), `blank` (inbox, unread, flagged, priority counts and the last sync), `item/{id}`, `action/{archive\|trash\|read\|unread\|star\|unstar}` with `{ids}` or `{filter: {query, chip}}` (400 when neither selects anything); one `_where` serves LEFT, the bulk actions and `email_search` |
-| Item | `body_of` fetches the message once through the read client into `email_bodies` (shared with `email_get`); on failure the snippet stands in, a `failed` event is written and the next open retries. Fields: headers, `text` (`subject` + body, for Home and Feedback), `body`, `html`, `attachments`, `unread`, `starred`, `in_inbox`, `priority`, `reason`, `actions` (`archive` primary and `trash` with confirm while in the inbox, read/unread, star/unstar, `open` as a Gmail href) |
-| Body | `body.py`: `extract` gives text (plain parts, else the html as text, else the snippet), sanitized html (`None` when nothing is visible) and attachment names; no attachment is ever fetched. `sanitize` keeps a fixed tag set bare (integer `colspan`, `rowspan`, `start` only), drops scripts, styles, forms, media and anything hidden inline, writes a link as its text plus the raw URL for http, https, mailto and tel, and an image as its alt text |
-| Actions | labels change through `batchModify` in chunks of 1000, then the local rows in the same job; `trash` is Gmail's Trash (the `gmail.modify` scope cannot delete permanently); events `archived`, `trashed`, `marked read`, `marked unread`, `starred`, `unstarred` name the subject for one id, else `N messages · chip` |
-| Hooks | `numbers` (unread), `today` (inbox mail of the local day), `item`, `context` (counts, last sync, ten newest, high-priority with reasons) |
-| Tools | read: `email_search`, `email_get` (text and attachment names), `email_triage`; write: `email_flag`, which upserts Otto's triage row with source `session`. No tool reaches Gmail. `test_email_client_split` forbids every writing name in `tasks.py` and `tools.py` |
-| Schedules | `email.sync` every 5m on resource `gmail`: first a `backfill_days` backfill (`newer_than`, ten metadata fetches in flight) committed in pages of 100 under the cursor `email.backfill` (`<historyId>\|<started>`, resumed by the next run), then Gmail history from `email.history`, re-fetching added and relabelled ids and deleting removed ones; a 404 on that id (expired) backfills again. `email.triage` every 24h inside the nightly window prioritizes `triage_batch` untriaged inbox messages with a JSON-array reply, `INSERT OR IGNORE` so a session flag is never overwritten, cursor `email.triage` |
-| Gmail | `gmail.py`: the token, refreshed 60 s before expiry and written back; `GmailRead` (`profile`, `list_ids`, `metadata`, `body`, `history`) for tasks and body fetches; `GmailWrite` adds `batchModify` and is reachable only from action routes; `TRANSPORT` is the test seam; the `consent` command. A quota refusal (429, or 403 naming the quota) pauses every call in flight together for 61 s and retries up to five times |
-| Page | LEFT: search, chips, then a sticky action bar, then rows by day as `sender: subject` with the unread dot. The bar shows the selected message's actions (`1 selected`), or `Mark read`, `Archive`, `Trash` over every message matching the filter (archive and trash confirm with the count); archiving or trashing the selection clears it. MIDDLE blank: one status line of the counts and last sync. MIDDLE selected: the reader in a `72ch` measure: kind and time, `Send to session`, `×`, subject, `from → to`, priority and reason, attachment names, then the sanitized html under the `.mail` rules or the plain text. No mailbox action lives in MIDDLE |
-| Departures | `Priority` chip added; no `Reply` (no compose) and no `Snooze` (no API); the inspector's action row became the LEFT bar so one control serves one message and the whole filter; the blank state is unspecified in the artboard |
-
-### Education
-
-1. Aimed towards teaching concepts and high level understanding; minimal algebra/derivations as it is hard to type by hand.
-2. Has a corpus of topics/questions manageable via database. 
-3. Progress tracker
-4. Aims for "flow state"; balance of difficulty and understanding determined by score range. 
-5. Agent grades answers, makes notes of past performance, uses as context when creating future questions, takes into account feedback.
-6. Must provide clearly worded questions, must introduce any equations as part of premise/prompt
-7. A question is one shared setup with as many parts as that setup genuinely opens on one coherent theme, never a count; every part is intimately related to the original question
-8. "Grading" should allow for back and forth communication; i.e. answer given -> LLM response
-   
-#### Education Constraints
-
-1. Breadth over depth; do not repeat the same questions over and over again, even if I get them wrong. 
-2. Topics covered should include
-   1. Probability and statistics
-   2. Agentic AI
-   3. Deep learning
-   4. Machine Learning
-   5. Natural Language Model/Processing
-   6. Reinforcement Learning
-   7. Modern time series forecasting and foundational models
-   8. Causal Inference
-   9. Mathematics
-   10. Optimization and decision science
-   11. Physics
-   12. Supply chain optimization
-   13. Robotics
-   14. Quantitative finance
-3. On demand: pursued when there is time, with an anticipation of 3 questions per day. Nothing is scheduled to a date.
-4. Progress and score are tracked by domain, one per topic above.
-5. New tech (pick a new technology, see if I can understand how it works): a separate roadmap item, `docs/roadmap/new-tech/`.
-
-Built:
-
-| Piece | Current state |
-|---|---|
-| Tables | `topics(name, description, difficulty 1-5, retired_at)`, `questions(topic_id, title, topic_tag, premise (the setup: markdown, math in LaTeX), difficulty, source nightly\|session, started_at, graded_at, skipped_at, score)`, `question_parts(question_id, n, text, rubric, answer, answered_at, verdict correct\|partial\|incorrect, score 0-100, note (the explanation), graded_at)`, `education_feedback` (the owner's words, unchanged). The package's `setup` adds `topic_tag`, `rubric`, `answer`, `answered_at` and `verdict` to a database whose tables predate them |
-| Files | `questions.py` (the shared reads, the generator prompt from `prompts/generate.md`, the reply parser, `validate_question`, `unbound_acronyms`, inserts), `grading.py` (the grade prompt from `prompts/grade.md`, the parser, `apply_grade`, the tutor's `grade`) |
-| Format | one setup shared by lettered parts `(a)`, `(b)`, past `(z)` as `(aa)`; each part one ask with a hidden rubric; a rubric leaves the server only to the tutor and only once its part is graded |
-| Routes | `left` (the due queue, then history by day; search over title and setup; an open question's bar is the share of parts graded, a closed one's its score; page), `blank` (progress per topic, add-topic box), `item/{id}` (`text` carries title, setup and part prompts for Home and Feedback), `action/answer` (stores the answer, starts its question, un-starting any other, then grades it through `oneshot` with `prompts/grade.md`, awaited; 400 empty, 409 already graded or skipped, 502 on a bad reply keeps the answer), `action/generate` (one question for the topic never asked or asked longest ago, through `oneshot` with `prompts/generate.md`, source `session`, not started; 409 with no active topic, 502 on a rejected reply, a `warning` for a header acronym the body never binds), `action/{start\|skip\|add_topic\|retire_topic}` (`add_topic` revives a retired topic of the same name). The two LLM actions run on resource `education.llm`, the rest on `education` |
-| Hooks | `numbers` (due), `today` (the due queue), `item`, `context` (per topic: difficulty, graded/asked, average, recent scores; the started question with each part's prompt, answer, verdict, score, explanation and, once graded, rubric; the last five graded; recent feedback verbatim) |
-| Tools | read: `education_topics`, `education_questions`, `education_question` (rubrics on graded parts only), `education_feedback`; write: `education_add_topic`, `education_add_question(topic_id, title, topic_tag, setup, parts)` (validated like the generator's output, started at once), `education_grade(question_id, part, score 0-100, note)` (the verdict follows the score), `education_record_feedback` |
-| Schedule | `education.generate` every 24h inside the nightly window: `per_night` new questions whatever the queue already holds, one for each topic that has waited longest, one budgeted run with `prompts/generate.md` and no tools; an element is rejected for a missing title, tag or setup, a part without a prompt and rubric, a topic not asked for, or a title already used on the topic; a header acronym the body never binds is logged and kept |
-| Grading | the grader sees topic, description, difficulty, setup, prompt, rubric, answer and the topic's feedback and answers `{verdict, score 0-2 in halves, explanation}`; the score is stored as 0-100 with the verdict; the last part scored sets the question's mean and moves the topic's difficulty by the flow band once; a re-grade recomputes the mean and never moves it again. The nightly prompt carries every topic's learner summary, each listed topic's titles already asked, last verdicts and feedback, then the general feedback |
-| Flow | a new topic starts at `start_difficulty`; a completed question averaging below `flow_low` drops its topic one step, above `flow_high` raises it, floor 1 and ceiling 5 |
-| Page | LEFT: search, the `due` group, then history by day with the score as a progress bar; MIDDLE blank: `Generate` above a row per topic (difficulty, graded/asked, average, recent scores, last asked, retire) and the add-topic box; MIDDLE selected: title, topic and tag chips, the setup as markdown with LaTeX, each part with its prompt and either an answer box with `Submit` (Ctrl+Enter, `grading…` in flight) or the graded block (the answer, the score in the verdict colour, the explanation), the owner's feedback lines, `Start` or `Skip`, `Send to session` |
-| Departures | `Reschedule` dropped (nothing is scheduled to a date); LEFT leads with `due` instead of grouping everything by date; verdict colours correct `#7fb894`, partial `#d1a36a`, incorrect `#cf7b7b`; `Generate`, answer boxes and markdown in MIDDLE are not drawn in the artboard; the blank state is unspecified there |
-
-### Memory
-
-1. General note taking/to-do list/journaling module
-2. Typically a dumping ground for random ideas/notes I have
-3. Agent aimed at consolidating/collecting thoughts, must be very literal and not reword items/add to them. Can suggest action items based on current state/discoveries, never makes suggestion more than onces. 
-
-Built:
-
-| Piece | Current state |
-|---|---|
-| Tables | `memories(kind note\|link\|quote\|fact\|task, text, created_at, updated_at, done_at)`, `memory_tags`, `memory_suggestions(text unique, memory_ids, status open\|accepted\|dismissed)`, `memories_fts` (FTS5, trigger-maintained) |
-| Routes | `left` (query: each word quoted, all required in `memories_fts`; chip All/Notes/Links/Quotes/Facts/Tasks, page), `blank` (kinds, counts, open suggestions), `item/{id}` (a link's `Open` is the first token of the text), `action/{capture\|forget\|tag\|untag\|done\|suggestion}`, each a `prepare(store, body)` that validates and answers 400 or 404 before the job, then a `write(ctx)` inside it |
-| Hooks | `numbers` (total), `today` (captures of the local day), `item`, `context` (counts, last ten, open suggestions) |
-| Tools | read: `memory_search`, `memory_get`, `memory_tags`, `memory_suggestions`; write: `memory_add`, `memory_tag`, `memory_suggest` (records a suggestion so it is never repeated) |
-| Schedule | `memory.suggest`, every 24h inside the nightly window, resource `memory`: proposes up to `suggest_max` action items from the undone memories of the last `suggest_lookback_days` days as a JSON array of `{text, memory_ids}`, every prior suggestion listed in the prompt, tools `memory_search` and `memory_get`, inserted with `INSERT OR IGNORE`, cursor `memory.suggest` |
-| Page | LEFT: search, kind chips, rows by day with the kind as leading slot; MIDDLE blank: capture box (kind chips, textarea, tags, `Save`, Ctrl+Enter) and open suggestions with `Accept` / `Dismiss`; MIDDLE selected: inspector with tags (add on Enter, click to remove), `Open` for links, `Done` for tasks, `Forget` |
-
-### Science
-
-1. Interface for scientific experiments via .py or .ipynb; 
-2. Uses user-wide python C:\Users\gudo\AppData\Local\Python\pythoncore-3.14-64\python.exe
-3. Agent is able to help read/debug notebooks, look at outputs/clean up files, etc; essentially a personalized jupyter + agent interface because I don't like how VSCode handles kernels.  
-
-Built:
-
-| Piece | Current state |
-|---|---|
-| Files | no tables; `science.root` is the index, walked at request time for `.ipynb` and `.py` (checkpoint and dot directories skipped), newest modification first. A file id is its posix path under the root; anything escaping the root is a 404 |
-| Kernels | one per notebook, started on the first run on `science.python` through an explicit KernelSpec (the daemon's venv cannot see the user-wide kernelspec) with the notebook's directory as working directory, held in `state.py` by the `Kernels` registry of `kernels.py` (start, execute, interrupt, restart, shutdown), shut down at daemon exit; a kernel must answer `kernel_info` within 60 s; a run polls liveness every 5 s and fails as `kernel died` or `kernel restarted or shut down`; `Restart` is a shutdown and a fresh start. `science.reap` every 5m on resource `science` shuts down kernels idle past `idle_minutes` and never touches a file |
-| Writes | the notebook on disk is the document: `notebook.py` reads it, shapes cells and outputs for the wire, and writes it whole after every edit and every finished run (`.tmp` then replace); no save button, no dirty state |
-| Routes | `left` (files by modification day, a hue dot when the kernel is live, name in mono), `blank` (kernel and file counts), `item/{id:path}` (cells with ids, types `code\|markdown\|raw` and shaped outputs, the running cell's in-flight outputs replacing the saved ones; `.py` gives the source), `action/run` `{id, index}` (submitted on `kernel:<id>`, returns the job id; events `{path, cell, index, event started\|output\|done\|error, ...}` stream over `GET /api/science/events`, then the outputs and count are written to the cell by id, so a cell moved during the run still gets them), `action/{interrupt\|restart\|shutdown}` (immediate, never queued, 409 without a kernel), `action/{set_cell\|insert_cell\|delete_cell\|set_cells}` (synchronous read-modify-write of the file, no job; `set_cells` `{id, cells: [{id?, type, source}]}` replaces the list whole, a spec naming an existing id of the same type keeps that cell and its outputs, one `deleted` event per cell that vanished), `action/new` (an empty notebook in the root, name without `/`, `\` or a leading `.`, 409 if it exists, resource `science`). A pre-4.5 file gets positional cell ids on read and is bumped to nbformat 4.5 on its next write |
-| Hooks | `numbers` (live kernels), `today` (files modified in the local day), `item`, `context` (root, file count, each kernel's state, idle minutes and runs, the five newest files) |
-| Tools | read: `science_files`, `science_notebook` (outputs capped at `tool_output_chars`, images described), `science_cell` (uncapped), `science_kernels`; write: `science_run`, `science_set_cell`. Delete, new, interrupt, restart and shutdown are page actions only |
-| Outputs | `stream` and `text/plain` in mono, `image/png` inline, `text/html` as the kernel's own markup, errors as the traceback in `#cf7b7b` |
-| Page | LEFT: files by day and a `new` control; MIDDLE: nothing until a file is picked, then `name · python3 · state · ×`, `Run all`, `Interrupt` / `Restart` / `Shut down` while a kernel is live, `+ cell`, `Send to session`, then the cells as JupyterLab's two modes. Command mode: the notebook holds focus, a mousedown on a cell selects it, the selection is a span with a 2px hue bar on the active cell, and keys act on the span: `Enter` edits, `Shift+Enter` / `Ctrl+Enter` / `Alt+Enter` run (and select next, stay, or insert below), `↑ ↓ j k` move with `Shift` extending, `A` `B` insert, `X` `C` `V` cut copy paste, `D,D` delete, `Z` / `Shift+Z` undo redo, `Y` `M` `R` set the type, `1`-`6` a markdown heading, `Shift+M` merge, `Ctrl+Shift+↑/↓` move, `Ctrl+A` select all, `I,I` interrupt, `0,0` restart (chords within 1 s). Edit mode: a click in the source focuses its textarea; `Esc` or `Ctrl+M` returns, the run keys are the same, `Ctrl+Shift+-` splits at the caret, `Ctrl+/` toggles a comment, `Tab` indents four spaces, `↑` on the first line or `↓` on the last crosses into the neighbour; blur saves a changed draft through `set_cell`. Every structural change is one `set_cells` and one undo entry; the active cell alone shows `+ code` / `+ markdown` and a key hint; markdown cells are textareas, not rendered; a `.py` shows its source under the label `module` |
-| Departures | the page is a full editor with JupyterLab's command and edit modes where the artboard's notebook is static with name, kernel and `×`; a `.py` shows source where the artboard shows bars; tracebacks use a colour the artboard does not give; scripts are listed, not run |
-
-### Finance
-
-1. General place for me to organize important information regarding anything money related; budget/recurring subscriptions/payments, stock/investment info (not direct link to account, just a proxy with manual inputs)
-2. Agent should be able to be asked general questions regarding finances; i.e. natural language queries. 
-
-Built:
-
-| Piece | Current state |
-|---|---|
-| Tables | `finance_entries(kind account\|recurring\|holding\|budget, name, amount in cents, cadence monthly\|yearly\|weekly, note, ended_at)`, `finance_amounts` (every value the entry has held) |
-| Routes | `left` (query, chips All/Accounts/Recurring/Holdings/Budgets; rows ordered active first then by name, the amount as `stampText`), `blank` (totals, kinds, cadences, counts), `item/{id}` with the amount history (`update` primary, `end` while active, `forget` with confirm), `action/{capture\|update\|end\|forget}`, each validated before the job is queued: `cadence` is required for recurring and budget and dropped otherwise, amounts parse with commas and round half-up to cents, and `update` is the only path that appends to `finance_amounts` |
-| Hooks | `numbers` (active records), `today` (entries touched in the local day), `item`, `context` (the four totals, every active entry, the ended names) |
-| Tools | read only: `finance_list`, `finance_get`, `finance_totals`. The manifest declares no write tools |
-| Totals | recurring and budget amounts normalize to a month as yearly / 12 and weekly x 52 / 12; accounts and holdings sum as entered |
-| Page | LEFT: search, kind chips, one group per kind with the amount in the stamp slot and a dot for active, ended entries last in their group and struck through; MIDDLE blank: the totals and the capture form; MIDDLE selected: the entry, its amount history, `Update`, `End`, `Forget` |
-| Departures | the artboard's Money page was a document list, now Business: chips are the four kinds, rows group by kind rather than day, item actions are `Update` / `End` / `Forget` |
-
-### Business
-
-1. Houses business plans/networking (people, events, etc.)/documents
-2. Finds/Tracks items immediately relevant to current pursuits, recommendations based on career improvement, business plans, job openings that are realistic, automated; 
-
-Built:
-
-| Piece | Current state |
-|---|---|
-| Table | `business_items(kind plan\|person\|event\|document\|lead, text, ref, why, status open\|accepted\|dismissed)`, unique on `(kind, ref)`; `ref` is a URL for a lead, an absolute path for a document and an optional link on the rest |
-| Routes | `left` (query as `LIKE` per word over text and ref, chips per kind), `blank` (counts and the open leads), `item/{id}` (an open lead offers `accept` / `dismiss`, which the page posts as `action/lead {id, status}`; a ref gives an `Open` href), `action/{capture\|forget\|lead\|open}`: capture takes `plan`, `person` or `event` only, `forget` refuses a document (delete the file), `open` is `os.startfile` on a document whose file exists |
-| Hooks | `numbers` (open leads), `today` (items created in the local day), `item`, `context` (counts, every plan verbatim, open leads, document paths) |
-| Tools | read: `business_search`, `business_get`, `business_leads`; write: `business_add`, `business_lead` |
-| Schedules | `business.index_documents` every 15m mirrors the top-level files in `data/workspace/business/` as `document` rows, drops rows whose file is gone and returns `Skipped` when nothing changed. `business.scout` every 24h inside the nightly window (`Skipped` with no plans) searches the web against every plan with the last hundred leads listed, expects a JSON array of `{text, url, why}`, and queues up to `leads_per_run` new leads, never repeating a url, cursor `business.scout` |
-| Page | LEFT: search, chips, rows by day with the file extension as the leading slot for documents; MIDDLE blank: the capture box and the lead queue; MIDDLE selected: the item, its reason and url, `Accept` / `Dismiss` for a lead, `Open` for a document |
-| Departures | chips are the five kinds rather than the artboard's `Accounts, Plans, Documents` (accounts are Finance); `Summarize` and `Share` dropped; the blank state is unspecified in the artboard |
-
-### Database
-
-1. Module which interfaces with underlying DBs to allow for manual querying/editing of data to give visibility
-2. Agent is natural language interface for creating queries
-3. Agent has in depth knowledge of database schema. 
-
-Built:
-
-| Piece | Current state |
-|---|---|
-| Table | `db_queries(name unique, sql)`: the queries the owner or the agent kept |
-| Execution | `query.py` splits the text on the semicolons `sqlite3.complete_statement` calls statement ends and runs the statements in order; nothing parses SQL. `read` drives the `mode=ro` connection under `store.ro_lock`, so a write fails inside SQLite; `execute` drives the read-write connection under `store.raw()`, so writes and DDL land and there is no undo. Statements commit one by one, so a script that must be all-or-nothing spells out its own `BEGIN` and `COMMIT`. Both return `{columns, rows, total, truncated, changed, ddl, statements, ms}` from the last statement that returned rows, at most `max_rows` of them, blobs as `<N bytes>`; one progress handler covers the whole script and interrupts it past `max_seconds`, leaving what already committed. An error comes back as text naming the statement that broke, not a failed job. `explain` prefixes `EXPLAIN QUERY PLAN` to the first statement, which prepares it and never runs it |
-| Routes | `left` (user tables with row counts, shadow tables of virtual tables hidden, then the saved queries with their sql), `blank` (store file name, size with the WAL, tables), `action/{run\|explain\|save\|delete}` on resource `db`, shared with backup and vacuum. `run` goes to `execute` and writes a `wrote` event when rows changed or the schema moved |
-| Hooks | `numbers` (store size), `context` (every table with its columns and row count, the saved query names) |
-| Tools | read: `db_schema`, `db_query(sql, limit)` (limit clamped to `max_rows`, on the `mode=ro` connection), `db_explain`; write: `db_save_query` only, on the full server. `query.execute` has no tool: the agent drafts a statement and saves it, the owner runs it from the editor |
-| Page | LEFT: tables with counts (a click loads the newest `ui.page_size` rows), then `saved`; MIDDLE: the SQL editor (Ctrl+Enter runs), `Run` / `Explain` / `Save` (a name prompt) and `Delete` on a loaded saved query, the result grid with paging and the timing line. `Run` sends the text straight to SQLite with no confirmation step; the line reports rows written, and a result that changed anything reloads the rail so the counts move |
-| Departures | `Export` is not built; grid columns come from the query rather than the artboard's fixed five; `Save` and a `prev` link are added for saved queries and paging |
-
-### Graph
-
-1. A knowledge graph which picks up any items which were explicitly tagged via the other modules; entirely a read-only/view-only insight layered on top of data generated elsewhere.    
-2. Agent serves as natural language interface for graph data. 
-3. Agent has ability to query, clean/consolidate/delete nodes/edges from the graph; i.e. it is the graph architect  
-
-Built:
-
-| Piece | Current state |
-|---|---|
-| Sources | every tag on a memory and on any tagged session, open or closed (a pane's session is tagged when it closes, a Chat conversation after its first turn; its time is `closed_at` or else `opened_at`), lowercased and stripped, so `GRADient` and `gradient` are one node. Graph never writes those tables |
-| Tables | `graph_nodes(tag, count, memories, sessions, last_seen)` and `graph_edges(a, b, kind cooccur\|link, weight, note)`, both replaced whole on each rebuild; the curation overlays `graph_merges`, `graph_pruned` and `graph_links` survive it. A curated link whose end is pruned is dropped at rebuild and a merged end is remapped; merges stay one level deep and a cycle is refused |
-| Routes | `left` (tags by count with a `count` field, search, page), `graph` (the same query and page: the visible nodes, the edges among them, build time and whole-table totals). No `item`, `action`, `today` or `queue`; selecting a tag is local to the page |
-| Hooks | `numbers` (nodes), `context` (totals, the ten largest tags, merges, prunes, curated link count) |
-| Tools | read: `graph_nodes`, `graph_neighbors`, `graph_items` (a tag's memories and sessions, aliases included); write: `graph_link` (both ends must be nodes), `graph_unlink` (curated links only), `graph_merge`, `graph_prune`, `graph_restore`, each in one transaction with the rebuild and each writing an event |
-| Schedule | `graph.rebuild` every 15m, plain SQL and no LLM, `build.rebuild` shared with every write tool, the cursor `graph.rebuild` served as `built_at`: tags on the same item become a `cooccur` edge weighted by shared items, a curated link an edge of weight 1 |
-| Page | LEFT: search and tags by count; MIDDLE: a ring of nodes with their edges, selecting a tag lights its neighbours |
-| Departures | `extract-entities` chip dropped and `neighbors` added; ring radius comes from a hash of the tag so a node stays put when the list reorders; counts are live |
-
-### Search
-
-Meets Home requirement 2 and the Nightly Process: the owner names topics through the Chat agent, one nightly run searches the web for them, and each finding waits on Home for a yes or no that becomes the record. No page and no agent: the manifest sets `page=False`, so `/api/shell` lists it with `page: false` for its hue and icon, Home carries its `Review` group and number without a link, and Settings shows only its `runs` toggle.
-
-Built:
-
-| Piece | Current state |
-|---|---|
-| Tables | `search_topics(kind money\|work\|learn, text unique, created_at)`, `search_findings(topic_id, kind, title, url unique, summary, found_at, status open\|agreed\|disagreed, decided_at)`; a finding keeps its kind after its topic is removed |
-| Routes | `item/{id}` (`Agree` primary, `Disagree`, `Open` as an href; a decided finding offers `Open` only), `action/{agree\|disagree}` `{id}` on resource `web_search` (409 on a decided finding; events `agreed`, `disagreed`). Home's inspector posts them |
-| Hooks | `numbers` (open findings, `to review`), `today` (found in the local day), `queue` (every open finding, newest first: Home's `Review` group), `item`, `context` (topics by kind, the open queue with urls, last run) |
-| Tools | read on both servers: `search_findings(query, status, limit)` (the same `LIKE` per word over title and summary, limit capped at 100), `search_topics`; write on `otto` only: `search_topic_add(kind, text)`, `search_topic_remove(id)`, declared by Chat's manifest, each writing a `topic added` or `topic removed` event marked `(agent)` |
-| Schedule | `web_search.nightly` every 24h inside the nightly window, resource `web_search`: one budgeted run over every topic (listed as `(topic_id, kind) text`) with the CLI's WebSearch and no extra tools, the last hundred findings listed with their status as already found, a JSON array of `{topic_id, title, url, summary}` back (a fence is tolerated; a row naming no current topic or missing a title or url is dropped); up to `max_findings` new rows inserted with `INSERT OR IGNORE` on url and the cursor `web_search.nightly` in the same transaction, one `found` event per row. No topics, no run |
-| Page | none. Home's `Review` group lists the open findings and its inspector shows the url and status with `Agree`, `Disagree` and `Open`; Activity's chip and the `events` log carry the module |
-| Departures | the module is not in the artboard: title `Search`, hue `#d9915b` and magnifier icon are Otto's and colour Home's rows; there is no rail entry |
-
-### System (no page)
-
-`system.heartbeat` every 60 s proves the clock runs; `system.prune_sessions` every 24 h deletes closed sessions older than `sessions_kept_days`.
-
-### Feedback (no page)
-
-A `feedback` control in the header of every page records a change the owner wants, together with the selected item when its inspector loaded. `POST /api/feedback/action/add` (400 on an empty page or text) writes the row, an event under the originating page, and returns `{id}` at once after submitting a filing job on resource `feedback`; `retry` requeues a failed one (404 unknown, 409 unless `failed`). The filing job is a `oneshot` run with `feedback.max_turns` and the read tools `docs_list`, `docs_read` (markdown under `docs/` only) and `feedback_list`; its prompt carries the id, time, page, selected item (text cut to 300) and the owner's words in fenced blocks. The agent replies with one JSON object and the job writes it to the row: `kind` (bug, defect, gap or roadmap), `title` (120), `summary` (200), `tags` (eight of 40), `ref` (the existing `docs/` file it belongs in) and `draft` (the body ready for that file, with the owner's words quoted). A reply that is not that object marks the row `failed` with the error and the job failed. `GET /api/feedback/recent` feeds the panel with the last five rows; `GET /api/feedback/list` gives every field over HTTP, and the `feedback_list` tool gives agents everything but `item_text`, `draft`, `filed_at`, `job_id` and `error`. Nothing touches the repo; the row is the record. Table `feedback(created_at, page, item_module, item_id, item_text, text (the owner's words, verbatim), status queued, filed or failed, kind, title, summary, tags JSON, ref, draft, filed_at, job_id, error)`. The manifest sets `page=False`, hue `#8b8f98`, order 99, so there is no rail entry; the agent's Current state block names the built modules, the roadmap plans on disk and the count of files in each finding folder. Panel: 360px, a 3-row textarea with the page and item as context, `Send` (Enter; Shift+Enter breaks, Esc closes and keeps the draft), rows reading `filing…`, `<kind> <summary>` or `failed <error>` with `retry`.
-
-### Activity and Settings (shell pages)
-
-Activity: LEFT is the `events` log by day with a chip per module; MIDDLE blank state is the task table with its toggles, the nightly budget line (runs used, window, the stagger gap), and the last fifty jobs; selecting an event shows its job's result, error and log. Settings: General (start page among the modules with a page, refresh, time format, rows per page, side panel max, middle max), Modules (every module, page or not: `shown` in the rail for a module with a page, `runs` for one with scheduled tasks, a dash otherwise; a failed module shows its error), Claude (binary, model, agents dir, workspace, sessions kept, background jobs; read-only), Data (database path and size, last backup, `Back up now` through the SQLite backup API into `data/backups/`, `Vacuum`).
+| Home [0] | `docs/home/CLAUDE.md` |
+| Chat [1] | `docs/chat/CLAUDE.md` |
+| Email [1] | `docs/email/CLAUDE.md` |
+| Education [2] | `docs/education/CLAUDE.md` |
+| Memory [3] | `docs/memory/CLAUDE.md` |
+| Science [4] | `docs/science/CLAUDE.md` |
+| Finance [5] | `docs/finance/CLAUDE.md` |
+| Business [6] | `docs/business/CLAUDE.md` |
+| Graph [7] | `docs/graph/CLAUDE.md` |
+| Database [8] | `docs/database/CLAUDE.md` |
+| Search [9, no page] | `docs/web_search/CLAUDE.md` |
+| System [99, no page] | `docs/system/CLAUDE.md` |
+| Feedback [99, no page] | `docs/feedback/CLAUDE.md` |
 
 ## UI
 
@@ -434,17 +210,121 @@ Session pane: header is a 6px hue dot plus `claude · <module>`; skill chips; us
 
 Item inspector: 16px hue glyph, kind and time in mono, `×` to clear, the body, then a primary action in the hue, secondary actions, and `Send to session` right-aligned, which prefills the composer with the item's reference. Email's reader keeps the glyph, time, `×` and `Send to session` and carries no actions; those sit in its LEFT bar.
 
+### Activity and Settings
+
+Activity: LEFT is the `events` log by day with a chip per module; MIDDLE blank state is the task table with its toggles, the nightly budget line (runs used, window, the stagger gap), and the last fifty jobs; selecting an event shows its job's result, error and log. Settings: General (start page among the modules with a page, refresh, time format, rows per page, side panel max, middle max), Modules (every module, page or not: `shown` in the rail for a module with a page, `runs` for one with scheduled tasks, a dash otherwise; a failed module shows its error), Claude (binary, model, agents dir, workspace, sessions kept, background jobs; read-only), Data (database path and size, last backup, `Back up now` through the SQLite backup API into `data/backups/`, `Vacuum`).
+
 ### Departures from the artboard
 
 - One session per module, no tab strip.
-- Memory's blank state (capture box) is not in the artboard, which left it unspecified.
 - Activity's MIDDLE blank state is the task table, required by the Daemon section.
 - Settings, Data: `Export` is not built.
 - Finance and Business are separate modules; the artboard had one `Money` entry.
-- Chat is not in the artboard; its title, hue, icon and rail position are Otto's, its RIGHT track is the conversation's folder instead of the session pane, and its MIDDLE is the transcript in the pane's own shapes.
-- Search has no page; its hue and icon are Otto's and its findings are decided on Home.
-- Email's message actions are a sticky bar at the top of LEFT, acting on the selected message or the whole filter; the artboard puts them in the inspector.
-- Science's notebook is a full editor with JupyterLab's command and edit modes and the header carries run and kernel actions; the artboard's notebook is static.
-- Education's MIDDLE renders markdown and LaTeX with answer boxes and verdict colours; the artboard's inspector is plain text.
 - The rail shows only built modules with a page.
-- The `feedback` control in the header and its panel are not in the artboard; they reuse the header meta style, the panel surfaces, the composer textarea and compact rows.
+- Each module's own departures are the `Departures` row of its doc's `## Built` table.
+
+## Patches
+
+### Nightly budget counts finished runs only, so concurrent runs slip past the cap
+
+- Kind: bug
+- Where: `app/claude.py` `ClaudeRunner.budget` and `run_task`; `app/runner.py` worker count
+- Found: 2026-09-10, sync-architecture
+- Status: open
+
+What happens: `budget()` counts `llm_runs` rows with status `done` or `failed`, and `run_task` writes its row only after the CLI exits. The scheduler submits every nightly task in the same tick and the runner starts `max_concurrent` of them at once, so each sees `used = 0`. On 2026-09-09 three runs started at 02:00:02 local and a fourth at 02:00:05 after the first finished; all four completed against `max_sessions = 3`. The cap holds only when runs happen to serialize.
+
+Expected: at most `max_sessions` budgeted runs start per local day, whatever the concurrency.
+
+Fix: write the `llm_runs` row with status `running` before spawning and count `running` too, updating the row to `done` or `failed` afterwards; or hand every `llm=True` schedule the same resource so they serialize and the count is exact.
+
+### Budget refusal marks the job failed instead of skipped
+
+- Kind: bug
+- Where: `app/claude.py` `run_task`; `app/modules/memory/tasks.py` `suggest`, `app/modules/email/tasks.py` `triage`, `app/modules/business/tasks.py` `scout`, `app/modules/web_search/tasks.py` `nightly`
+- Found: 2026-09-07, sync-architecture
+- Status: open
+
+What happens: outside the nightly window or past `max_sessions`, `run_task` writes a `skipped` row to `llm_runs` and raises `BudgetExceeded`; the runner records the job as `failed` with a traceback and writes a `failed` event, so Activity shows a refusal as a failure. `app/modules/education/tasks.py` `generate` is the only task that catches it and returns `Skipped`; the other four do not. `[nightly] max_sessions` is now five, one per nightly LLM task, so a refusal is no longer due every night; it still reads as a failure whenever one happens.
+
+Expected: the job reads `skipped` with the reason and no `failed` event is written.
+
+Fix: have the runner treat `BudgetExceeded` like `Skipped` (one `except` in `Runner._run`), which covers every task at once and lets the education task stop repeating the catch.
+
+### `python-multipart` is required by Chat's upload route but not in requirements.txt
+
+- Kind: bug
+- Where: `requirements.txt`; `app/modules/chat/routes.py` `upload` (`UploadFile = File(...)`)
+- Found: 2026-09-12, sync-architecture
+- Status: open
+
+What happens: FastAPI needs `python-multipart` to parse a multipart form, and the Chat upload route declares one. The package is installed in the current `.venv` (0.0.32) because it was added by hand, but `requirements.txt` pins seven packages and not this one. A venv rebuilt from the file boots a daemon whose Chat module fails at import with FastAPI's `Form data requires "python-multipart"` error, and the registry drops Chat with that error in `module_errors`.
+
+Expected: `pip install -r requirements.txt` yields a venv on which every module loads.
+
+Fix: add `python-multipart==0.0.32` to `requirements.txt`.
+
+### A rotated daemon log is tracked in git
+
+- Kind: bug
+- Where: `.gitignore` (`data/*.log`); `app/daemon.py` `RotatingFileHandler(maxBytes=1_000_000, backupCount=3)`
+- Found: 2026-09-10, sync-architecture
+- Status: open
+
+What happens: the daemon rotates `data/daemon.log` to `daemon.log.1`, `.2`, `.3`. The ignore pattern `data/*.log` does not match those names, so `git add` picked up `data/daemon.log.1` (4,866 lines) in commit `9593a2c`. Every later rotation leaves a modified tracked file in the working tree and a diff in every commit that adds it.
+
+Expected: no file under `data/` other than `.gitkeep` is tracked; the log and its rotations stay local.
+
+Fix: add `data/*.log.*` to `.gitignore` and run `git rm --cached data/daemon.log.1` once.
+
+### A failed task reports no reason anywhere in the UI
+
+- Kind: bug
+- Where: `app/runner.py` `_finish` (line 152 writes the event, line 149 writes `tasks.last_result`)
+- Found: 2026-09-12, email organization session
+- Status: open
+
+What happens: both places that surface a failure take the wrong slice of the traceback. The event text is `(error or '').strip().splitlines()[-1][:200]`, the traceback's last line, which is the exception message only when that message is single-line; `tasks.last_result` is `(error or text or '')[:500]`, the traceback's first 500 characters, which is frame headers and never reaches the exception. `GmailError` renders as `gmail 401: {` then the JSON body over several lines, so on 2026-09-12 Otto recorded 216 consecutive `email.sync` failures over roughly eight hours whose entire Activity text was `email.sync: }` and whose `last_result` was three `File "..."` frames. The two real causes, an expired refresh token (`invalid_grant`) and then a deleted client secret (`invalid_client`), were readable only by grepping `data/daemon.log`. Any exception whose message spans lines loses its reason the same way, in every module.
+
+Expected: the event names the exception, and `tasks.last_result` holds the end of the traceback, so Activity says why a task failed without the owner opening the log.
+
+Fix: take the last non-blank line of the formatted exception rather than of the whole traceback (`traceback.format_exception_only(e)[-1]`), and slice `last_result` from the tail (`error[-500:]`) so the exception survives. Neither changes the stored `jobs.error`, which is already the full traceback.
+
+### Daemon does not start at logon on this machine
+
+- Kind: gap
+- Where: Daemon requirement "It starts at logon"; `app/__main__.py` `setup`
+- Found: 2026-09-07, sync-architecture
+- Status: open, owner action
+
+What happens: `python -m app setup` registers the Task Scheduler entry `Otto`, but it has not been run; the daemon starts only when `python -m app` is run.
+
+Expected: the daemon is running after every logon.
+
+Fix: run `python -m app setup` once from the repo root, then confirm with `Get-ScheduledTask -TaskName Otto`.
+
+### One session per module; tabs not built
+
+- Kind: gap
+- Where: Summary requirement "Multiple conversations should be spawnable/selectable via tabs"; `app/api.py` sessions, `app/static/session.js`
+- Found: 2026-09-07, sync-architecture
+- Status: deferred by the owner
+
+What happens: one open session per module pane; `/clear` closes it, tags it and starts a fresh one. Closed sessions keep their title, tags and turns. Chat (merged 2026-09-12) keeps many conversations on its own page through the same `start_turn` seam with busy state per session id, so the platform now supports several open sessions per module; the panes still show one.
+
+Expected: several open sessions per module, selectable by tab.
+
+Fix: `sessions` already allows several open rows per module; add a tab strip to the pane header, a session id on the send and events routes, and per-session busy state.
+
+### Settings, Data: Export button not built
+
+- Kind: gap
+- Where: artboard Settings > Data (`Back up now`, `Export`, `Vacuum`); `app/static/pages/settings.js`
+- Found: 2026-09-07, sync-architecture
+- Status: open, needs a decision
+
+What happens: the Data section offers `Back up now` and `Vacuum`. `Export` is absent because nothing defines what it exports.
+
+Expected: either an export with a defined target (a copy of the database, or a JSON dump of chosen tables), or the button dropped from the design.
+
+Fix: decide the target, then one action route and one button.
