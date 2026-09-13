@@ -73,7 +73,7 @@ class App extends Component {
       clearInterval(this.timer);
       this.timer = setInterval(() => this.refresh(), this.interval);
     }
-    get('/api/feedback/recent').then((feedback) => this.setState({ feedback })).catch(() => {});
+    get(`/api/feedback/recent?page=${encodeURIComponent(page)}`).then((feedback) => this.setState({ feedback })).catch(() => {});
     if (!impl) { this.setState({ data: { empty: true } }); return; }
     try {
       const data = await impl.load(this);

@@ -17,6 +17,12 @@ from app.store import Store, now_iso
 JobFn = Callable[["JobContext"], Awaitable[Any]]
 
 
+def reason(e: BaseException) -> str:
+    """Type and message on one line. The last line of a traceback is the message's last line, which for a multi-line
+    message is a closing brace; folding the whole formatted exception keeps the words that say why it failed."""
+    return " ".join("".join(traceback.format_exception_only(e)).split())
+
+
 @dataclass
 class Job:
     id: int
@@ -122,34 +128,36 @@ class Runner:
             self.running.add(job.id)
             self.store.execute("UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?", (now_iso(), job.id))
             ctx = JobContext(job, self)
-            status, result, error = "done", None, None
+            status, result, error, why = "done", None, None, None
             try:
                 result = await job.fn(ctx)
                 if isinstance(result, Skipped):
                     status, result = "skipped", str(result)
             except asyncio.CancelledError:
-                status, error = "failed", "cancelled"
-                self._finish(job, status, result, error)
+                status, error, why = "failed", "cancelled", "cancelled"
+                self._finish(job, status, result, error, why)
                 raise
-            except Exception:
-                status, error = "failed", traceback.format_exc()
+            except Exception as e:
+                status, error, why = "failed", traceback.format_exc(), reason(e)
             finally:
                 self.running.discard(job.id)
-            self._finish(job, status, result, error)
+            self._finish(job, status, result, error, why)
 
-    def _finish(self, job: Job, status: str, result: Any, error: str | None) -> None:
+    def _finish(self, job: Job, status: str, result: Any, error: str | None, why: str | None) -> None:
         text = None if result is None else str(result)[:4000]
         self.store.execute(
             "UPDATE jobs SET status = ?, finished_at = ?, result = ?, error = ? WHERE id = ?",
             (status, now_iso(), text, error, job.id),
         )
         if job.kind == "scheduled":
+            # the tail of a traceback, not its head: the exception is at the end and the frame headers are not the reason
+            last = error[-500:] if error else (text or "")[:500]
             self.store.execute(
                 "UPDATE tasks SET last_run = ?, last_status = ?, last_result = ? WHERE name = ?",
-                (now_iso(), status, (error or text or "")[:500], job.task),
+                (now_iso(), status, last, job.task),
             )
         if status == "failed":
-            self.store.event(job.module, "failed", f"{job.task}: {(error or '').strip().splitlines()[-1][:200]}", job.id)
+            self.store.event(job.module, "failed", f"{job.task}: {why or 'failed'}"[:200], job.id)
         elif job.notify:
             self.store.event(job.module, "ran" if job.kind == "scheduled" else "did", f"{job.task}: {text or 'ok'}"[:200], job.id)
         if not job.done.done():

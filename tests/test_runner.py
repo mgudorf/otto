@@ -58,10 +58,12 @@ def test_cap_holds(store, config):
 
 def test_failure_is_local(store, config):
     async def boom(ctx):
-        raise ValueError("kaput")
+        raise ValueError('kaput 401: {\n  "reason": "invalid_grant"\n}')
 
     async def ok(ctx):
         return "fine"
+
+    store.execute("INSERT INTO tasks(name, module, interval_seconds) VALUES ('bad', 'm', 60)")
 
     async def main():
         r = make_runner(store, config, cap=1)
@@ -79,7 +81,10 @@ def test_failure_is_local(store, config):
     rows = {r["task"]: r for r in store.query("SELECT * FROM jobs")}
     assert rows["bad"]["status"] == "failed" and "kaput" in rows["bad"]["error"]
     assert rows["good"]["status"] == "done"
-    assert store.one("SELECT * FROM events WHERE verb = 'failed'")["text"].startswith("bad:")
+    # a multi-line message keeps its reason: the event names the exception, last_result holds the tail of the traceback
+    event = store.one("SELECT * FROM events WHERE verb = 'failed'")["text"]
+    assert event.startswith("bad: ValueError: kaput 401:") and "invalid_grant" in event
+    assert "invalid_grant" in store.one("SELECT last_result FROM tasks WHERE name = 'bad'")["last_result"]
 
 
 def test_skipped_and_logs_and_commit(store, config):

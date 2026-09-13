@@ -1,4 +1,5 @@
 // Header control on every page: record a change in place; the Feedback agent files it as a row.
+// One panel per page: the draft, the panel and the rows below it belong to the page they were opened on.
 import { Component } from './vendor/preact.mjs';
 import { html, T, mono13, Button } from './rows.js';
 import { post } from './api.js';
@@ -9,8 +10,9 @@ export class Feedback extends Component {
     this.state = { open: false, draft: '', error: null, busy: false };
   }
 
-  componentDidUpdate(prev) {
-    if (this.state.open && !prev.open && this.ta) this.ta.focus();
+  componentDidUpdate(prevProps, prevState) {
+    if (prevProps.page !== this.props.page) this.setState({ open: false, draft: '', error: null, busy: false });
+    if (this.state.open && !prevState.open && this.ta) this.ta.focus();
   }
 
   async send() {
@@ -39,7 +41,7 @@ export class Feedback extends Component {
   }
 
   render({ page, hue, sel, recent }, { open, draft, error, busy }) {
-    const rows = recent ? recent.rows : [];
+    const rows = recent && recent.page === page ? recent.rows : [];   // a fetch still in flight from the page just left
     const context = sel ? `${page} · item ${sel.id}` : page;
     return html`<span style=${{ position: 'relative' }}>
       <span class="ring" onClick=${() => this.setState({ open: !open })} style=${{ ...mono13, color: open ? T.text : T.muted, cursor: 'pointer', padding: '3px 8px', borderRadius: 6 }}>feedback</span>
