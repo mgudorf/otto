@@ -19,7 +19,7 @@ def register(read, full, store: Store, config) -> None:
         return p
 
     def docs_list() -> list[dict]:
-        """Every markdown file under docs/: ARCHITECTURE.md (the platform and its Patches) and one CLAUDE.md per module (requirements, Built, Patches)."""
+        """Every markdown file under docs/: one CLAUDE.md per module (requirements, Built, Patches); docs/app/CLAUDE.md is the platform's."""
         out = []
         for p in sorted(docs.rglob("*.md")):
             st = p.stat()

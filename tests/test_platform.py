@@ -106,8 +106,8 @@ def test_docs_tools_confined(store, config):
     tools.register(read, full, store, config)
     assert set(read.tools) == set(full.tools) == {"docs_list", "docs_read", "feedback_list"}
     paths = {d["path"] for d in read.tools["docs_list"]()}
-    assert "docs/ARCHITECTURE.md" in paths and all(p.startswith("docs/") and p.endswith(".md") for p in paths)
-    assert read.tools["docs_read"]("docs/ARCHITECTURE.md")["text"].startswith("# Architecture")
+    assert "docs/app/CLAUDE.md" in paths and all(p.startswith("docs/") and p.endswith(".md") for p in paths)
+    assert read.tools["docs_read"]("docs/app/CLAUDE.md")["text"].startswith("# App")
     for bad in ("config.toml", "../app/config.py", "docs/design/support.js", "docs/../app/claude.py"):
         assert "error" in read.tools["docs_read"](bad), bad
     assert read.tools["feedback_list"]() == []

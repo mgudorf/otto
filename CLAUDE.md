@@ -29,13 +29,13 @@ Otto, a personification of the word "auto" is a PERSONALIZED dashboard applicati
 
 ## Documentation
 
-1. `docs/ARCHITECTURE.md` describes the platform on `main`: daemon, config, Claude, module contract, UI frame, the shell pages, an index of the module docs, and the platform's own `## Patches`.
+1. `docs/app/CLAUDE.md` describes the platform (`app/`) on `main`: daemon, config, Claude, module contract, UI frame, the shell pages, an index of the module docs, and the platform's own `## Patches`. It is the `app` module doc: `/feedback-queue app` and `/feature-flow` treat it like any other.
 2. `docs/<module>/CLAUDE.md` is the one description of a module on `main`: my requirements, `## Built` (tables, routes, hooks, tools, schedules, page, departures from the artboard) and `## Patches`. It changes in the same commit as the module's code and states current functionality only, nothing about history or plans. `/sync-architecture` catches what slipped.
 3. `docs/design/` is the imported Claude Design artboard and its runtime; open the html in a browser. It is the source for hues, icons and each page's LEFT and MIDDLE shape.
 
 ## Patches
 
-1. **A bug, defect, gap or request seen during any work is recorded before the work continues**, as an entry under `## Patches` in the doc of the module whose code closes it (`docs/ARCHITECTURE.md` for the platform). Naming it only in a reply loses it; a reply is not a record. Record it in whatever tree you are working in, so it merges with the branch.
+1. **A bug, defect, gap or request seen during any work is recorded before the work continues**, as an entry under `## Patches` in the doc of the module whose code closes it (`docs/app/CLAUDE.md` for the platform). Naming it only in a reply loses it; a reply is not a record. Record it in whatever tree you are working in, so it merges with the branch.
 2. **Expand an existing entry rather than duplicating it.** `/feedback-queue <module>` lists the open entries, including those in other docs that name the module's code. When one covers the same cause, add what you saw to it: another path in `Where:`, a sentence in `What happens:`. A related but separate cause gets its own entry.
 3. **Shape**: `### <Title>`, then `- Kind: bug | defect | gap | roadmap`, `- Where:`, `- Found: <date>, <what saw it>`, `- Status: open`, then one paragraph each for `What happens:`, `Expected:` and `Fix:`. bug: the code does something it was not meant to do. defect: built as designed, but wrong for me or against the artboard or a tenet. gap: a requirement or artboard element not met. roadmap: something new I asked for. When two fit, the earlier one wins.
 4. **Filing is not fixing.** Do not detour to repair what you filed; it waits for feature-flow's step 0. Something inside the scope of the current change is fixed in that change and needs no entry. An entry the change closes is removed in the same commit, and feedback the change does not resolve becomes an entry before its queue is cleared.

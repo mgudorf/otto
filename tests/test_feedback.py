@@ -30,11 +30,13 @@ def test_feedback_queue(store, config, tmp_path, capsys):
     (docs / "email").mkdir()
     (docs / "science" / "CLAUDE.md").write_text("# Science\n\n## Built\n\nx\n\n## Patches\n\n" + ENTRY.format(title="Own", where="`app/static/pages/science.js`"), "utf-8")
     (docs / "email" / "CLAUDE.md").write_text("# Email\n\n## Patches\n\nNone open.\n", "utf-8")
-    (docs / "ARCHITECTURE.md").write_text("# Architecture\n\n## Patches\n\n" + ENTRY.format(title="Shared", where="`app/runner.py`; `app/modules/science/tasks.py`") + ENTRY.format(title="Other", where="`app/claude.py`"), "utf-8")
-    assert [(e["doc"], e["title"], e["kind"]) for e in queue.patches(tmp_path, ["science"])] == [("platform", "Shared", "bug"), ("science", "Own", "bug")]
+    (docs / "app").mkdir()
+    (docs / "app" / "CLAUDE.md").write_text("# App\n\n## Patches\n\n" + ENTRY.format(title="Shared", where="`app/runner.py`; `app/modules/science/tasks.py`") + ENTRY.format(title="Other", where="`app/claude.py`"), "utf-8")
+    assert [(e["doc"], e["title"], e["kind"]) for e in queue.patches(tmp_path, ["science"])] == [("app", "Shared", "bug"), ("science", "Own", "bug")]
     assert queue.patches(tmp_path, ["email"]) == []
-    assert {e["doc"] for e in queue.patches(tmp_path, ["activity"])} == {"platform"}                   # shell pages read the platform doc
-    assert queue.open_counts(tmp_path) == {"platform": 2, "science": 1}
+    assert {e["doc"] for e in queue.patches(tmp_path, ["activity"])} == {"app"}                        # shell pages read the platform doc
+    assert [e["title"] for e in queue.patches(tmp_path, ["app"])] == ["Shared", "Other"]
+    assert queue.open_counts(tmp_path) == {"app": 2, "science": 1}
 
     cfg = dataclasses.replace(config, root=tmp_path)
     assert queue.main(["list", "nope"], cfg) == 2 and queue.main([], cfg) == 2

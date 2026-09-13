@@ -4,7 +4,7 @@ description: Worktree -> implement -> update module doc -> merge
 ---
 Follow these steps in order for: $ARGUMENTS
 
-Run from the primary checkout on `main` (`C:\Users\gudo\Desktop\otto`; the live database and the `.venv` exist only there). `<module>` is a directory name under `app/modules/`; platform work reads and updates `docs/ARCHITECTURE.md` wherever a module doc is named below.
+Run from the primary checkout on `main` (`C:\Users\gudo\Desktop\otto`; the live database and the `.venv` exist only there). `<module>` is a directory name under `app/modules/`, or `app` for the platform, whose doc is `docs/app/CLAUDE.md`.
 
 0. Feedback and patches: `.venv/Scripts/python.exe -m app.modules.feedback list <module>...` prints my uncleared feedback for those modules and every open `## Patches` entry that concerns them (their own doc, and entries elsewhere that name their code). Show me both lists as printed and ask which outstanding patches and feedback items this work should resolve. Wait for my answer; step 1 does not start without it.
 1. `git worktree add ../wt-<slug> -b feat/<slug>` from the default branch.

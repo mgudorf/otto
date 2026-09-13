@@ -16,7 +16,8 @@ import app.modules
 from app.store import Store, now_iso
 
 MODULES_DIR = Path(app.modules.__file__).parent
-SHELL_PAGES = ("activity", "settings")   # feedback pages that are not modules; their patches live in ARCHITECTURE.md
+PLATFORM = "app"                          # the platform doc, docs/app/CLAUDE.md, is a module doc like the others
+SHELL_PAGES = ("activity", "settings")   # feedback pages that are not modules; their patches live in the platform doc
 FIELDS = "id, created_at, page, item_module, item_id, item_text, text, status, kind, title, summary, ref, draft, error"
 
 
@@ -27,8 +28,8 @@ def add_cleared_at(conn: sqlite3.Connection) -> None:
 
 
 def names() -> list[str]:
-    """Every module package plus the shell pages: the names `list` and `clear` accept."""
-    return sorted(p.name for p in MODULES_DIR.iterdir() if (p / "__init__.py").exists()) + list(SHELL_PAGES)
+    """Every module package, the platform, and the shell pages: the names `list` and `clear` accept."""
+    return sorted(p.name for p in MODULES_DIR.iterdir() if (p / "__init__.py").exists()) + [PLATFORM, *SHELL_PAGES]
 
 
 def _scope(modules: list[str]) -> tuple[str, list[str]]:
@@ -57,8 +58,8 @@ def _field(body: str, name: str) -> str:
 
 
 def entries(root: Path) -> list[dict]:
-    """Every `### ` entry under `## Patches` in docs/ARCHITECTURE.md (doc `platform`) and each docs/<module>/CLAUDE.md."""
-    docs = [("platform", root / "docs" / "ARCHITECTURE.md")] + sorted((p.parent.name, p) for p in (root / "docs").glob("*/CLAUDE.md"))
+    """Every `### ` entry under `## Patches` in each docs/<module>/CLAUDE.md, the platform's `app` among them."""
+    docs = sorted((p.parent.name, p) for p in (root / "docs").glob("*/CLAUDE.md"))
     out = []
     for doc, path in docs:
         if not path.exists():
@@ -76,7 +77,7 @@ def entries(root: Path) -> list[dict]:
 
 def patches(root: Path, modules: list[str]) -> list[dict]:
     """Open entries for the modules: those in their own docs, plus entries elsewhere whose text names their code."""
-    own = {m: "platform" if m in SHELL_PAGES else m for m in modules}
+    own = {m: PLATFORM if m in SHELL_PAGES else m for m in modules}
     out = []
     for e in entries(root):
         hits = [m for m in modules if e["doc"] == own[m] or any(s in e["body"] for s in (f"modules/{m}/", f"pages/{m}.js", f"/api/{m}/"))]

@@ -1,4 +1,4 @@
-# Architecture
+# App
 
 ## Summary
 
@@ -7,7 +7,7 @@ The middle is the main interaction/use of the module, which displays the main ou
 
 ### What runs today
 
-Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps every module's state current on a schedule; the window renders that state and holds none of it. Each module pane holds one open session; `/clear` closes it, tags it, and starts a fresh one. Chat keeps as many conversations as the owner starts, each tagged after its first turn and never closed. Each module is described in `docs/<module>/CLAUDE.md`; open findings live in that doc's `## Patches` section, the platform's in this file's.
+Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps every module's state current on a schedule; the window renders that state and holds none of it. Each module pane holds one open session; `/clear` closes it, tags it, and starts a fresh one. Chat keeps as many conversations as the owner starts, each tagged after its first turn and never closed. Each module is described in `docs/<module>/CLAUDE.md`; this file, `docs/app/CLAUDE.md`, is the platform's. Open findings live in each doc's `## Patches` section.
 
 | Piece | What it is |
 |---|---|
@@ -157,7 +157,7 @@ Not used: Node, APScheduler, pywebview, `claude-agent-sdk`, nbclient, an Anthrop
 
 ## Modules
 
-One doc per module, `docs/<module>/CLAUDE.md`: the owner's requirements, `## Built` and `## Patches`. Rail order in brackets; a module without a page has no rail entry.
+One doc per module, `docs/<module>/CLAUDE.md`: the owner's requirements, `## Built` and `## Patches`. The platform (`app/`) is this file. Rail order in brackets; a module without a page has no rail entry.
 
 | Module | Doc |
 |---|---|
@@ -224,6 +224,19 @@ Activity: LEFT is the `events` log by day with a chip per module; MIDDLE blank s
 - Each module's own departures are the `Departures` row of its doc's `## Built` table.
 
 ## Patches
+
+### Static files carry no Cache-Control, so an edited page silently does not appear
+
+- Kind: bug
+- Where: `app/daemon.py:97` `app.mount("/", StaticFiles(...))`
+- Found: 2026-09-13, the owner looking for the Finance due date box after the finance merge
+- Status: open
+
+What happens: the static mount answers with `etag` and `last-modified` and no `Cache-Control`, so Chrome caches every module heuristically and may serve `pages/<name>.js` from cache without revalidating. The shell is a hash router, so the document never reloads on its own either. After a merge and a daemon restart the window keeps running the old module: the Finance due date box was absent in the owner's window while the same click produced it in a clean browser against the same daemon. Only `Ctrl+Shift+R` clears it, which no part of the app tells anyone.
+
+Expected: a restarted daemon serves a page whose code matches the revision it reports, without the owner knowing to force a reload.
+
+Fix: send `Cache-Control: no-cache` on the static mount (a `StaticFiles` subclass overriding `file_response`, or middleware on the mount), so the browser still caches but always revalidates against the etag. `/health` already carries `rev`; the shell could compare it with the revision it loaded under and reload once on a mismatch.
 
 ### Nightly budget counts finished runs only, so concurrent runs slip past the cap
 
