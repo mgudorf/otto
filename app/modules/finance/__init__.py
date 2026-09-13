@@ -1,3 +1,5 @@
+import sqlite3
+
 from app.modules import Agent, Manifest
 
 MANIFEST = Manifest(
@@ -14,3 +16,21 @@ MANIFEST = Manifest(
         write_tools=(),
     ),
 )
+
+# v1 column on the table v0 created. schema.sql only creates tables, so a database that already has
+# finance_entries is brought up here; a fresh one has the column and this finds nothing to add.
+COLUMNS = {"finance_entries": {"due_on": "TEXT"}}
+
+
+def setup(config) -> None:
+    """Called once by daemon.build after the schemas: add the columns a v0 database lacks."""
+    conn = sqlite3.connect(config.data.db, timeout=5)
+    try:
+        for table, columns in COLUMNS.items():
+            have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+            for name, ddl in columns.items():
+                if name not in have:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+        conn.commit()
+    finally:
+        conn.close()

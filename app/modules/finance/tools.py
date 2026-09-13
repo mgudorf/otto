@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from app.modules.finance.routes import KINDS, amount_text, monthly, totals
+from datetime import date
+
+from app.modules.finance.routes import KINDS, amount_text, monthly, next_due, totals
 from app.store import Store
 
 
 def register(read, full, store: Store, config) -> None:
     def finance_list(kind: str | None = None, include_ended: bool = False) -> list[dict]:
-        """The owner's entries. kind narrows to account, recurring, holding or budget. Amounts are cents; text is the display form."""
+        """The owner's entries. kind narrows to account, recurring, holding or budget. Amounts are cents; text is the
+        display form; due_on is the owner's anchor date and next_due the occurrence projected from it."""
         where, params = [], []
         if kind:
             if kind not in KINDS:
@@ -19,15 +22,19 @@ def register(read, full, store: Store, config) -> None:
             where.append("ended_at IS NULL")
         sql_where = ("WHERE " + " AND ".join(where)) if where else ""
         rows = store.query(f"SELECT * FROM finance_entries {sql_where} ORDER BY kind, name", tuple(params))
-        return [{**r, "text": amount_text(r), "monthly": monthly(r) if r["cadence"] else None} for r in rows]
+        today = date.today()
+        return [
+            {**r, "text": amount_text(r), "monthly": monthly(r) if r["cadence"] else None, "next_due": next_due(r, today)}
+            for r in rows
+        ]
 
     def finance_get(id: int) -> dict:
-        """One entry by id with its amount history, newest first."""
+        """One entry by id with its amount history, newest first, and the next occurrence of a dated payment."""
         r = store.one("SELECT * FROM finance_entries WHERE id = ?", (id,))
         if r is None:
             return {"error": f"no entry {id}"}
         history = store.query("SELECT ts, amount FROM finance_amounts WHERE entry_id = ? ORDER BY ts DESC", (id,))
-        return {**r, "text": amount_text(r), "history": history}
+        return {**r, "text": amount_text(r), "next_due": next_due(r, date.today()), "history": history}
 
     def finance_totals() -> dict:
         """Sums over active entries, in cents: accounts, holdings, monthly_recurring, monthly_budget."""

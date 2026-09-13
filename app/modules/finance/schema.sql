@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS finance_entries (
   amount     INTEGER NOT NULL,                 -- cents
   cadence    TEXT CHECK (cadence IN ('monthly', 'yearly', 'weekly')),
   note       TEXT,
+  due_on     TEXT,                             -- anchor date YYYY-MM-DD, recurring only
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   ended_at   TEXT
