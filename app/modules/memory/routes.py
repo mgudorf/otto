@@ -13,6 +13,7 @@ router = APIRouter(prefix="/api/memory")
 
 KINDS = ("note", "link", "quote", "fact", "task")
 CHIPS = {"All": None, "Notes": "note", "Links": "link", "Quotes": "quote", "Facts": "fact", "Tasks": "task"}
+SUGGESTION = "s"                                   # a suggestion's row id, "s12"; a memory carries the bare integer
 RESOURCE = "memory"
 
 
@@ -57,6 +58,18 @@ def _get(store: Store, memory_id: int) -> dict:
     return row
 
 
+def _suggestion_id(value) -> int:
+    """The integer behind an "s12" row id. Anything else is not a suggestion, so it is a 404 rather than a 500."""
+    text = str(value or "")
+    if not text.startswith(SUGGESTION) or not text[len(SUGGESTION):].isdigit():
+        raise HTTPException(404, "no such suggestion")
+    return int(text[len(SUGGESTION):])
+
+
+def _suggestion_row(r: dict) -> dict:
+    return {"id": f"{SUGGESTION}{r['id']}", "module": "memory", "text": r["text"], "stamp": r["created_at"], "leading": {"kind": "idea"}}
+
+
 @router.get("/left")
 def left(request: Request, query: str = "", chip: str = "All", page: int = 0) -> dict:
     store: Store = request.app.state.store
@@ -86,23 +99,35 @@ def left(request: Request, query: str = "", chip: str = "All", page: int = 0) ->
 def blank(request: Request) -> dict:
     store: Store = request.app.state.store
     counts = {r["kind"]: r["n"] for r in store.query("SELECT kind, COUNT(*) AS n FROM memories GROUP BY kind")}
-    suggestions = store.query("SELECT * FROM memory_suggestions WHERE status = 'open' ORDER BY created_at DESC")
-    return {"kinds": list(KINDS), "counts": counts, "suggestions": suggestions}
+    return {"kinds": list(KINDS), "counts": counts, "suggestions": queue(store)}
 
 
 @router.get("/item/{memory_id}")
-def item_route(request: Request, memory_id: int) -> dict:
-    return item(request.app.state.store, str(memory_id))
+def item_route(request: Request, memory_id: str) -> dict:
+    return item(request.app.state.store, memory_id)
+
+
+def _suggestion_item(store: Store, sid: int) -> dict:
+    r = store.one("SELECT * FROM memory_suggestions WHERE id = ?", (sid,))
+    if r is None:
+        raise HTTPException(404, "no such suggestion")
+    actions = []
+    if r["status"] == "open":
+        actions.append({"verb": "accept", "label": "Accept", "primary": True, "removes": True})
+        actions.append({"verb": "dismiss", "label": "Dismiss", "removes": True})
+    return {**r, "id": f"{SUGGESTION}{r['id']}", "module": "memory", "kind": "suggestion", "actions": actions}
 
 
 def item(store: Store, memory_id: str) -> dict:
+    if not str(memory_id).isdigit():
+        return _suggestion_item(store, _suggestion_id(memory_id))
     r = _get(store, int(memory_id))
     actions = []
     if r["kind"] == "link":
         actions.append({"verb": "open", "label": "Open", "primary": True, "href": r["text"].split()[0]})
     elif r["kind"] == "task" and not r["done_at"]:
         actions.append({"verb": "done", "label": "Done", "primary": True})
-    actions.append({"verb": "forget", "label": "Forget", "confirm": "Forget this memory?"})
+    actions.append({"verb": "forget", "label": "Forget", "confirm": "Forget this memory?", "removes": True})
     return {**r, "module": "memory", "tags": _tags(store, r["id"]), "actions": actions}
 
 
@@ -193,29 +218,40 @@ def _done(store: Store, body: dict):
     return write
 
 
-def _suggestion(store: Store, body: dict):
-    status = body.get("status")
-    if status not in ("accepted", "dismissed"):
-        raise HTTPException(400, "status must be accepted or dismissed")
-    sid = int(body["id"])
-    if store.one("SELECT id FROM memory_suggestions WHERE id = ?", (sid,)) is None:
-        raise HTTPException(404, "no such suggestion")
+def _decide(status: str):
+    """One verb per decision, each taking {id}: what the page posts is what Home posts."""
 
-    def write(ctx) -> dict:
-        with ctx.commit() as conn:
-            conn.execute("UPDATE memory_suggestions SET status = ? WHERE id = ?", (status, sid))
-        ctx.event(status, f"suggestion {sid}", ref=str(sid))
-        return {"id": sid, "status": status}
+    def prepare(store: Store, body: dict):
+        sid = _suggestion_id(body.get("id"))
+        if store.one("SELECT id FROM memory_suggestions WHERE id = ?", (sid,)) is None:
+            raise HTTPException(404, "no such suggestion")
 
-    return write
+        def write(ctx) -> dict:
+            with ctx.commit() as conn:
+                conn.execute("UPDATE memory_suggestions SET status = ? WHERE id = ?", (status, sid))
+            ctx.event(status, f"suggestion {sid}", ref=str(sid))
+            return {"id": f"{SUGGESTION}{sid}", "status": status}
+
+        return write
+
+    return prepare
 
 
-ACTIONS = {"capture": _capture, "forget": _forget, "tag": _tag, "untag": _untag, "done": _done, "suggestion": _suggestion}
+ACTIONS = {
+    "capture": _capture, "forget": _forget, "tag": _tag, "untag": _untag, "done": _done,
+    "accept": _decide("accepted"), "dismiss": _decide("dismissed"),
+}
 
 
 # ---- shell hooks ---------------------------------------------------------------------------
 def numbers(store: Store) -> dict:
     return {"value": store.scalar("SELECT COUNT(*) FROM memories"), "label": "memories"}
+
+
+def queue(store: Store) -> list[dict]:
+    """Every suggestion still waiting on a yes or no, newest first; Home lists these under Review."""
+    rows = store.query("SELECT * FROM memory_suggestions WHERE status = 'open' ORDER BY created_at DESC, id DESC")
+    return [_suggestion_row(r) for r in rows]
 
 
 def today(store: Store) -> list[dict]:
@@ -229,7 +265,7 @@ def today(store: Store) -> list[dict]:
 def context(store: Store, registry) -> str:
     counts = store.query("SELECT kind, COUNT(*) AS n FROM memories GROUP BY kind ORDER BY kind")
     recent = store.query("SELECT id, kind, text, created_at FROM memories ORDER BY created_at DESC LIMIT 10")
-    open_s = store.query("SELECT id, text FROM memory_suggestions WHERE status = 'open'")
+    open_s = queue(store)                                      # the "s12" ids the page and Home open
     lines = ["Counts: " + (", ".join(f"{c['n']} {c['kind']}" for c in counts) or "none")]
     lines.append("Most recent (id, kind, text):")
     lines += [f"  {r['id']} {r['kind']}: {r['text'][:140]}" for r in recent] or ["  none"]

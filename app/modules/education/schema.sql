@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS questions (
   started_at   TEXT,                                           -- the first answer
   completed_at TEXT,                                           -- the owner pressed Complete quiz; every part was scored
   score        INTEGER,                                        -- mean of the part scores once every part is scored
+  deleted_at   TEXT,                                           -- thrown away by the owner: off every list, kept so the generator never re-asks it
   UNIQUE (topic_id, title)
 );
 CREATE INDEX IF NOT EXISTS questions_created ON questions(created_at);
@@ -47,6 +48,6 @@ CREATE TABLE IF NOT EXISTS education_feedback (
   id          INTEGER PRIMARY KEY,
   ts          TEXT NOT NULL,
   topic_id    INTEGER REFERENCES topics(id),
-  question_id INTEGER REFERENCES questions(id),                -- set NULL when the question is deleted
+  question_id INTEGER REFERENCES questions(id),                -- kept when the question is deleted; the words still describe it
   text        TEXT NOT NULL                                    -- the owner's words, unchanged
 );

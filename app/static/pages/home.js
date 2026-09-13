@@ -33,7 +33,7 @@ export function Middle({ app, data, mod, fmt }) {
       if (a.href) { window.open(a.href, '_blank'); return; }
       if (a.confirm && !window.confirm(a.confirm)) return;
       await post(`/api/${item.module}/action/${a.verb}`, { id: item.id });
-      if (a.verb === 'forget') app.select(null);
+      if (a.removes) app.select(null);
       app.refresh();
     }} />`;
   }

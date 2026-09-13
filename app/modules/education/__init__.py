@@ -28,7 +28,7 @@ SCHEMA = Path(__file__).parent / "schema.sql"
 # Columns added to tables an older database created. schema.sql only creates tables, so a database that already has
 # them is brought up here; a fresh one has every column from schema.sql and this finds nothing to add.
 COLUMNS = {
-    "questions": {"topic_tag": "TEXT"},                                         # v1
+    "questions": {"topic_tag": "TEXT", "deleted_at": "TEXT"},                   # v1, v3
     "question_parts": {
         "rubric": "TEXT",                                                       # v1
         "answer": "TEXT",

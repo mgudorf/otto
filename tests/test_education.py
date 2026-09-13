@@ -7,7 +7,7 @@ import sqlite3
 from app.daemon import build
 from app.modules.education import setup
 from app.modules.education.grading import grade
-from app.modules.education.questions import add_question, label, unbound_acronyms, validate_question
+from app.modules.education.questions import add_question, generate_prompt, label, unbound_acronyms, validate_question, waiting_topics
 from app.store import now_iso
 from tests.conftest import FakeProc, fake_spawn, run
 from tests.test_app import client_for, settle
@@ -205,14 +205,21 @@ def test_education_end_to_end(config):
             assert (await c.get(f"/api/education/item/{qid}")).json()["tags"] == ["hard", "bootstrap"]
             assert (await c.get("/api/education/left?chip=completed&query=bootstrap")).json()["showing"] == "1 / 1"
             assert (await c.post("/api/education/action/tags", json={"id": qid, "tags": "x"})).status_code == 400
-            # delete: an active question goes with its parts, its feedback keeps its words; a completed one stays
+            # delete: an active question leaves both slices and every count, and is kept whole so it can never be asked again
             store.execute("INSERT INTO education_feedback(ts, topic_id, question_id, text) VALUES (?, ?, ?, ?)", (now_iso(), tid, gid, "too easy"))
-            assert (await c.post("/api/education/action/delete", json={"id": qid})).status_code == 409
+            assert (await c.post("/api/education/action/delete", json={"id": qid})).status_code == 409       # a completed one stays
+            assert [a["removes"] for a in (await c.get(f"/api/education/item/{gid}")).json()["actions"]] == [True]
             assert (await c.post("/api/education/action/delete", json={"id": gid})).status_code == 200
-            assert store.scalar("SELECT COUNT(*) FROM question_parts WHERE question_id = ?", (gid,)) == 0
-            assert store.one("SELECT question_id, text FROM education_feedback") == {"question_id": None, "text": "too easy"}
+            assert (await c.get("/api/education/left")).json()["groups"] == []
+            assert [r["id"] for g in (await c.get("/api/education/left?chip=completed")).json()["groups"] for r in g["rows"]] == [qid]
             assert (await c.get(f"/api/education/item/{gid}")).status_code == 404
             assert next(x for x in (await c.get("/api/home/numbers")).json() if x["module"] == "education")["value"] == 0
+            t = (await c.get("/api/education/blank")).json()["topics"][0]
+            assert (t["completed"], t["asked"]) == (1, 1)                                                   # it no longer counts as asked
+            assert store.scalar("SELECT COUNT(*) FROM question_parts WHERE question_id = ?", (gid,)) == 3
+            assert store.one("SELECT question_id, text FROM education_feedback") == {"question_id": gid, "text": "too easy"}
+            assert "Why softmax saturates (Pinned output, Low temperature, Smallest gradient) [deleted by the owner]"                 in generate_prompt(store, waiting_topics(store, 1))
+            assert (await c.post("/api/education/action/tags", json={"id": gid, "tags": ["x"]})).status_code == 404
             # retire and return
             assert (await c.post("/api/education/action/retire_topic", json={"id": tid})).status_code == 200
             assert (await c.get("/api/education/blank")).json()["topics"] == []

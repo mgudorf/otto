@@ -41,15 +41,14 @@ const capture = new Capture();
 
 export function Middle({ app, data, mod, fmt }) {
   const hue = mod.hue;
-  const decide = async (id, status) => { await post('/api/business/action/lead', { id, status }); app.refresh(); };
+  const decide = async (id, verb) => { await post(`/api/business/action/${verb}`, { id }); app.refresh(); };
   if (app.state.sel) {
     const item = app.state.item;
     const act = async (a) => {
       if (a.href) { window.open(a.href, '_blank'); return; }
       if (a.confirm && !window.confirm(a.confirm)) return;
-      if (a.verb === 'accept' || a.verb === 'dismiss') { await decide(item.id, a.verb === 'accept' ? 'accepted' : 'dismissed'); app.loadItem(app.state.sel); return; }
       await post(`/api/business/action/${a.verb}`, { id: item.id });
-      if (a.verb === 'forget') app.select(null); else app.loadItem(app.state.sel);
+      if (a.removes) app.select(null); else app.loadItem(app.state.sel);
       app.refresh();
     };
     const detail = item && !item.error ? html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -89,8 +88,8 @@ export function Middle({ app, data, mod, fmt }) {
           <span onClick=${() => app.select({ module: 'business', id: l.id })} style=${{ cursor: 'pointer' }}>${l.text}</span>
           ${l.why && html`<span style=${{ fontSize: 13, color: T.muted }}>${l.why}</span>`}
         </div>
-        <${Button} label="Accept" hue=${hue} onClick=${() => decide(l.id, 'accepted')} />
-        <${Button} label="Dismiss" onClick=${() => decide(l.id, 'dismissed')} />
+        <${Button} label="Accept" hue=${hue} onClick=${() => decide(l.id, 'accept')} />
+        <${Button} label="Dismiss" onClick=${() => decide(l.id, 'dismiss')} />
       </div>`)}
     </div>`}
   </div>`;

@@ -114,7 +114,7 @@ class Question extends Component {
       this.setState({ error: e.message });
       return;
     }
-    if (a.verb === 'delete') app.select(null);
+    if (a.removes) app.select(null);
     else app.loadItem(app.state.sel);
     app.refresh();
   }

@@ -29,6 +29,7 @@ MEANS = {
 }
 # No "All": the shell resets every page's chip to "All", and an unknown chip falls back to Upcoming, which is the useful landing slice.
 CHIPS = ("Upcoming", "Going", "Past", "Interests")
+LISTED = "status != 'dismissed'"                    # a dismissed event leaves every slice; the row stays for the scout
 RESOURCE = "social"
 
 
@@ -42,10 +43,10 @@ def _where(chip: str) -> str:
     if chip == "Going":
         return "kind = 'event' AND status = 'going'"
     if chip == "Past":
-        return "kind = 'event' AND starts_at < :today"
+        return f"kind = 'event' AND {LISTED} AND starts_at < :today"
     if chip == "Interests":
         return "kind = 'interest'"
-    return "kind = 'event' AND starts_at >= :today"      # Upcoming: every future event, a dismissed one struck through
+    return f"kind = 'event' AND {LISTED} AND starts_at >= :today"
 
 
 def _order(chip: str) -> str:
@@ -79,7 +80,6 @@ def _row(r: dict, fmt: str) -> dict:
         "text": r["text"],
         "stamp": r["created_at"],
         "leading": {"kind": r["category"] or "interest"},
-        "done": r["status"] == "dismissed",
     }
     clock = _clock(r, fmt)
     if clock is not None:
@@ -174,13 +174,13 @@ def item(store: Store, item_id: str) -> dict:
         if r["status"] != "going":
             actions.append({"verb": "going", "label": "Going", "primary": True})
         if r["status"] != "dismissed":
-            actions.append({"verb": "dismiss", "label": "Dismiss"})
+            actions.append({"verb": "dismiss", "label": "Dismiss", "removes": True})
         if r["ref"]:
             actions.append({"verb": "link", "label": "Open", "href": r["ref"]})
     else:
         if r["ref"]:
             actions.append({"verb": "link", "label": "Open", "href": r["ref"]})
-        actions.append({"verb": "forget", "label": "Forget", "confirm": "Forget this interest?"})
+        actions.append({"verb": "forget", "label": "Forget", "confirm": "Forget this interest?", "removes": True})
     return {**r, "module": "social", "actions": actions}
 
 
@@ -261,8 +261,8 @@ def today(store: Store) -> list[dict]:
     fmt = str(store.setting("ui.time_format"))
     start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
     rows = store.query(
-        "SELECT * FROM social_items WHERE (kind = 'event' AND status != 'dismissed' AND starts_at >= ? AND starts_at <= ?)"
-        " OR created_at >= ? ORDER BY starts_at IS NULL, starts_at ASC, created_at DESC",
+        f"SELECT * FROM social_items WHERE {LISTED} AND ((kind = 'event' AND starts_at >= ? AND starts_at <= ?) OR created_at >= ?)"
+        " ORDER BY starts_at IS NULL, starts_at ASC, created_at DESC",
         (today_stamp(), start.strftime("%Y-%m-%dT23:59"), iso(start)),
     )
     return [_row(r, fmt) for r in rows]

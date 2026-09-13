@@ -20,15 +20,15 @@
 ### A missing or non-numeric `id` on an action is a 500, not a 400
 
 - Kind: bug
-- Where: `app/modules/finance/routes.py` `_check_update` and `_check_id` (`int(body["id"])`); `app/modules/web_search/routes.py` `agree` and `disagree` checks (`int(body.get("id", 0))`)
-- Found: 2026-09-12, sync-architecture
+- Where: `app/modules/finance/routes.py` `_check_update` and `_check_id` (`int(body["id"])`); `app/modules/web_search/routes.py` `agree` and `disagree` checks (`int(body.get("id", 0))`); `app/modules/business/routes.py` `_validate` and `app/modules/social/routes.py` `_validate` (`int(body.get("id", 0))`, and `_forget` re-parsing it)
+- Found: 2026-09-12, sync-architecture; 2026-09-13, the dismissal change found the same in Business and Social
 - Status: open
 
-What happens: both modules promise that an action is validated before the job is queued, but the id is parsed with a bare `int()` before any check runs. Finance's `update`, `end` and `forget` posted without an `id` raise `KeyError`, and any of these posted with `"id": "abc"` raises `ValueError`, so the route answers 500 with a traceback in the log instead of the 400 the other checks produce. The pages always send integer ids, so only an agent or a hand-made request hits it.
+What happens: every one of these modules promises that an action is validated before the job is queued, but the id is parsed with a bare `int()` before any check runs. Finance's `update`, `end` and `forget` posted without an `id` raise `KeyError`, and any of these posted with `"id": "abc"` raises `ValueError`, so the route answers 500 with a traceback in the log instead of the 400 the other checks produce. Business's and Social's `_validate` do the same on every verb but `capture`. The pages always send integer ids, so only an agent or a hand-made request hits it. Memory is the one module clear of it: `_suggestion_id` answers 404 on anything that is not `s<digits>`.
 
 Expected: a malformed id is a 400 naming the field, like every other validation failure in those routes.
 
-Fix: one helper that reads `body.get("id")` and answers `HTTPException(400, "id required")` on a missing or non-integer value, used by both modules' checks.
+Fix: one helper that reads `body.get("id")` and answers `HTTPException(400, "id required")` on a missing or non-integer value, used by every module's checks.
 
 ### Recurring payments have no billing date
 

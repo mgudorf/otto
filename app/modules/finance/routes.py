@@ -173,7 +173,7 @@ def item(store: Store, entry_id: str) -> dict:
         actions.append({"verb": "due", "label": "Set date"})
     if not r["ended_at"]:
         actions.append({"verb": "end", "label": "End"})
-    actions.append({"verb": "forget", "label": "Forget", "confirm": "Forget this entry and its history?"})
+    actions.append({"verb": "forget", "label": "Forget", "confirm": "Forget this entry and its history?", "removes": True})
     text = "\n".join(p for p in (r["name"], amount_text(r), f"next {day_label(nxt)}" if nxt else None, r["note"]) if p)
     return {**r, "module": "finance", "text": text, "next_due": nxt, "history": history, "actions": actions}
 

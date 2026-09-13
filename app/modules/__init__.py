@@ -10,6 +10,9 @@ A module is a package under app/modules/<name>/ with:
   agent.md      system prompt for the module's Claude session (optional)
   setup(config) / async shutdown()   on the package, for modules that own process resources (optional)
 A module that fails to import or set up is recorded and skipped; the rest of the app keeps running.
+A row the owner dismisses or deletes leaves every list that presents it (the module's LEFT, today, queue and the agent's
+context) while staying in its table, so no task suggests it again. The action that removes a row says so with removes: True;
+that is how the page and Home know to close the inspector standing on it.
 Its page, app/static/pages/<name>.js, exports load, meta, Left, Middle and optionally Right, which replaces the session pane.
 """
 

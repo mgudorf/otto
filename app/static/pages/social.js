@@ -55,7 +55,7 @@ export function Middle({ app, data, mod, fmt }) {
       if (a.href) { window.open(a.href, '_blank'); return; }
       if (a.confirm && !window.confirm(a.confirm)) return;
       await post(`/api/social/action/${a.verb}`, { id: item.id });
-      if (a.verb === 'forget') app.select(null); else app.loadItem(app.state.sel);
+      if (a.removes) app.select(null); else app.loadItem(app.state.sel);
       app.refresh();
     };
     const where = item && [item.venue, item.city].filter(Boolean).join(', ');

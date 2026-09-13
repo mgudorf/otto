@@ -14,6 +14,7 @@ from app.store import Store, iso, now_iso
 router = APIRouter(prefix="/api/web_search")
 
 KINDS = ("money", "work", "learn")
+LISTED = "status != 'disagreed'"                   # a finding turned down leaves the list; the row stays for the nightly run
 RESOURCE = "web_search"
 
 
@@ -24,7 +25,6 @@ def _row(r: dict) -> dict:
         "text": r["title"],
         "stamp": r["found_at"],
         "leading": {"kind": r["kind"]},
-        "done": r["status"] == "disagreed",
     }
 
 
@@ -54,7 +54,7 @@ def item(store: Store, finding_id: str) -> dict:
     actions = []
     if r["status"] == "open":
         actions.append({"verb": "agree", "label": "Agree", "primary": True})
-        actions.append({"verb": "disagree", "label": "Disagree"})
+        actions.append({"verb": "disagree", "label": "Disagree", "removes": True})
     actions.append({"verb": "link", "label": "Open", "href": r["url"]})
     return {**r, "module": "web_search", "text": f"{r['title']}\n\n{r['summary']}", "created_at": r["found_at"], "actions": actions}
 
@@ -97,7 +97,7 @@ def numbers(store: Store) -> dict:
 
 def today(store: Store) -> list[dict]:
     start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
-    rows = store.query("SELECT * FROM search_findings WHERE found_at >= ? ORDER BY found_at DESC, id DESC", (iso(start),))
+    rows = store.query(f"SELECT * FROM search_findings WHERE {LISTED} AND found_at >= ? ORDER BY found_at DESC, id DESC", (iso(start),))
     return [_row(r) for r in rows]
 
 

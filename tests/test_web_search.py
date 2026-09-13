@@ -80,10 +80,16 @@ def test_decisions_and_topic_tools(config):
             from app.modules.web_search.routes import queue
 
             assert [r["id"] for r in queue(store)] == [f2]
+            # Turned down: off Home's Today as well as the queue, still in the table so the nightly run never brings it back
+            assert (await c.post("/api/web_search/action/disagree", json={"id": f2})).json()["status"] == "disagreed"
+            home = (await c.get("/api/home/left")).json()
+            assert {g["module"]: g["count"] for g in home["groups"]}["web_search"] == 1
+            assert [r["id"] for g in home["groups"] if g["module"] == "web_search" for r in g["rows"]] == [f1]
+            assert [f["id"] for f in read.tools["search_findings"]("", status="disagreed")] == [f2]
             assert full.tools["search_topic_remove"](tid) == {"id": tid} and "error" in full.tools["search_topic_remove"](tid)
             assert read.tools["search_topics"]() == []
             ev = (await c.get("/api/events?module=web_search")).json()
-            assert [e["verb"] for e in ev["events"]][:3] == ["topic removed", "agreed", "topic added"]
+            assert [e["verb"] for e in ev["events"]][:4] == ["topic removed", "disagreed", "agreed", "topic added"]
         await app.state.runner.drain(1)
         app.state.store.close()
 

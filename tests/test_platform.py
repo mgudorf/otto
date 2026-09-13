@@ -11,6 +11,7 @@ from app.modules import Registry
 from app.runner import JobContext
 
 FORBIDDEN_IN_TASKS = {"session_turn", "oneshot", "write_tools"}
+ACTION_KEYS = {"verb", "label", "primary", "confirm", "href", "removes"}    # everything the inspector reads off an action
 
 
 def test_revision_changes_with_content(tmp_path: Path):
@@ -73,6 +74,36 @@ def test_registry_picks_up_queue_hook(tmp_path: Path, monkeypatch):
     assert reg.errors == {}
     assert reg.get("withq").queue(None) == [{"id": 1, "text": "waiting"}]
     assert reg.get("without").queue is None
+
+
+def _action_literals(tree: ast.AST) -> list[dict]:
+    """Every {"verb": ...} dict in a routes.py, as {key: value node}: what item() offers the inspector."""
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        pairs = {k.value: v for k, v in zip(node.keys, node.values) if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+        if "verb" in pairs:
+            out.append(pairs)
+    return out
+
+
+def test_item_verbs_are_routes_the_module_serves():
+    """Home's inspector posts /api/<module>/action/<verb> with {id} and reads nothing else off an action, so a verb
+    without an href must be a served action and a misspelled key (removes, not remove) must fail here, not in the browser."""
+    for routes_py in sorted((ROOT / "app" / "modules").glob("*/routes.py")):
+        name = routes_py.parent.name
+        tree = ast.parse(routes_py.read_text("utf-8"))
+        served: set[str] = set()
+        for node in tree.body:      # the module's action table, whatever it is called
+            if isinstance(node, ast.Assign) and {t.id for t in node.targets if isinstance(t, ast.Name)} & {"ACTIONS", "VERBS"}:
+                served |= {k.value for k in node.value.keys if isinstance(k, ast.Constant)}
+        for action in _action_literals(tree):
+            assert set(action) <= ACTION_KEYS, f"{name}: an action carries {sorted(set(action) - ACTION_KEYS)}"
+            verb = action["verb"]
+            if "href" in action or not isinstance(verb, ast.Constant):
+                continue
+            assert verb.value in served, f"{name}: item offers {verb.value!r}, which is no action it serves"
 
 
 def test_tasks_never_reach_interactive_claude():

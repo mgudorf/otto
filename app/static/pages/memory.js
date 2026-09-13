@@ -50,7 +50,7 @@ export function Middle({ app, data, mod, fmt }) {
       if (a.href) { window.open(a.href, '_blank'); return; }
       if (a.confirm && !window.confirm(a.confirm)) return;
       await post(`/api/memory/action/${a.verb}`, { id: item.id });
-      if (a.verb === 'forget') app.select(null); else app.loadItem(app.state.sel);
+      if (a.removes) app.select(null); else app.loadItem(app.state.sel);
       app.refresh();
     };
     const tags = item && !item.error ? html`<div style=${{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', ...mono13, color: T.muted }}>
@@ -88,8 +88,8 @@ export function Middle({ app, data, mod, fmt }) {
       <${GroupHeader} label="suggested" count=${b.suggestions.length} />
       ${b.suggestions.map((s) => html`<div key=${s.id} style=${{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 36, padding: '6px 12px', borderRadius: 6 }}>
         <span style=${{ flex: 1, minWidth: 0 }}>${s.text}</span>
-        <${Button} label="Accept" hue=${hue} onClick=${async () => { await post('/api/memory/action/suggestion', { id: s.id, status: 'accepted' }); app.refresh(); }} />
-        <${Button} label="Dismiss" onClick=${async () => { await post('/api/memory/action/suggestion', { id: s.id, status: 'dismissed' }); app.refresh(); }} />
+        <${Button} label="Accept" hue=${hue} onClick=${async () => { await post('/api/memory/action/accept', { id: s.id }); app.refresh(); }} />
+        <${Button} label="Dismiss" onClick=${async () => { await post('/api/memory/action/dismiss', { id: s.id }); app.refresh(); }} />
       </div>`)}
     </div>`}
   </div>`;

@@ -8,7 +8,12 @@ from app.modules.education.questions import SELECT, add_question, parts_of, stat
 from app.modules.education.routes import detail
 from app.store import Store, now_iso
 
-STATUS_SQL = {"active": "q.completed_at IS NULL", "completed": "q.completed_at IS NOT NULL"}
+# A deleted question stays listed here, and only here: the tutor must see what never to write again.
+STATUS_SQL = {
+    "active": "q.deleted_at IS NULL AND q.completed_at IS NULL",
+    "completed": "q.deleted_at IS NULL AND q.completed_at IS NOT NULL",
+    "deleted": "q.deleted_at IS NOT NULL",
+}
 
 
 def register(read, full, store: Store, config=None) -> None:
@@ -19,7 +24,7 @@ def register(read, full, store: Store, config=None) -> None:
         return topic_rows(store)
 
     def education_questions(topic_id: int | None = None, status: str | None = None, limit: int = 50) -> list[dict]:
-        """Questions newest first: id, topic, title, topic_tag, difficulty, status (active or completed), score, the owner's tags. Check here before writing a question so nothing repeats."""
+        """Questions newest first: id, topic, title, topic_tag, difficulty, status (active, completed or deleted), score, the owner's tags. Check here before writing a question so nothing repeats; a deleted one the owner threw away and must never see again."""
         where, params = [], []
         if topic_id is not None:
             where.append("q.topic_id = ?")

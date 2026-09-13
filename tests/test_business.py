@@ -34,10 +34,32 @@ def test_business_end_to_end(config):
             assert {g["module"]: g["count"] for g in home["groups"]}["business"] == 2
             numbers = (await c.get("/api/home/numbers")).json()
             assert next(n for n in numbers if n["module"] == "business")["value"] == 0
+
+            # A lead waits under Review however old it is; each verb is a route taking {id}, which is what Home posts.
+            store = app.state.store
+            store.execute(
+                "INSERT INTO business_items(kind, text, ref, why, created_at, updated_at)"
+                " VALUES ('lead', 'Acme is hiring', 'https://acme.example/jobs', 'serves the december plan', ?, ?)",
+                ("2026-09-01T09:00:00+00:00",) * 2,
+            )
+            lid = store.scalar("SELECT id FROM business_items WHERE kind = 'lead'")
+            review = next(g for g in (await c.get("/api/home/left")).json()["groups"] if g["label"] == "Review")
+            assert review["module"] == "business" and [r["id"] for r in review["rows"]] == [lid]
+            assert [a["verb"] for a in (await c.get(f"/api/business/item/{lid}")).json()["actions"]] == ["accept", "dismiss", "link"]
+            assert (await c.post("/api/business/action/dismiss", json={"id": pid})).status_code == 400   # only a lead is decided
+            assert (await c.post("/api/business/action/dismiss", json={"id": lid})).json()["status"] == "dismissed"
+
+            # Dismissed: off every chip and off Home, struck through nowhere, and still in the table for the scout.
+            listed = [r["id"] for g in (await c.get("/api/business/left")).json()["groups"] for r in g["rows"]]
+            assert lid not in listed and (await c.get("/api/business/left?chip=Leads")).json()["groups"] == []
+            assert all(g["label"] != "Review" for g in (await c.get("/api/home/left")).json()["groups"])
+            assert store.scalar("SELECT COUNT(*) FROM business_items WHERE kind = 'lead'") == 1
+            assert [a["verb"] for a in (await c.get(f"/api/business/item/{lid}")).json()["actions"]] == ["link"]
+
             assert (await c.post("/api/business/action/forget", json={"id": pid})).status_code == 200
             assert (await c.get(f"/api/business/item/{pid}")).status_code == 404
             ev = (await c.get("/api/events?module=business")).json()
-            assert [e["verb"] for e in ev["events"]][:2] == ["forgot", "captured"]
+            assert [e["verb"] for e in ev["events"]][:3] == ["forgot", "dismissed", "captured"]
         await app.state.runner.drain(1)
         app.state.store.close()
 

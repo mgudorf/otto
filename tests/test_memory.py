@@ -87,14 +87,23 @@ def test_done_and_suggestion_actions(config):
             left = (await c.get("/api/memory/left?chip=Tasks")).json()
             assert left["groups"][0]["rows"][0]["done"] is True
 
+            # A suggestion carries its own row id, "s<n>", so it never collides with a memory of the same number.
             sid = store.execute(
                 "INSERT INTO memory_suggestions(text, memory_ids, created_at) VALUES (?, ?, ?)", ("call them today", f"[{mid}]", now_iso())
             ).lastrowid
-            assert (await c.get("/api/memory/blank")).json()["suggestions"][0]["id"] == sid
-            r = await c.post("/api/memory/action/suggestion", json={"id": sid, "status": "accepted"})
-            assert r.json() == {"id": sid, "status": "accepted"}
+            row = f"s{sid}"
+            assert (await c.get("/api/memory/blank")).json()["suggestions"][0]["id"] == row
+            assert [r["id"] for g in (await c.get("/api/home/left")).json()["groups"] if g["label"] == "Review" for r in g["rows"]] == [row]
+            sug = (await c.get(f"/api/memory/item/{row}")).json()
+            assert sug["kind"] == "suggestion" and [a["verb"] for a in sug["actions"]] == ["accept", "dismiss"]
+            assert all(a["removes"] for a in sug["actions"])
+            r = await c.post("/api/memory/action/accept", json={"id": row})
+            assert r.json() == {"id": row, "status": "accepted"}
             assert (await c.get("/api/memory/blank")).json()["suggestions"] == []
-            assert (await c.post("/api/memory/action/suggestion", json={"id": sid, "status": "later"})).status_code == 400
+            assert [a["verb"] for a in (await c.get(f"/api/memory/item/{row}")).json()["actions"]] == []
+            assert all(g["label"] != "Review" for g in (await c.get("/api/home/left")).json()["groups"])
+            assert (await c.post("/api/memory/action/dismiss", json={"id": mid})).status_code == 404     # a memory is not a suggestion
+            assert (await c.get("/api/memory/item/nope")).status_code == 404
             verbs = [e["verb"] for e in (await c.get("/api/events?module=memory")).json()["events"]]
             assert verbs[:2] == ["accepted", "completed"]
             missing = await c.post("/api/memory/action/done", json={"id": mid + 999})

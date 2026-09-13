@@ -20,6 +20,7 @@ RECENT = 5                                                     # scores listed p
 DIFFICULTY_MAX = 10                                            # 1-2 introduction, 3-5 intro course, 6-8 advanced/masters, 9-10 expert
 TAG_CHARS = 40
 ACTIVE = "q.completed_at IS NULL"
+LISTED = "q.deleted_at IS NULL"                                # a deleted question is off both slices; the row stays, unrepeatable
 SELECT = """SELECT q.*, t.name AS topic,
   (SELECT COUNT(*) FROM question_parts p WHERE p.question_id = q.id) AS parts,
   (SELECT COUNT(*) FROM question_parts p WHERE p.question_id = q.id AND p.score IS NOT NULL) AS graded_parts
@@ -69,11 +70,13 @@ def clean_tags(tags) -> list[str]:
 
 # ---- reads ---------------------------------------------------------------------------------------
 def status_of(q: dict) -> str:
+    if q.get("deleted_at"):
+        return "deleted"
     return "completed" if q["completed_at"] else "active"
 
 
 def question(store: Store, question_id: int) -> dict | None:
-    return store.one(f"{SELECT} WHERE q.id = ?", (question_id,))
+    return store.one(f"{SELECT} WHERE {LISTED} AND q.id = ?", (question_id,))
 
 
 def parts_of(store: Store, question_id: int) -> list[dict]:
@@ -86,33 +89,34 @@ def feedback_of(store: Store, question_id: int) -> list[str]:
 
 def due_queue(store: Store) -> list[dict]:
     """Active questions, the ones with an answer in progress first, then oldest first."""
-    return store.query(f"{SELECT} WHERE {ACTIVE} ORDER BY q.started_at IS NULL, q.created_at")
+    return store.query(f"{SELECT} WHERE {LISTED} AND {ACTIVE} ORDER BY q.started_at IS NULL, q.created_at")
 
 
 def due_count(store: Store) -> int:
-    return store.scalar(f"SELECT COUNT(*) FROM questions q WHERE {ACTIVE}")
+    return store.scalar(f"SELECT COUNT(*) FROM questions q WHERE {LISTED} AND {ACTIVE}")
 
 
 def open_question(store: Store) -> dict | None:
     """The question the page opened last, whatever its state: the tutor's context."""
-    return store.one(f"{SELECT} WHERE q.opened_at IS NOT NULL ORDER BY q.opened_at DESC, q.id DESC LIMIT 1")
+    return store.one(f"{SELECT} WHERE {LISTED} AND q.opened_at IS NOT NULL ORDER BY q.opened_at DESC, q.id DESC LIMIT 1")
 
 
 def topic_rows(store: Store) -> list[dict]:
     """Progress per topic: difficulty, completed/asked, average, the last RECENT scores, last asked."""
     rows = store.query(
-        """SELECT t.id, t.name, t.description, t.difficulty,
-             (SELECT COUNT(*) FROM questions q WHERE q.topic_id = t.id) AS asked,
-             (SELECT COUNT(*) FROM questions q WHERE q.topic_id = t.id AND q.completed_at IS NOT NULL) AS completed,
-             (SELECT AVG(score) FROM questions q WHERE q.topic_id = t.id AND q.completed_at IS NOT NULL) AS average,
-             (SELECT MAX(created_at) FROM questions q WHERE q.topic_id = t.id) AS last_asked
+        f"""SELECT t.id, t.name, t.description, t.difficulty,
+             (SELECT COUNT(*) FROM questions q WHERE q.topic_id = t.id AND {LISTED}) AS asked,
+             (SELECT COUNT(*) FROM questions q WHERE q.topic_id = t.id AND {LISTED} AND q.completed_at IS NOT NULL) AS completed,
+             (SELECT AVG(score) FROM questions q WHERE q.topic_id = t.id AND {LISTED} AND q.completed_at IS NOT NULL) AS average,
+             (SELECT MAX(created_at) FROM questions q WHERE q.topic_id = t.id AND {LISTED}) AS last_asked
            FROM topics t WHERE t.retired_at IS NULL ORDER BY t.name"""
     )
     for t in rows:
         t["average"] = None if t["average"] is None else round(t["average"])
         t["recent"] = [
             r["score"] for r in store.query(
-                "SELECT score FROM questions WHERE topic_id = ? AND completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT ?", (t["id"], RECENT)
+                "SELECT score FROM questions WHERE topic_id = ? AND deleted_at IS NULL AND completed_at IS NOT NULL"
+                " ORDER BY completed_at DESC LIMIT ?", (t["id"], RECENT)
             )
         ]
     return rows
@@ -121,7 +125,7 @@ def topic_rows(store: Store) -> list[dict]:
 def waiting_topics(store: Store, limit: int) -> list[dict]:
     """Active topics that have waited longest for a question, never asked first: breadth over depth."""
     return store.query(
-        """SELECT t.*, (SELECT MAX(created_at) FROM questions q WHERE q.topic_id = t.id) AS last_asked
+        f"""SELECT t.*, (SELECT MAX(created_at) FROM questions q WHERE q.topic_id = t.id AND {LISTED}) AS last_asked
            FROM topics t WHERE t.retired_at IS NULL ORDER BY last_asked IS NOT NULL, last_asked, t.name LIMIT ?""",
         (limit,),
     )
@@ -150,19 +154,20 @@ def feedback_lines(store: Store, topic_id: int | None = None) -> str:
 
 
 def _asked_line(store: Store, q: dict) -> str:
-    """A title and its part titles: what "never repeat" covers."""
+    """A title and its part titles: what "never repeat" covers. A deleted one says so; it is why it must not come back."""
     parts = [p["title"] for p in parts_of(store, q["id"]) if p["title"]]
-    return q["title"] + (f" ({', '.join(parts)})" if parts else "")
+    return q["title"] + (f" ({', '.join(parts)})" if parts else "") + (" [deleted by the owner]" if q["deleted_at"] else "")
 
 
 def _topic_block(store: Store, t: dict) -> str:
     lines = [f"Topic {t['id']}: {t['name']} — difficulty {t['difficulty']}/{DIFFICULTY_MAX}"]
     if t.get("description"):
         lines.append(f"  What the owner wants: {t['description'][:300]}")
-    asked = store.query("SELECT id, title FROM questions WHERE topic_id = ? ORDER BY created_at DESC", (t["id"],))
+    asked = store.query("SELECT id, title, deleted_at FROM questions WHERE topic_id = ? ORDER BY created_at DESC", (t["id"],))
     lines.append("  Already asked, never repeat: " + ("; ".join(_asked_line(store, a) for a in asked) if asked else "nothing yet"))
     last = store.one(
-        "SELECT id, title, score FROM questions WHERE topic_id = ? AND completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT 1", (t["id"],)
+        "SELECT id, title, score FROM questions WHERE topic_id = ? AND deleted_at IS NULL AND completed_at IS NOT NULL"
+        " ORDER BY completed_at DESC LIMIT 1", (t["id"],)
     )
     if last:
         graded = [p for p in parts_of(store, last["id"]) if p["score"] is not None]

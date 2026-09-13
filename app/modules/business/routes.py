@@ -14,6 +14,7 @@ router = APIRouter(prefix="/api/business")
 
 KINDS = ("plan", "person", "event")            # what the owner captures; documents and leads arrive by task
 CHIPS = {"All": None, "Plans": "plan", "People": "person", "Events": "event", "Documents": "document", "Leads": "lead"}
+LISTED = "status != 'dismissed'"                   # a dismissed lead leaves every chip; the row stays for the scout
 RESOURCE = "business"
 
 
@@ -25,7 +26,6 @@ def _row(r: dict) -> dict:
         "text": r["text"],
         "stamp": r["created_at"],
         "leading": leading,
-        "done": r["kind"] == "lead" and r["status"] == "dismissed",
     }
 
 
@@ -67,10 +67,11 @@ def left(request: Request, query: str = "", chip: str = "All", page: int = 0) ->
     limit = size * (page + 1)
     kind = CHIPS.get(chip)
     where, params = _search(query)
+    where.append(LISTED)
     if kind:
         where.append("kind = ?")
         params.append(kind)
-    sql_where = ("WHERE " + " AND ".join(where)) if where else ""
+    sql_where = "WHERE " + " AND ".join(where)
     total = store.scalar(f"SELECT COUNT(*) FROM business_items {sql_where}", tuple(params))
     rows = store.query(f"SELECT * FROM business_items {sql_where} ORDER BY created_at DESC LIMIT ?", (*params, limit))
     return {
@@ -103,12 +104,12 @@ def item(store: Store, item_id: str) -> dict:
     elif r["kind"] == "lead":
         if r["status"] == "open":
             actions.append({"verb": "accept", "label": "Accept", "primary": True})
-            actions.append({"verb": "dismiss", "label": "Dismiss"})
+            actions.append({"verb": "dismiss", "label": "Dismiss", "removes": True})
         actions.append({"verb": "link", "label": "Open", "href": r["ref"]})
     else:
         if r["ref"]:
             actions.append({"verb": "link", "label": "Open", "href": r["ref"]})
-        actions.append({"verb": "forget", "label": "Forget", "confirm": "Forget this item?"})
+        actions.append({"verb": "forget", "label": "Forget", "confirm": "Forget this item?", "removes": True})
     return {**r, "module": "business", "actions": actions}
 
 
@@ -138,8 +139,8 @@ def _validate(store: Store, verb: str, body: dict) -> None:
     r = _get(store, int(body.get("id", 0)))
     if verb == "forget" and r["kind"] == "document":
         raise HTTPException(400, "delete the file instead; the folder is re-indexed")
-    if verb == "lead" and (r["kind"] != "lead" or body.get("status") not in ("accepted", "dismissed")):
-        raise HTTPException(400, "a lead and a status of accepted or dismissed are required")
+    if verb in ("accept", "dismiss") and r["kind"] != "lead":
+        raise HTTPException(400, "only a lead is accepted or dismissed")
     if verb == "open" and (r["kind"] != "document" or not r["ref"] or not Path(r["ref"]).is_file()):
         raise HTTPException(400, "not a document on disk")
 
@@ -165,13 +166,17 @@ def _forget(store: Store, body: dict, ctx) -> dict:
     return {"id": r["id"]}
 
 
-def _lead(store: Store, body: dict, ctx) -> dict:
-    status = body["status"]
-    r = _get(store, int(body["id"]))
-    with ctx.commit() as conn:
-        conn.execute("UPDATE business_items SET status = ?, updated_at = ? WHERE id = ?", (status, now_iso(), r["id"]))
-    ctx.event(status, r["text"][:120], ref=str(r["id"]))
-    return {"id": r["id"], "status": status}
+def _decide(status: str):
+    """One verb per decision, each taking {id}: what the page posts is what Home posts."""
+
+    def fn(store: Store, body: dict, ctx) -> dict:
+        r = _get(store, int(body["id"]))
+        with ctx.commit() as conn:
+            conn.execute("UPDATE business_items SET status = ?, updated_at = ? WHERE id = ?", (status, now_iso(), r["id"]))
+        ctx.event(status, r["text"][:120], ref=str(r["id"]))
+        return {"id": r["id"], "status": status}
+
+    return fn
 
 
 def _open(store: Store, body: dict, ctx) -> dict:
@@ -181,7 +186,7 @@ def _open(store: Store, body: dict, ctx) -> dict:
     return {"id": r["id"]}
 
 
-ACTIONS = {"capture": _capture, "forget": _forget, "lead": _lead, "open": _open}
+ACTIONS = {"capture": _capture, "forget": _forget, "accept": _decide("accepted"), "dismiss": _decide("dismissed"), "open": _open}
 
 
 # ---- shell hooks ---------------------------------------------------------------------------
@@ -189,9 +194,15 @@ def numbers(store: Store) -> dict:
     return {"value": store.scalar("SELECT COUNT(*) FROM business_items WHERE kind = 'lead' AND status = 'open'"), "label": "leads"}
 
 
+def queue(store: Store) -> list[dict]:
+    """Every lead still waiting on a yes or no, newest first; Home lists these under Review."""
+    rows = store.query("SELECT * FROM business_items WHERE kind = 'lead' AND status = 'open' ORDER BY created_at DESC, id DESC")
+    return [_row(r) for r in rows]
+
+
 def today(store: Store) -> list[dict]:
     start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
-    rows = store.query("SELECT * FROM business_items WHERE created_at >= ? ORDER BY created_at DESC", (iso(start),))
+    rows = store.query(f"SELECT * FROM business_items WHERE {LISTED} AND created_at >= ? ORDER BY created_at DESC", (iso(start),))
     return [_row(r) for r in rows]
 
 

@@ -10,8 +10,8 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from app.api import pane_turn
 from app.modules.education import grading, questions
 from app.modules.education.questions import (
-    ACTIVE, DIFFICULTY_MAX, RECENT, SELECT, clean_tags, due_count, due_queue, feedback_of, label, open_question, part_title, parts_of,
-    question, status_of, tags_of, topic_rows,
+    ACTIVE, DIFFICULTY_MAX, LISTED, RECENT, SELECT, clean_tags, due_count, due_queue, feedback_of, label, open_question, part_title,
+    parts_of, question, status_of, tags_of, topic_rows,
 )
 from app.runner import JobFailed
 from app.store import Store, now_iso, parse
@@ -63,7 +63,7 @@ def detail(store: Store, question_id: int) -> dict | None:
     if st == "active":
         if parts and all(p["score"] is not None for p in parts):
             actions.append({"verb": "complete", "label": "Complete quiz", "primary": True})
-        actions.append({"verb": "delete", "label": "Delete", "confirm": f'Delete "{q["title"]}"?'})
+        actions.append({"verb": "delete", "label": "Delete", "confirm": f'Delete "{q["title"]}"?', "removes": True})
     kind = f"{q['topic']} · d{q['difficulty']}" + (f" · {q['score']}" if st == "completed" else "")
     setup = (f"{q['definitions']}\n\n" if q["definitions"] else "") + q["premise"]
     text = f"{q['title']}\n\n{setup}\n\n" + "\n".join(f"({p['label']}) {p['title']}: {p['text']}" for p in parts)
@@ -90,13 +90,13 @@ def left(request: Request, query: str = "", chip: str = "active", page: int = 0)
         params = (f"%{query.strip()}%",) * 5
     out = {"chips": list(TABS), "chip": tab}
     if tab == "active":
-        rows = store.query(f"{SELECT} WHERE {ACTIVE}{where} ORDER BY q.started_at IS NULL, q.created_at", params)
+        rows = store.query(f"{SELECT} WHERE {LISTED} AND {ACTIVE}{where} ORDER BY q.started_at IS NULL, q.created_at", params)
         groups = [{"label": "due", "count": len(rows), "rows": [_row(q) for q in rows]}] if rows else []
         return {**out, "groups": groups, "showing": f"{len(rows)} / {len(rows)}", "more": False}
     size = int(store.setting("ui.page_size"))
     limit = size * (page + 1)
-    total = store.scalar(f"SELECT COUNT(*) FROM questions q WHERE NOT ({ACTIVE}){where}", params)
-    rows = store.query(f"{SELECT} WHERE NOT ({ACTIVE}){where} ORDER BY q.completed_at DESC LIMIT ?", (*params, limit))
+    total = store.scalar(f"SELECT COUNT(*) FROM questions q WHERE {LISTED} AND NOT ({ACTIVE}){where}", params)
+    rows = store.query(f"{SELECT} WHERE {LISTED} AND NOT ({ACTIVE}){where} ORDER BY q.completed_at DESC LIMIT ?", (*params, limit))
     return {**out, "groups": _group_by_day(rows), "showing": f"{min(limit, total)} / {total}", "more": total > limit}
 
 
@@ -234,9 +234,9 @@ def _delete(store: Store, body: dict):
     q = _question_for(store, body, ("active",))
 
     def write(ctx) -> dict:
+        # Stamped, not dropped: off the page and out of the tutor's reach, but still in the generator's never-repeat list.
         with ctx.commit() as conn:
-            conn.execute("UPDATE education_feedback SET question_id = NULL WHERE question_id = ?", (q["id"],))   # the owner's words stay
-            conn.execute("DELETE FROM questions WHERE id = ?", (q["id"],))                                      # parts go with it
+            conn.execute("UPDATE questions SET deleted_at = ? WHERE id = ?", (now_iso(), q["id"]))
         ctx.event("deleted", q["title"][:120], ref=str(q["id"]))
         return {"id": q["id"]}
 

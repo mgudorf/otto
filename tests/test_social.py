@@ -63,13 +63,21 @@ def test_social_end_to_end(config):
             assert (await c.get(f"/api/social/item/{eid}")).json()["status"] == "going"
             assert [a["verb"] for a in (await c.get(f"/api/social/item/{eid}")).json()["actions"]] == ["dismiss", "link"]
             assert (await c.get("/api/social/left?chip=Going")).json()["showing"] == "1 / 1"
+
+            # Dismissed: off Upcoming, Going, Past and Home's Today, and still in the table so the scout stops bringing it
+            assert (await c.post("/api/social/action/dismiss", json={"id": eid})).json()["status"] == "dismissed"
+            for chip in ("", "?chip=Going", "?chip=Past"):
+                assert (await c.get(f"/api/social/left{chip}")).json()["groups"] == [], chip
+            assert [r["id"] for g in (await c.get("/api/home/left")).json()["groups"] if g["module"] == "social" for r in g["rows"]] == [iid]
+            assert store.scalar("SELECT COUNT(*) FROM social_items WHERE status = 'dismissed'") == 1
+            assert store.scalar("SELECT COUNT(*) FROM social_items WHERE kind = 'event' AND status = 'going'") == 0
             assert (await c.post("/api/social/action/forget", json={"id": eid})).status_code == 400
             assert (await c.post("/api/social/action/going", json={"id": iid})).status_code == 400
             assert (await c.post("/api/social/action/forget", json={"id": iid})).status_code == 200
             assert (await c.get(f"/api/social/item/{iid}")).status_code == 404
 
             ev = (await c.get("/api/events?module=social")).json()
-            assert [e["verb"] for e in ev["events"]][:3] == ["forgot", "going", "captured"]
+            assert [e["verb"] for e in ev["events"]][:4] == ["forgot", "dismissed", "going", "captured"]
         await app.state.runner.drain(1)
         app.state.store.close()
 

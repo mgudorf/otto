@@ -57,7 +57,8 @@ async def scout(ctx) -> str:
         "The owner's current business plans, in their own words:",
         *[f"- {p['text'][:500]}" for p in plans],
         "",
-        "Leads already recorded (status, url, text). Never repeat a url, and let accepted ones show what the owner values:",
+        "Leads already recorded (status, url, text). Never repeat a url; an accepted one shows what the owner values,"
+        " a dismissed one what to stop bringing:",
         *([f"- ({s['status']}) {s['ref']} {s['text'][:120]}" for s in seen] or ["- none"]),
         "",
         f"Use WebSearch to find up to {cap} new leads that serve these plans: realistic job openings, calls, events, or news the owner should act on.",

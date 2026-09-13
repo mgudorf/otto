@@ -59,7 +59,7 @@ export function Middle({ app, data, mod, fmt }) {
         if (a.confirm && !window.confirm(a.confirm)) return;
         await post(`/api/finance/action/${a.verb}`, { id: item.id });
       }
-      if (a.verb === 'forget') app.select(null); else app.loadItem(app.state.sel);
+      if (a.removes) app.select(null); else app.loadItem(app.state.sel);
       app.refresh();
     };
     const body = item && !item.error ? html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 12 }}>

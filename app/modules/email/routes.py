@@ -155,8 +155,8 @@ def item(store: Store, message_id: str) -> dict:
     unread, starred, in_inbox = "UNREAD" in labels, "STARRED" in labels, "INBOX" in labels
     actions = []
     if in_inbox:
-        actions.append({"verb": "archive", "label": "Archive", "primary": True})
-        actions.append({"verb": "trash", "label": "Trash", "confirm": "Trash this message?"})
+        actions.append({"verb": "archive", "label": "Archive", "primary": True, "removes": True})
+        actions.append({"verb": "trash", "label": "Trash", "confirm": "Trash this message?", "removes": True})
     actions.append({"verb": "read", "label": "Mark read"} if unread else {"verb": "unread", "label": "Mark unread"})
     actions.append({"verb": "unstar", "label": "Unstar"} if starred else {"verb": "star", "label": "Star"})
     actions.append({"verb": "open", "label": "Open in Gmail", "href": f"https://mail.google.com/mail/u/0/#all/{message_id}"})
