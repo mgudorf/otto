@@ -20,3 +20,16 @@ What happens: `add` inserts the `feedback` row as `queued` and submits the filin
 Expected: a note whose filing job died reads `failed` with the reason and can be retried; a note sent during a drain is either refused before the row exists or picked up after the restart.
 
 Fix: at boot, mark `feedback` rows still `queued` as `failed` with `daemon restarted` (the runner already does this for jobs), and in `add` check the runner's draining flag before the insert. Requeueing them instead is also one query over `status = 'queued'` at boot.
+
+### `feedback list` crashes partway on the Windows console
+
+- Kind: bug
+- Where: `app/modules/feedback/queue.py` `_print` (bare `print` of `text`, `item_text` and `draft`); reached through `app/modules/feedback/__main__.py`
+- Found: 2026-09-13, email feedback session
+- Status: open
+
+What happens: the command prints feedback rows verbatim, and the owner's words routinely carry characters the console's default Windows codepage cannot encode. Listing the email queue on 2026-09-13 died with `UnicodeEncodeError: 'charmap' codec can't encode character '\u2192'` partway through row #2, having already printed the header and part of that row, so the remaining two rows and the whole `## Patches` summary were never shown and the command exited 1. Any row holding an arrow, a curly quote, an em dash or an emoji does this. `PYTHONIOENCODING=utf-8` in front of the command is a working shell-side workaround, which is how the queue was read.
+
+Expected: the command prints every pending row and the patch summary whatever the owner typed, on a default Windows console.
+
+Fix: reconfigure the stream once at entry, `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` in `__main__.py`, so every path through `queue.py` is covered. This is the same class of failure as a task losing its reason, and it is the tool the whole `feature-flow` step 0 depends on.
