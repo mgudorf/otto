@@ -102,6 +102,14 @@ class WebSearch:
 
 
 @dataclass(frozen=True)
+class Social:
+    cities: tuple[str, ...]
+    radius_miles: int
+    horizon_days: int
+    events_per_run: int
+
+
+@dataclass(frozen=True)
 class Feedback:
     max_turns: int
 
@@ -132,6 +140,7 @@ class Config:
     database: Database
     email: Email
     web_search: WebSearch
+    social: Social
     feedback: Feedback
     ui: Ui
 
@@ -160,6 +169,7 @@ def load(root: Path = ROOT) -> Config:
             backfill_days=raw["email"]["backfill_days"], triage_batch=raw["email"]["triage_batch"],
         ),
         web_search=WebSearch(**raw["web_search"]),
+        social=Social(**{**raw["social"], "cities": tuple(raw["social"]["cities"])}),
         feedback=Feedback(**raw["feedback"]),
         ui=Ui(**raw["ui"]),
     )

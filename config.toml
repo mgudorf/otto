@@ -63,6 +63,12 @@ triage_batch = 40             # messages the nightly triage prioritizes per run
 [web_search]
 max_findings = 3            # findings the nightly search may queue per run
 
+[social]
+cities = ["Woodstock, GA", "Roswell, GA", "Canton, GA", "Alpharetta, GA", "Marietta, GA"]
+radius_miles = 15           # how far around each of those towns the scout may reach
+horizon_days = 30           # how far ahead it looks for events
+events_per_run = 5          # new events the nightly scout may queue per run
+
 [feedback]
 max_turns = 12             # per filing run: list docs, read a few, reply
 
