@@ -1,4 +1,4 @@
-"""Files under science.root: the listing, reading and atomic writing of notebooks, and the wire shape of cells."""
+"""Files under science.root: the tree, the flat listing, creation, reading and atomic writing of notebooks, and the wire shape of cells."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import nbformat
 from fastapi import HTTPException
 
 EXTS = (".ipynb", ".py")
+KINDS = ("py", "ipynb", "folder")
 SKIP = {".ipynb_checkpoints", "__pycache__"}
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 TYPES = ("code", "markdown", "raw")
@@ -20,19 +21,45 @@ def mtime_iso(ts: float) -> str:
     return datetime.fromtimestamp(ts, UTC).isoformat(timespec="seconds")
 
 
-def scan(root: Path) -> list[dict]:
-    """Every notebook and script under root, newest modification first."""
-    out = []
-    if not root.is_dir():
+def _hidden(name: str) -> bool:
+    return name.startswith(".") or name in SKIP
+
+
+def tree(root: Path) -> list[dict]:
+    """Every directory and every notebook or script under root as nested nodes, directories first, names in order. Dot and checkpoint directories are skipped."""
+
+    def walk(d: Path, rel: str) -> list[dict]:
+        out = []
+        try:
+            entries = sorted(d.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+        except OSError:
+            return out
+        for p in entries:
+            if _hidden(p.name):
+                continue
+            rid = f"{rel}/{p.name}" if rel else p.name
+            if p.is_dir():
+                out.append({"id": rid, "name": p.name, "kind": "dir", "children": walk(p, rid)})
+            elif p.suffix in EXTS and p.is_file():
+                st = p.stat()
+                out.append({"id": rid, "name": p.name, "kind": p.suffix[1:], "mtime": mtime_iso(st.st_mtime), "size": st.st_size})
         return out
-    for p in root.rglob("*"):
-        if p.suffix not in EXTS or not p.is_file():
-            continue
-        rel = p.relative_to(root)
-        if any(part in SKIP or part.startswith(".") for part in rel.parts):
-            continue
-        st = p.stat()
-        out.append({"id": rel.as_posix(), "name": p.name, "ext": p.suffix[1:], "mtime": mtime_iso(st.st_mtime), "size": st.st_size})
+
+    return walk(root, "") if root.is_dir() else []
+
+
+def scan(root: Path) -> list[dict]:
+    """Every notebook and script under root, flat, newest modification first."""
+    out: list[dict] = []
+
+    def flat(nodes: list[dict]) -> None:
+        for n in nodes:
+            if n["kind"] == "dir":
+                flat(n["children"])
+            else:
+                out.append({"id": n["id"], "name": n["name"], "ext": n["kind"], "mtime": n["mtime"], "size": n["size"]})
+
+    flat(tree(root))
     out.sort(key=lambda f: f["mtime"], reverse=True)
     return out
 
@@ -47,6 +74,34 @@ def resolve(root: Path, file_id: str) -> Path:
     if not p.is_file() or p.suffix not in EXTS:
         raise HTTPException(404, "no such file")
     return p
+
+
+def target(root: Path, rel: str, kind: str) -> Path:
+    """Where a new folder, script or notebook goes: every part of `rel` plain (no leading dot), the suffix added for a file, 409 if it exists."""
+    if kind not in KINDS:
+        raise HTTPException(400, f"kind is one of {', '.join(KINDS)}")
+    parts = [p.strip() for p in rel.replace("\\", "/").split("/")]
+    if not parts or not all(parts) or any(_hidden(p) for p in parts):
+        raise HTTPException(400, "give it a plain path under the root")
+    path = root / Path(*parts)
+    if kind != "folder" and path.suffix != f".{kind}":
+        path = path.with_name(f"{path.name}.{kind}")
+    if path.exists():
+        raise HTTPException(409, "that path exists")
+    return path
+
+
+def create(root: Path, path: Path, kind: str) -> str:
+    """Make what `target` chose: a folder, an empty script or a one-cell notebook. Returns the new id."""
+    if kind == "folder":
+        path.mkdir(parents=True)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if kind == "py":
+            path.write_text("", "utf-8")
+        else:
+            new(path)
+    return path.relative_to(root).as_posix()
 
 
 def read(path: Path):

@@ -32,7 +32,7 @@ app/revision.py   sha256 of app/** and config.toml, served by /health
 app/claude.py     CLI spawn, event stream, read-only allowlist, nightly budget
 app/modules/      registry, agent_base.md, one package per module (contract under Daemon)
 app/static/       index.html, shell.js, session.js, rows.js, api.js, feedback.js, md.js, pages/<name>.js, vendor/
-data/             otto.db, daemon.log and its rotations, secrets/, workspace/ (science/, business/, chat/<id>/), backups/, exports/; .gitignore covers data/*.log and data/*.log.*, the db, secrets, workspace, backups and exports
+data/             otto.db, daemon.log and its rotations, secrets/, workspace/ (Science's root: business/, chat/<id>/ and the owner's notebooks, scripts and folders), backups/, exports/; .gitignore covers data/*.log and data/*.log.*, the db, secrets, workspace, backups and exports
 .claude/          skills/ (feature-flow, feedback-queue, sync-architecture): the repo's own workflows
 ```
 
@@ -75,7 +75,7 @@ The UI is a view of daemon state. Pages render from the store and poll or subscr
 | Durable job records | SQLite WAL; jobs, logs, events, sessions survive restarts; nothing is replayed | `test_skipped_and_logs_and_commit` |
 | Resources in the daemon | tokens under `data/secrets/`, cursors in `cursors`, Claude runs as child processes of the daemon, Jupyter kernels as child processes held in Science's module state and shut down at lifespan exit; the page holds nothing | `test_science_reap` |
 | Idempotent, kill-safe tasks | a task's only write path is `ctx.commit(cursor=...)`: results and the new cursor in one transaction | `test_skipped_and_logs_and_commit` |
-| Scheduled agent only reads | `ctx.run_task` is the only Claude entry point a task can reach: read server, read-only built-ins, budget. `session_turn` and `oneshot` are reachable from routes only. Science's `tasks.py` names neither `execute` nor `write` | `test_tasks_never_reach_interactive_claude`, `test_read_builtins_exclude_writers`, `test_science_tasks_never_execute_or_write` |
+| Scheduled agent only reads | `ctx.run_task` is the only Claude entry point a task can reach: read server, read-only built-ins, budget. `session_turn` and `oneshot` are reachable from routes only. Science's `reap` names neither `execute` nor `write`; its `due` task runs the files the owner scheduled on the page, on purpose | `test_tasks_never_reach_interactive_claude`, `test_read_builtins_exclude_writers`, `test_science_reap_never_executes_or_writes` |
 | Failure is local, and says why | the runner catches per job: a `BudgetExceeded` from `run_task` records the job `skipped` with the reason, whichever task raised it; any other exception fails the job: the `jobs` row is failed with the full traceback in `error`, the `events` row reads `<task>: <exception type and message folded to one line>`, and a scheduled task's `last_result` holds the last 500 characters of the traceback, so a multi-line message keeps its reason. The registry records a module that fails to import or whose `setup` raises in `module_errors`, and the rail shows it disabled with the error | `test_failure_is_local`, `test_budget_refusal_is_skipped`, `test_registry_skips_broken_module` |
 | UI is a view | pages fetch `/api/...` on the refresh interval and after every action; the loading line reflects in-flight fetches; the session pane and a running notebook cell subscribe to server-sent events. Static files go out with `Cache-Control: no-cache`, so the browser revalidates every module against its etag, and the shell reloads the window once when `/api/shell` reports a `rev` other than the one it loaded under | `test_memory_end_to_end`, `test_science_run_streams_and_saves` |
 
@@ -93,7 +93,7 @@ The UI is a view of daemon state. Pages render from the store and poll or subscr
 | chat | upload_max_mb (an attachment past it is a 413), replay_chars (tail of the stored transcript replayed when the CLI has lost a conversation) |
 | business | leads_per_run |
 | memory | suggest_lookback_days, suggest_max |
-| science | python (the interpreter every kernel runs on), root (notebooks and scripts, under the workspace, created at boot), idle_minutes, tool_output_chars |
+| science | python (the interpreter every kernel and script runs on), root (the workspace itself: the tree LEFT shows, created at boot), idle_minutes, tool_output_chars |
 | education | per_night, start_difficulty, flow_low, flow_high |
 | database | max_rows, max_seconds |
 | email | client_file, token_file, backfill_days, triage_batch |
@@ -104,7 +104,7 @@ The UI is a view of daemon state. Pages render from the store and poll or subscr
 
 ### Claude
 
-Every run is one CLI process with the prompt on stdin and `--output-format stream-json --verbose`, launched with `--setting-sources ""`, `--restricted`, `--strict-mcp-config`, `--permission-prompts none`, `--tools` with the read built-ins `Read,Grep,Glob,WebSearch,WebFetch` (a session turn adds the module agent's `builtins`: `Write` and `Edit` for Chat, confined to the workspace by `--restricted`), `--allowedTools` for those plus the module's MCP tools, `--system-prompt`, then `--model` and `--effort` when the module's own settings (or, for the model, `claude.model`) say something other than `default`. The environment is scrubbed of every `ANTHROPIC_*`, `CLAUDECODE*` and `CLAUDE_CODE_*` variable. Stdout is read in 64 KiB chunks and split on newlines by the daemon itself, so one message carrying a whole file as a tool result never truncates the run. Any run past `max_minutes` is killed. Verified on this machine: the CLI answers with no API key set, WebSearch works headless under these flags, and the owner's global CLAUDE.md does not reach these runs.
+Every run is one CLI process with the prompt on stdin and `--output-format stream-json --verbose`, launched with `--setting-sources ""`, `--restricted`, `--strict-mcp-config`, `--permission-prompts none`, `--tools` with the read built-ins `Read,Grep,Glob,WebSearch,WebFetch` (a session turn adds the module agent's `builtins`: `Write` and `Edit` for Chat and Science, confined to the workspace by `--restricted`), `--allowedTools` for those plus the module's MCP tools, `--system-prompt`, then `--model` and `--effort` when the module's own settings (or, for the model, `claude.model`) say something other than `default`. The environment is scrubbed of every `ANTHROPIC_*`, `CLAUDECODE*` and `CLAUDE_CODE_*` variable. Stdout is read in 64 KiB chunks and split on newlines by the daemon itself, so one message carrying a whole file as a tool result never truncates the run. Any run past `max_minutes` is killed. Verified on this machine: the CLI answers with no API key set, WebSearch works headless under these flags, and the owner's global CLAUDE.md does not reach these runs.
 
 | Path | Who | MCP server | Extra flags |
 |---|---|---|---|
@@ -150,7 +150,7 @@ Wire shape for LEFT: `{groups: [{label, count, rows: [{id, module, text, stamp, 
 | Claude Code CLI | 2.1.263 at `C:\Users\gudo\.local\bin\claude.exe`, claude.ai login, subscription max |
 | Google Chrome | found through the `App Paths\chrome.exe` registry key |
 | SQLite with FTS5 and JSON | 3.50.4, stdlib |
-| Vendored frontend | `app/static/vendor/`: preact.mjs, htm.mjs, marked.esm.js 18.0.12, katex/ 0.18.7 (module, stylesheet, 20 woff2 fonts), Inter 400/500/600, JetBrains Mono 400/500, pinned by `SHA256SUMS` |
+| Vendored frontend | `app/static/vendor/`: preact.mjs, htm.mjs, marked.esm.js 18.0.12, katex/ 0.18.7 (module, stylesheet, 20 woff2 fonts), highlight/ 11.11.1 (core and the python grammar, ES builds), Inter 400/500/600, JetBrains Mono 400/500, pinned by `SHA256SUMS` |
 | Google OAuth client and token | `data/secrets/google_client.json` (web client, redirect `http://localhost:8756/m/email/api/oauth/callback`), `data/secrets/token.json`, scope `gmail.modify`, refreshed in place |
 
 Not used: Node, APScheduler, pywebview, `claude-agent-sdk`, nbclient, an Anthropic API key, paid search APIs, a graph database, Microsoft Edge.
