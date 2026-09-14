@@ -81,5 +81,3 @@ start_page = "home"
 refresh_seconds = 30
 time_format = "24h"
 page_size = 40
-side_max = 420                # px ceiling the LEFT and RIGHT tracks stop growing at
-middle_max = 1400             # px ceiling for MIDDLE content, centred in its track

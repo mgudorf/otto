@@ -1,5 +1,5 @@
 // Memory: LEFT = chips + rows by day · MIDDLE blank = capture box and open suggestions.
-import { html, T, mono13, Row, GroupHeader, Chips, Search, Button, Empty, fmtInt } from '../rows.js';
+import { html, T, mono13, Row, GroupHeader, Chips, Search, Button, Empty, fmtInt, TextArea } from '../rows.js';
 import { get, post } from '../api.js';
 import { Inspector } from '../shell.js';
 
@@ -74,10 +74,9 @@ export function Middle({ app, data, mod, fmt }) {
       ${b.kinds.map((k) => html`<span key=${k} class="ring" onClick=${() => { capture.kind = k; app.forceUpdate(); }} style=${{ padding: '3px 9px', borderRadius: 6, fontSize: 13, cursor: 'pointer', background: capture.kind === k ? hue : 'transparent', color: capture.kind === k ? T.ground : T.muted }}>${k}</span>`)}
       <span style=${{ marginLeft: 'auto', ...mono13, color: T.dim }}>${Object.entries(b.counts).map(([k, n]) => `${n} ${k}`).join(' · ') || 'empty'}</span>
     </div>
-    <textarea value=${capture.text} placeholder=${capture.kind === 'link' ? 'https://… (then a note)' : 'Capture in your own words…'} spellcheck="false"
+    <${TextArea} value=${capture.text} placeholder=${capture.kind === 'link' ? 'https://… (then a note)' : 'Capture in your own words…'}
       onInput=${(e) => { capture.text = e.target.value; }}
-      onKeyDown=${(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); } }}
-      style=${{ width: '100%', minHeight: 112, resize: 'vertical', padding: '12px 14px', border: 0, borderRadius: 6, background: T.panel, color: T.text, fontSize: 15, lineHeight: 1.6, '--hue': hue }} />
+      onKeyDown=${(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); } }} hue=${hue} style=${{ background: T.panel }} />
     <div style=${{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <${Button} label="Save" primary=${true} hue=${hue} onClick=${save} />
       <input placeholder="tags, comma separated" value=${capture.tags} onInput=${(e) => { capture.tags = e.target.value; }}

@@ -1,6 +1,6 @@
 // Chat: LEFT = every conversation by day · MIDDLE = the conversation, composer pinned below · RIGHT = its folder.
 import { Component } from '../vendor/preact.mjs';
-import { html, T, mono13, Row, GroupHeader, Search, Icon, Empty, bytes, stamp, clock, dayLabel } from '../rows.js';
+import { html, T, mono13, Row, GroupHeader, Search, Icon, Empty, bytes, stamp, clock, dayLabel, TextArea } from '../rows.js';
 import { get, post } from '../api.js';
 import { Markdown } from '../md.js';
 
@@ -175,10 +175,9 @@ class Conversation extends Component {
         ${pending.map((n) => html`<span key=${n} style=${{ padding: '2px 8px', borderRadius: 6, fontSize: 13, color: T.muted, boxShadow: 'inset 0 0 0 1px rgba(230,231,234,.1)' }}>${n}
           <span onClick=${() => this.setState({ pending: pending.filter((p) => p !== n) })} style=${{ marginLeft: 6, cursor: 'pointer', color: T.dim }}>×</span></span>`)}
       </div>`}
-      <textarea ref=${(el) => (this.ta = el)} value=${draft} rows="3" placeholder="Ask anything…" spellcheck="false"
+      <${TextArea} taRef=${(el) => (this.ta = el)} value=${draft} placeholder="Ask anything…" hue=${hue}
         onInput=${(e) => this.setState({ draft: e.target.value })}
-        onKeyDown=${(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); } }}
-        style=${{ width: '100%', resize: 'none', padding: '10px 12px', border: 0, borderRadius: 6, background: T.raised, color: T.text, fontSize: 15, lineHeight: 1.4, '--hue': hue }} />
+        onKeyDown=${(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); } }} />
       <div style=${{ display: 'flex', alignItems: 'center', gap: 8, ...mono13, color: T.dim, padding: '0 4px' }}>
         <span>${busy ? 'thinking…' : this.props.id ? plural(this.state.turns.filter((t) => t.role === 'user').length, 'message') : 'new conversation · drop files here'}</span>
         <label class="ring" style=${{ marginLeft: 'auto', padding: '3px 8px', borderRadius: 6, color: T.muted, cursor: 'pointer' }}>attach
@@ -191,13 +190,13 @@ class Conversation extends Component {
   render({ app, mod, fmt, id }, { turns, title, tags, busy, partial, error, loading }) {
     const hue = mod.hue;
     if (!id) {
-      return html`<div style=${{ maxWidth: '72ch', margin: '0 auto', paddingTop: '18vh', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      return html`<div style=${{ paddingTop: '18vh', display: 'flex', flexDirection: 'column', gap: 12 }}>
         ${error && html`<div style=${{ ...mono13, color: RED }}>${error}</div>`}
         ${this.composer(hue)}
       </div>`;
     }
     const opened = turns.length ? turns[0].ts : null;
-    return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: '72ch', margin: '0 auto' }}>
+    return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style=${{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 24 }}>
         <span style=${{ display: 'grid', placeItems: 'center', width: 16, height: 16, color: hue, flex: 'none' }}><${Icon} svg=${mod.icon} /></span>
         <span style=${{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${title}</span>

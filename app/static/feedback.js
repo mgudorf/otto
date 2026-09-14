@@ -1,7 +1,7 @@
 // Header control on every page: record a change in place; the Feedback agent files it as a row.
 // One panel per page: the draft, the panel and the rows below it belong to the page they were opened on.
 import { Component } from './vendor/preact.mjs';
-import { html, T, mono13, Button } from './rows.js';
+import { html, T, mono13, Button, TextArea } from './rows.js';
 import { post } from './api.js';
 
 export class Feedback extends Component {
@@ -46,13 +46,12 @@ export class Feedback extends Component {
     return html`<span style=${{ position: 'relative' }}>
       <span class="ring" onClick=${() => this.setState({ open: !open })} style=${{ ...mono13, color: open ? T.text : T.muted, cursor: 'pointer', padding: '3px 8px', borderRadius: 6 }}>feedback</span>
       ${open && html`<div style=${{ position: 'absolute', top: 30, right: 0, width: 520, zIndex: 10, display: 'flex', flexDirection: 'column', gap: 8, padding: 12, background: T.panel, borderRadius: 6, boxShadow: `inset 0 0 0 1px ${T.hair}`, '--hue': hue }}>
-        <textarea ref=${(el) => (this.ta = el)} value=${draft} rows="8" placeholder="What should change here?" spellcheck="false"
+        <${TextArea} taRef=${(el) => (this.ta = el)} value=${draft} placeholder="What should change here?" hue=${hue}
           onInput=${(e) => this.setState({ draft: e.target.value })}
           onKeyDown=${(e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); }
             if (e.key === 'Escape') this.setState({ open: false });
-          }}
-          style=${{ width: '100%', resize: 'none', padding: '10px 12px', border: 0, borderRadius: 6, background: T.raised, color: T.text, fontSize: 15, lineHeight: 1.4 }} />
+          }} />
         <div style=${{ display: 'flex', alignItems: 'center', gap: 8, ...mono13, color: T.dim }}>
           <span style=${{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${context}</span>
           <span style=${{ marginLeft: 'auto' }}><${Button} label=${busy ? '…' : 'Send'} primary=${true} hue=${hue} onClick=${() => this.send()} /></span>

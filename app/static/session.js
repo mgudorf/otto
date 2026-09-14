@@ -1,6 +1,6 @@
 // RIGHT track: the module's Claude sessions, one tab each. Shell is identical everywhere; agent and tools differ.
 import { Component } from './vendor/preact.mjs';
-import { html, T, mono13, clock } from './rows.js';
+import { html, T, mono13, clock, TextArea } from './rows.js';
 import { get, post } from './api.js';
 import { Markdown } from './md.js';
 
@@ -124,10 +124,9 @@ export class Session extends Component {
         })}
       </div>
       <div style=${{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <textarea ref=${(el) => (this.ta = el)} value=${draft} rows="3" placeholder=${agent ? agent.placeholder : ''}
+        <${TextArea} taRef=${(el) => (this.ta = el)} value=${draft} placeholder=${agent ? agent.placeholder : ''} hue=${hue}
           onInput=${(e) => this.setState({ draft: e.target.value })}
-          onKeyDown=${(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); } }}
-          style=${{ width: '100%', resize: 'none', padding: '10px 12px', border: 0, borderRadius: 6, background: T.raised, color: T.text, fontSize: 15, lineHeight: 1.4 }} />
+          onKeyDown=${(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); } }} />
         <div style=${{ display: 'flex', alignItems: 'center', gap: 8, ...mono13, color: T.dim, padding: '0 4px' }}>
           <span>${contextLabel}${selected ? ' · 1 selected' : ''}</span>
           <span onClick=${() => this.send()} style=${{ marginLeft: 'auto', padding: '3px 10px', borderRadius: 6, cursor: 'pointer', color: busy ? T.dim : T.text, boxShadow: ring }}>↵</span>

@@ -75,6 +75,14 @@ export function Search({ value, onInput, hue }) {
     style=${{ width: '100%', height: 36, marginBottom: 16, padding: '0 12px', border: 0, borderRadius: 6, background: T.raised, color: T.text, fontSize: 15, '--hue': hue }} />`;
 }
 
+// Every composer and capture box. Grows with its text from three lines to half the viewport, then scrolls
+// (the browser's own content sizing, as the notebook's cells). `style` overrides the surface; `taRef` gets the element.
+export function TextArea({ value, onInput, onKeyDown, placeholder, hue, disabled, taRef, style }) {
+  return html`<textarea ref=${taRef} value=${value} rows="3" placeholder=${placeholder} disabled=${disabled} spellcheck="false"
+    onInput=${onInput} onKeyDown=${onKeyDown}
+    style=${{ display: 'block', width: '100%', minHeight: 88, maxHeight: '50vh', overflow: 'auto', resize: 'none', fieldSizing: 'content', padding: '10px 12px', border: 0, borderRadius: 6, background: T.raised, color: T.text, fontSize: 15, lineHeight: 1.5, '--hue': hue, ...style }} />`;
+}
+
 export function Button({ label, primary, hue, onClick, right }) {
   const base = { padding: '5px 10px', borderRadius: 6, fontSize: 13, cursor: 'pointer', marginLeft: right ? 'auto' : 0 };
   if (primary) return html`<span onClick=${onClick} style=${{ ...base, background: hue, color: T.ground, fontWeight: 500 }}>${label}</span>`;

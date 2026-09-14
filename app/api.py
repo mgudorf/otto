@@ -151,8 +151,7 @@ def events(request: Request, module: str = "", limit: int = 200, offset: int = 0
 
 
 # ---- settings --------------------------------------------------------------------------------
-UI_KEYS = {"ui.start_page": str, "ui.refresh_seconds": int, "ui.time_format": str, "ui.page_size": int,
-           "ui.side_max": int, "ui.middle_max": int}
+UI_KEYS = {"ui.start_page": str, "ui.refresh_seconds": int, "ui.time_format": str, "ui.page_size": int}
 
 
 @router.get("/api/settings")
@@ -171,10 +170,6 @@ def settings_put(request: Request, body: dict = Body(...)) -> dict:
                 raise HTTPException(400, "refresh must be 5 to 3600 seconds")
             if key == "ui.page_size" and not 10 <= value <= 200:
                 raise HTTPException(400, "rows per page must be 10 to 200")
-            if key == "ui.side_max" and not 280 <= value <= 900:
-                raise HTTPException(400, "side panel ceiling must be 280 to 900 px")
-            if key == "ui.middle_max" and not 640 <= value <= 3000:
-                raise HTTPException(400, "middle ceiling must be 640 to 3000 px")
             if key == "ui.time_format" and value not in ("24h", "12h"):
                 raise HTTPException(400, "time format must be 24h or 12h")
             if key == "ui.start_page" and value not in st.registry.modules and value not in ("activity", "settings"):

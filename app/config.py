@@ -124,8 +124,6 @@ class Ui:
     refresh_seconds: int
     time_format: str
     page_size: int
-    side_max: int
-    middle_max: int
 
 
 @dataclass(frozen=True)
