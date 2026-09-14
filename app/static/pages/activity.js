@@ -1,6 +1,7 @@
 // Activity: LEFT = event log by day · MIDDLE blank = every scheduled task in one table.
 import { html, T, mono13, GroupHeader, Chips, Toggle, Empty, dayLabel, clock, stamp, interval } from '../rows.js';
 import { get, post } from '../api.js';
+import { Markdown } from '../md.js';
 
 export async function load(app) {
   const chip = app.state.chip;
@@ -57,16 +58,16 @@ export function Middle({ app, data, fmt }) {
     const e = sel.local;
     const job = e.job_id ? cache.jobs[e.job_id] : null;
     if (e.job_id && !job) get(`/api/jobs/${e.job_id}`).then((j) => { cache.jobs[e.job_id] = j; app.forceUpdate(); });
-    return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: '72ch', margin: '0 auto' }}>
+    return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style=${{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <span style=${{ width: 6, height: 6, borderRadius: 3, background: app.module(e.module).hue }} />
         <span style=${{ ...mono13, color: T.muted }}>${e.module} · ${e.verb} · ${dayLabel(e.ts)} ${clock(e.ts, fmt)}</span>
         <span class="bright-hover" onClick=${() => app.select(null)} style=${{ marginLeft: 'auto', cursor: 'pointer', color: T.dim, padding: '0 4px', lineHeight: 1 }}>×</span>
       </div>
-      <div style=${{ lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>${e.text}</div>
+      <${Markdown} text=${e.text} />
       ${job && html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 6, ...mono13, color: T.muted }}>
         <div>job ${job.id} · ${job.kind} · ${job.status} · ${job.started_at ? clock(job.started_at, fmt) : ''}${job.finished_at ? ` → ${clock(job.finished_at, fmt)}` : ''}</div>
-        ${job.result && html`<div style=${{ color: T.text, whiteSpace: 'pre-wrap' }}>${job.result}</div>`}
+        ${job.result && html`<div style=${{ color: T.text }}><${Markdown} text=${job.result} /></div>`}
         ${job.error && html`<pre style=${{ margin: 0, color: '#cf7b7b', whiteSpace: 'pre-wrap', fontFamily: T.mono, fontSize: 12 }}>${job.error}</pre>`}
         ${job.logs.map((l, i) => html`<div key=${i}><span style=${{ color: T.dim }}>${clock(l.ts, fmt)}</span> ${l.message}</div>`)}
       </div>`}

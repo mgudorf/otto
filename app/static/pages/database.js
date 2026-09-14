@@ -1,7 +1,7 @@
 // Database: LEFT = modules, each opening to its tables, then saved queries · MIDDLE = editor, Run / Explain / Save,
 // the picked table's schema until a statement runs, then the result grid.
 // Run sends whatever is typed straight to SQLite: selects, writes and DDL all land, with no undo.
-import { html, T, mono13, GroupHeader, Button, Empty, bytes, stamp } from '../rows.js';
+import { html, T, mono13, GroupHeader, Button, Empty, bytes, stamp, TextArea } from '../rows.js';
 import { get, post } from '../api.js';
 
 class Editor {
@@ -152,10 +152,9 @@ export function Middle({ app, data, mod }) {
   }
 
   return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
-    <textarea value=${ed.sql} placeholder="select …" spellcheck="false"
+    <${TextArea} value=${ed.sql} placeholder="select …"
       onInput=${(e) => { ed.sql = e.target.value; }}
-      onKeyDown=${(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); exec('run', 'result'); } }}
-      style=${{ width: '100%', minHeight: 112, resize: 'vertical', padding: '12px 14px', border: 0, borderRadius: 6, background: T.panel, color: T.text, ...mono13, lineHeight: 1.6, '--hue': hue }} />
+      onKeyDown=${(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); exec('run', 'result'); } }} hue=${hue} style=${{ background: T.panel, ...mono13 }} />
     <div style=${{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <${Button} label="Run" primary=${true} hue=${hue} onClick=${() => exec('run', 'result')} />
       <${Button} label="Explain" onClick=${() => exec('explain', 'explain')} />

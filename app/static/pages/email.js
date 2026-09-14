@@ -162,7 +162,7 @@ function Reader({ app, item, mod, fmt }) {
   ensureStyles();
   const body = { borderTop: `1px solid ${T.hair}`, paddingTop: 12 };
   const open = (item.actions || []).find((a) => a.verb === 'open');
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: '72ch', margin: '0 auto' }}>
+  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 12 }}>
     <div style=${{ display: 'flex', alignItems: 'center', gap: 12 }}>
       <span style=${{ display: 'grid', placeItems: 'center', width: 16, height: 16, color: mod.hue }}><${Icon} svg=${mod.icon} /></span>
       <span style=${{ ...mono13, color: T.muted }}>${item.kind} · ${dayLabel(item.created_at)} ${clock(item.created_at, fmt)}</span>

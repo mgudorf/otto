@@ -14,7 +14,7 @@ const SECTIONS = ['General', 'Modules', 'Claude', 'Data'];
 
 export function Left({ app }) {
   const s = app.state.shell;
-  const metaOf = { General: '6', Modules: String(s.modules.filter((m) => !m.error).length), Claude: '8', Data: '4' };
+  const metaOf = { General: '4', Modules: String(s.modules.filter((m) => !m.error).length), Claude: '8', Data: '4' };
   return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
     ${SECTIONS.map((label) => html`<div key=${label} class="row" onClick=${() => app.setState({ section: label })}
         style=${{ display: 'flex', alignItems: 'center', gap: 12, height: 36, padding: '0 12px', borderRadius: 6, cursor: 'pointer', background: app.state.section === label ? T.raised : 'transparent', color: app.state.section === label ? T.text : T.muted }}>
@@ -41,8 +41,6 @@ export function Middle({ app, data, fmt }) {
       ${row('Refresh', html`${num('ui.refresh_seconds', 5, 3600)}<span style=${mono13}>s</span>`)}
       ${row('Time format', html`${pill('24 h', st['ui.time_format'] === '24h', () => save({ 'ui.time_format': '24h' }))}${pill('12 h', st['ui.time_format'] === '12h', () => save({ 'ui.time_format': '12h' }))}`)}
       ${row('Rows per page', num('ui.page_size', 10, 200))}
-      ${row('Side panel max', html`${num('ui.side_max', 280, 900)}<span style=${mono13}>px</span>`)}
-      ${row('Middle max', html`${num('ui.middle_max', 640, 3000)}<span style=${mono13}>px</span>`)}
     </div>`;
   }
   if (section === 'Modules') {

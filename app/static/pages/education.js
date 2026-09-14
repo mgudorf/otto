@@ -2,7 +2,7 @@
 // the pinned setup (definitions, then premise), the parts folded or open with an answer box each; or the progress
 // table with Generate. Submit hands an answer to the tutor in the session pane, where the grade and explanation land.
 import { Component } from '../vendor/preact.mjs';
-import { html, T, mono13, Row, GroupHeader, Chips, Search, Button, Empty, Icon, stamp, dayLabel } from '../rows.js';
+import { html, T, mono13, Row, GroupHeader, Chips, Search, Button, Empty, Icon, stamp, dayLabel, TextArea } from '../rows.js';
 import { get, post } from '../api.js';
 import { Markdown } from '../md.js';
 
@@ -66,10 +66,9 @@ function Part({ p, item, hue, open, onToggle, draft, busy, error, onDraft, onSub
       ${closed
         ? html`<div style=${{ background: T.raised, borderLeft: `3px solid ${color}`, borderRadius: 6, padding: '8px 12px', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
             ${p.answer || html`<span style=${{ ...mono13, color: T.dim }}>not answered</span>`}</div>`
-        : html`<textarea rows="4" value=${draft} disabled=${busy} placeholder="Your answer, in prose…"
+        : html`<${TextArea} value=${draft} disabled=${busy} placeholder="Your answer, in prose…" hue=${hue}
             onInput=${(e) => onDraft(e.target.value)}
-            onKeyDown=${(e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') onSubmit(); }}
-            style=${{ width: '100%', resize: 'vertical', padding: '10px 12px', border: 0, borderRadius: 6, background: T.raised, color: T.text, fontSize: 15, lineHeight: 1.5, '--hue': hue }} />
+            onKeyDown=${(e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') onSubmit(); }} />
           <div style=${{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 28 }}>
             <${Button} label=${p.graded_at ? 'Resubmit' : 'Submit'} primary=${!busy} hue=${hue} onClick=${() => !busy && onSubmit()} />
             ${status}
@@ -151,7 +150,7 @@ class Question extends Component {
       <span style=${{ ...mono13, color: hue }}>${label}</span>
       <div style=${PROSE}><${Markdown} text=${text} /></div>
     </div>`;
-    return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: '72ch', margin: '0 auto' }}>
+    return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style=${{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <span style=${{ display: 'grid', placeItems: 'center', width: 16, height: 16, color: hue }}><${Icon} svg=${mod.icon} /></span>
         <span style=${{ ...mono13, color: T.muted }}>${item.kind} · ${when}</span>
