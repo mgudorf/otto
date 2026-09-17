@@ -25,10 +25,10 @@
 - Kind: gap
 - Where: `app/modules/second_brain/routes.py` `_decide("accepted")`; `app/static/pages/second_brain.js` blank state; Home's `Review` group
 - Found: 2026-09-13, the dismissal change
-- Status: open, needs a decision
+- Status: open, deferred 2026-09-17: the owner chose to leave it as is for now
 
 What happens: `Accept` and `Dismiss` on a suggestion both do the same thing, stamp `status`, and the row leaves the list either way. A suggestion is an action item ("call them today"); accepting it produces no task, no item and no reminder, so the only trace is an `accepted` event and a row the nightly run will not repeat. Now that suggestions wait under Home's `Review`, the two buttons are side by side with no visible difference between them.
 
 Expected: accepting an action item leaves the owner with the item, presumably a `task` row carrying the suggestion's text and a link to the items it came from.
 
-Fix: decide whether `accept` writes a `task` row (text from the suggestion, tagged from `item_ids`) and returns its id so the page can open it; if it does, the event says which item it created, and `Dismiss` stays a bare status stamp.
+Fix: decide whether `accept` writes a `task` row (text from the suggestion, tagged from `item_ids`) and returns its id so the page can open it; if it does, the event says which item it created, and `Dismiss` stays a bare status stamp. Options weighed on 2026-09-17: Accept creates a `task` item tagged from its sources (recommended); Accept prefills the capture box as a task; the suggestion stays under Review until done; leave as is (chosen for now).
