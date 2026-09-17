@@ -25,7 +25,7 @@ Otto, a personification of the word "auto" is a PERSONALIZED dashboard applicati
 3. `app/static/` is the browser side, no build step. `shell.js` is the frame and the `PAGES` map, `pages/<name>.js` one file per module page plus `activity.js` and `settings.js`, `rows.js` tokens and shared components, `session.js` the agent pane, `vendor/` pinned copies of Preact, htm, marked, KaTeX, highlight.js and the fonts.
 4. `tests/` is one file per module plus `test_app.py`, `test_migrate.py`, `test_platform.py`, `test_runner.py` and `test_scheduler.py` for the platform. `conftest.py` mocks the Claude and Gmail seams so the suite runs offline.
 5. `data/` is runtime state, gitignored: the SQLite file, the daemon log, `secrets/` for the Google OAuth files, `workspace/` as the working directory every Claude session is confined to.
-6. `.claude/skills/` are the repo's own workflows: `feature-flow` (worktree, change, module doc, merge), `feedback-queue` (my feedback and the open patches for a module, listed and cleared), `sync-architecture` (the docs checked against `main` when a change bypassed feature-flow).
+6. `.claude/skills/` are the repo's own workflows: `feature-flow` (worktree, change, module doc, merge), `feedback-queue` (my feedback and the open patches for a module, listed and cleared), `sync-architecture` (the docs checked against `main` when a change bypassed feature-flow), `data-migration` (the live database backed up, confirmed when large, the migration proved on the suite and a copy, then run once).
 
 ## Documentation
 

@@ -34,7 +34,7 @@ app/claude.py     CLI spawn, event stream, read-only allowlist, nightly budget
 app/modules/      registry, agent_base.md, one package per module (contract under Daemon)
 app/static/       index.html, shell.js, session.js, rows.js, api.js, feedback.js, md.js, pages/<name>.js, vendor/
 data/             otto.db, daemon.log and its rotations, secrets/, workspace/ (Science's root: chat/<id>/ and the owner's notebooks, scripts and folders), backups/, exports/; .gitignore covers data/*.log and data/*.log.*, the db, secrets, workspace, backups and exports
-.claude/          skills/ (feature-flow, feedback-queue, sync-architecture): the repo's own workflows
+.claude/          skills/ (feature-flow, feedback-queue, sync-architecture, data-migration): the repo's own workflows
 ```
 
 ## Daemon
