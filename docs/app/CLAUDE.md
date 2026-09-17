@@ -202,7 +202,7 @@ Every page uses three fixed tracks. Selection swaps what renders inside MIDDLE a
 | Ground / panel / raised | `#101114` / `#1a1c21` / `#23262c` (selection, inputs, user bubbles) |
 | Text / muted / dim | `#e6e7ea` / `#8b8f98` / `#5f636c` |
 | Hairline / row hover / table row hover | `rgba(230,231,234,.08)` / `#202329` / `#16181c` |
-| Hues and rail order | home `#e6e7ea` 0, chat `#d9915b` 1 (not in the artboard; speech-bubble icon; ties with email and sorts first), email `#cf7b7b` 1, education `#7a9fd6` 2, memory `#d1a36a` 3, science `#6fb3b8` 4, finance `#7fb894` 5 (the artboard's Money hue and banknote icon), business `#c98ba8` 6 (not in the artboard; briefcase icon), graph `#b3b06a` 7, database `#a68bd0` 8; web_search `#d9915b` 9 (magnifier icon) has no rail entry and colours its Home rows |
+| Hues and rail order | home `#e6e7ea` 0, chat `#d9915b` 1 (not in the artboard; speech-bubble icon; ties with email and sorts first), email `#cf7b7b` 1, education `#7a9fd6` 2, memory `#d1a36a` 3, science `#6fb3b8` 4, finance `#7fb894` 5 (the artboard's Money hue and banknote icon), business `#c98ba8` 6 (not in the artboard; briefcase icon), graph `#b3b06a` 7, database `#a68bd0` 8, social `#8f95d6` 10 (not in the artboard; two-figures icon); web_search `#d9915b` 9 (magnifier icon) and System and Feedback `#8b8f98` 99 have no rail entry, and Search's hue colours its Home rows |
 | Type | Inter 15px/1.4 body, 13px meta, 20px/600 title; JetBrains Mono 13px stamps and code, 28px/500 numbers; vendored with `system-ui` / `ui-monospace` fallbacks |
 | Rows | 36px list rows, 32px compact rows, 28px group headers, padding `0 12px`, gap 12px, radius 6; leading slot is a kind label (40px, hue), a 6px dot, an extension, or a 40px progress bar; `mono` rows set the text in JetBrains Mono |
 | Chips / buttons | padding `3px 9px` / `5px 10px`, radius 6, 13px; active or primary is hue background with `#101114` text; inactive or secondary is `#8b8f98` text with a 1px inset ring on hover |
@@ -228,6 +228,19 @@ Activity: LEFT is the `events` log by day with a chip per module; MIDDLE blank s
 - Each module's own departures are the `Departures` row of its doc's `## Built` table.
 
 ## Patches
+
+### The module contract does not state the table naming rule
+
+- Kind: gap
+- Where: `app/modules/__init__.py` module docstring, its `schema.sql` line; the rule it omits is enforced by `tests/test_platform.py::test_tables_are_named_after_their_module` and stated in the module contract above
+- Found: 2026-09-16, sync-architecture
+- Status: open
+
+What happens: the docstring every module author reads describes `schema.sql` as "its own tables (optional)" and says nothing about the `<module>_<name>` prefix the 2026-09-13 rename made mandatory. A new module whose schema names a table `items` reads as correct against the contract and fails the suite.
+
+Expected: the contract states the naming rule where it names `schema.sql`, so the docstring and the test say the same thing.
+
+Fix: one line in `app/modules/__init__.py`, `schema.sql    its own tables, every one named <module>_<table> (optional)`. That edit is sitting uncommitted in `main`'s working tree; committing it closes this entry.
 
 ### Busy state drops early when two turns are queued on one session
 

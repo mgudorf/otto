@@ -37,7 +37,7 @@ Fix: `follow_up_at` and `parent_id` on `web_search_findings`, a line in the nigh
 - Found: 2026-09-10, sync-architecture
 - Status: open, owner action
 
-What happens: `web_search_topics` is empty (still zero rows on 2026-09-12). `web_search.nightly` returns `Skipped("no topics")` before spending a run, `web_search_findings` stays empty and Home has no `Review` group. The module has never produced a finding. Since the chat merge the Search page is gone; topics are edited only through the Chat agent's `search_topic_add` and `search_topic_remove` tools.
+What happens: `web_search_topics` is empty (still zero rows on 2026-09-16). `web_search.nightly` returns `Skipped("no topics")` before spending a run, `web_search_findings` stays empty and Home has no `Review` group. The module has never produced a finding. Since the chat merge the Search page is gone; topics are edited only through the Chat agent's `search_topic_add` and `search_topic_remove` tools.
 
 Expected: at least one topic per kind the owner cares about (`money`, `work`, `learn`), so the next nightly window queues up to `max_findings` findings for a yes or no.
 
