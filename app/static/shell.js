@@ -10,7 +10,7 @@ import * as home from './pages/home.js';
 import * as chat from './pages/chat.js';
 import * as email from './pages/email.js';
 import * as education from './pages/education.js';
-import * as memory from './pages/memory.js';
+import * as second_brain from './pages/second_brain.js';
 import * as science from './pages/science.js';
 import * as database from './pages/database.js';
 import * as newsfeed from './pages/newsfeed.js';
@@ -19,7 +19,7 @@ import * as graph from './pages/graph.js';
 import * as activity from './pages/activity.js';
 import * as settings from './pages/settings.js';
 
-const PAGES = { home, chat, email, education, memory, science, newsfeed, finance, graph, database, activity, settings };
+const PAGES = { home, chat, email, education, second_brain, science, newsfeed, finance, graph, database, activity, settings };
 // LEFT · gap · MIDDLE · gap · RIGHT as 20 · 5 · 50 · 5 · 20 of the width, whatever the window.
 const TRACKS = { gridTemplateColumns: '2fr 5fr 2fr', columnGap: '5%' };
 const FOOT = [

@@ -1,4 +1,4 @@
-"""Scheduled, read-only LLM work: propose action items from the recent memories."""
+"""Scheduled, read-only LLM work: propose action items from what the owner captured lately."""
 
 from __future__ import annotations
 
@@ -20,36 +20,36 @@ def _json_array(raw: str) -> list:
 
 
 async def suggest(ctx) -> str:
-    cfg = ctx.config.memory
+    cfg = ctx.config.second_brain
     recent = ctx.store.query(
-        "SELECT id, kind, text FROM memory_items WHERE created_at >= ? AND done_at IS NULL ORDER BY created_at",
+        "SELECT id, kind, text FROM second_brain_items WHERE created_at >= ? AND done_at IS NULL ORDER BY created_at",
         (days_ago_iso(cfg.suggest_lookback_days),),
     )
     if not recent:
-        return Skipped(f"no memories in the last {cfg.suggest_lookback_days} days")
+        return Skipped(f"no items in the last {cfg.suggest_lookback_days} days")
     # Every prior suggestion, any status: a suggestion is made once, ever.
-    existing = [r["text"] for r in ctx.store.query("SELECT text FROM memory_suggestions ORDER BY created_at DESC")]
+    existing = [r["text"] for r in ctx.store.query("SELECT text FROM second_brain_suggestions ORDER BY created_at DESC")]
     prompt = "\n".join([
-        f"These are the owner's memories from the last {cfg.suggest_lookback_days} days, as (id, kind, text):",
+        f"These are the items the owner captured in the last {cfg.suggest_lookback_days} days, as (id, kind, text):",
         *[f"- ({r['id']}, {r['kind']}) {r['text'][:300]}" for r in recent],
         "",
         "Already suggested, never repeat these or close variants:",
         *([f"- {t}" for t in existing] or ["- none"]),
         "",
-        "Reply with only a JSON array. Each element: {\"text\": one concrete action item in one sentence, \"memory_ids\": [ids it comes from]}.",
-        f"Suggest at most {cfg.suggest_max}, only when the memories clearly call for an action. An empty array is a fine answer.",
+        "Reply with only a JSON array. Each element: {\"text\": one concrete action item in one sentence, \"item_ids\": [ids it comes from]}.",
+        f"Suggest at most {cfg.suggest_max}, only when the items clearly call for an action. An empty array is a fine answer.",
     ])
-    raw = await ctx.run_task(prompt, tools=("memory_search", "memory_get"))
+    raw = await ctx.run_task(prompt, tools=("second_brain_search", "second_brain_get"))
     items = _json_array(raw)[:cfg.suggest_max]
     added = 0
-    with ctx.commit(cursor=("memory.suggest", now_iso())) as conn:
+    with ctx.commit(cursor=("second_brain.suggest", now_iso())) as conn:
         for it in items:
             text = str(it.get("text", "")).strip()
             if not text:
                 continue
             cur = conn.execute(
-                "INSERT OR IGNORE INTO memory_suggestions(text, memory_ids, created_at) VALUES (?, ?, ?)",
-                (text, json.dumps([int(i) for i in it.get("memory_ids", []) if str(i).isdigit()]), now_iso()),
+                "INSERT OR IGNORE INTO second_brain_suggestions(text, item_ids, created_at) VALUES (?, ?, ?)",
+                (text, json.dumps([int(i) for i in it.get("item_ids", []) if str(i).isdigit()]), now_iso()),
             )
             added += cur.rowcount
     return f"{added} new suggestion(s) from {len(items)} proposed"

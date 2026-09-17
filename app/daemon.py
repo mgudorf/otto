@@ -55,6 +55,7 @@ def build(config: Config, spawn_fn=None) -> FastAPI:
         if m.schema:
             store.migrate(m.schema)
     migrate.rebuild_fts(store, rebuild)
+    migrate.rename_modules(store, config.data.db.parent / "backups")   # rows naming a module by an old name, before the seeds add the new one
     for m in registry.ordered():
         if m.setup:
             try:

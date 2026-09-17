@@ -1,8 +1,8 @@
 -- Rebuilt whole on every rebuild: never written by hand.
 CREATE TABLE IF NOT EXISTS graph_nodes (
   tag       TEXT PRIMARY KEY,           -- lowercased, stripped
-  count     INTEGER NOT NULL,           -- distinct items carrying the tag
-  memories  INTEGER NOT NULL,
+  count     INTEGER NOT NULL,           -- distinct items and sessions carrying the tag
+  items     INTEGER NOT NULL,           -- of those, Second Brain items
   sessions  INTEGER NOT NULL,
   last_seen TEXT NOT NULL
 );
