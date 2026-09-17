@@ -9,7 +9,7 @@ from app.store import now_iso
 from tests.conftest import run
 from tests.test_app import client_for
 
-MEMORY_SCHEMA = (ROOT / "app" / "modules" / "memory" / "schema.sql").read_text("utf-8")
+SECOND_BRAIN_SCHEMA = (ROOT / "app" / "modules" / "second_brain" / "schema.sql").read_text("utf-8")
 GRAPH_SCHEMA = (ROOT / "app" / "modules" / "graph" / "schema.sql").read_text("utf-8")
 READ_TOOLS = {"graph_nodes", "graph_neighbors", "graph_items"}
 WRITE_TOOLS = {"graph_link", "graph_unlink", "graph_merge", "graph_prune", "graph_restore"}
@@ -28,17 +28,17 @@ class FakeServer:
 
 
 def seed(store):
-    """Three memories and three sessions: s1 closed and tagged, s2 a live pane (no tags yet), s3 a Chat conversation tagged while open."""
-    store.migrate(MEMORY_SCHEMA)
+    """Three items and three sessions: s1 closed and tagged, s2 a live pane (no tags yet), s3 a Chat conversation tagged while open."""
+    store.migrate(SECOND_BRAIN_SCHEMA)
     store.migrate(GRAPH_SCHEMA)
     ts = now_iso()
     with store.tx() as conn:
         for i in (1, 2, 3):
-            conn.execute("INSERT INTO memory_items(id, kind, text, created_at, updated_at) VALUES (?, 'note', ?, ?, ?)", (i, f"m{i}", ts, ts))
+            conn.execute("INSERT INTO second_brain_items(id, kind, text, created_at, updated_at) VALUES (?, 'note', ?, ?, ?)", (i, f"m{i}", ts, ts))
         for mid, tag in [(1, "Python"), (1, "sqlite"), (2, "python "), (2, "SQLite"), (3, "ledger")]:
-            conn.execute("INSERT INTO memory_tags(memory_id, tag) VALUES (?, ?)", (mid, tag))
-        conn.execute("INSERT INTO app_sessions(id, module, opened_at, closed_at, title, tags) VALUES ('s1', 'memory', ?, ?, 'one', ?)", (ts, ts, json.dumps(["SQLITE", "tax"])))
-        conn.execute("INSERT INTO app_sessions(id, module, opened_at) VALUES ('s2', 'memory', ?)", (ts,))
+            conn.execute("INSERT INTO second_brain_tags(item_id, tag) VALUES (?, ?)", (mid, tag))
+        conn.execute("INSERT INTO app_sessions(id, module, opened_at, closed_at, title, tags) VALUES ('s1', 'second_brain', ?, ?, 'one', ?)", (ts, ts, json.dumps(["SQLITE", "tax"])))
+        conn.execute("INSERT INTO app_sessions(id, module, opened_at) VALUES ('s2', 'second_brain', ?)", (ts,))
         conn.execute("INSERT INTO app_sessions(id, module, opened_at, title, tags) VALUES ('s3', 'chat', ?, 'three', ?)", (ts, json.dumps(["tax", "Chat"])))
 
 
@@ -51,7 +51,7 @@ def edges(store):
 
 
 def snapshot(store):
-    return [store.query(f"SELECT * FROM {t} ORDER BY 1, 2") for t in ("memory_items", "memory_tags", "app_sessions")]
+    return [store.query(f"SELECT * FROM {t} ORDER BY 1, 2") for t in ("second_brain_items", "second_brain_tags", "app_sessions")]
 
 
 def test_rebuild_from_sources(store):
@@ -60,7 +60,7 @@ def test_rebuild_from_sources(store):
         assert build.rebuild(conn) == (5, 3)
     n = nodes(store)
     assert set(n) == {"python", "sqlite", "ledger", "tax", "chat"}
-    assert (n["sqlite"]["count"], n["sqlite"]["memories"], n["sqlite"]["sessions"]) == (3, 2, 1)
+    assert (n["sqlite"]["count"], n["sqlite"]["items"], n["sqlite"]["sessions"]) == (3, 2, 1)
     assert n["python"]["count"] == 2 and n["tax"]["sessions"] == 2 and n["chat"]["sessions"] == 1
     assert edges(store) == {("python", "sqlite", "cooccur"): 2, ("sqlite", "tax", "cooccur"): 1, ("chat", "tax", "cooccur"): 1}
     before = (nodes(store), edges(store))
@@ -79,7 +79,7 @@ def test_overlays_and_sources_untouched(store, config):
     t = full.tools
     assert t["graph_merge"]("Ledger", "tax")["ok"]
     n = nodes(store)
-    assert "ledger" not in n and n["tax"]["count"] == 3 and n["tax"]["memories"] == 1
+    assert "ledger" not in n and n["tax"]["count"] == 3 and n["tax"]["items"] == 1
     assert t["graph_prune"]("python")["ok"]
     assert "python" not in nodes(store) and ("python", "sqlite", "cooccur") not in edges(store)
     assert t["graph_link"]("tax", "sqlite", "same ledger work")["ok"]
@@ -89,8 +89,8 @@ def test_overlays_and_sources_untouched(store, config):
     assert "error" in t["graph_link"]("nope", "tax")
     assert "error" in t["graph_merge"]("tax", "ledger")  # would make a cycle
     assert t["graph_unlink"]("sqlite", "tax")["ok"] and ("sqlite", "tax", "link") not in edges(store)
-    items = read.tools["graph_items"]("TAX")
-    assert [m["id"] for m in items["memories"]] == [3] and [s["id"] for s in items["sessions"]] == ["s1", "s3"]
+    hits = read.tools["graph_items"]("TAX")
+    assert [m["id"] for m in hits["items"]] == [3] and [s["id"] for s in hits["sessions"]] == ["s1", "s3"]
     assert {e["neighbor"] for e in read.tools["graph_neighbors"]("sqlite")} == {"python", "tax"}
     assert snapshot(store) == sources_before
     assert [e["verb"] for e in store.query("SELECT verb FROM app_events ORDER BY id")] == ["merged", "pruned", "linked", "restored", "unlinked"]
@@ -110,7 +110,7 @@ def test_graph_routes(config):
         await app.state.runner.start()
         async with client_for(app) as c:
             for tags in (["Python", "sqlite"], ["python"]):
-                assert (await c.post("/api/memory/action/capture", json={"kind": "note", "text": "x", "tags": tags})).status_code == 200
+                assert (await c.post("/api/second_brain/action/capture", json={"kind": "note", "text": "x", "tags": tags})).status_code == 200
             assert (await c.get("/api/graph/left")).json()["groups"][0]["count"] == 0
             job = app.state.runner.submit("graph.rebuild", "graph", "graph", "scheduled", tasks.rebuild)
             assert await job.done == "2 nodes, 1 edges"

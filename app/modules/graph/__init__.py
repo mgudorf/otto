@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import sqlite3
+
 from app.modules import Agent, Manifest, Schedule
 
 MANIFEST = Manifest(
@@ -14,3 +18,15 @@ MANIFEST = Manifest(
         write_tools=("graph_link", "graph_unlink", "graph_merge", "graph_prune", "graph_restore"),
     ),
 )
+
+
+def setup(config) -> None:
+    """Called once by daemon.build after the schemas: graph_nodes counted a tag's Second Brain items as `memories`
+    before 2026-09-17; the column is renamed in place and the next rebuild fills it."""
+    conn = sqlite3.connect(config.data.db, timeout=5)
+    try:
+        if "memories" in {r[1] for r in conn.execute("PRAGMA table_info(graph_nodes)")}:
+            conn.execute("ALTER TABLE graph_nodes RENAME COLUMN memories TO items")
+        conn.commit()
+    finally:
+        conn.close()

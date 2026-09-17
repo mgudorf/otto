@@ -33,8 +33,8 @@ stagger_minutes = 15          # gap the scheduler leaves between one nightly LLM
 upload_max_mb = 50            # an attachment larger than this is refused
 replay_chars = 20000          # characters of the stored transcript replayed when the CLI has lost a conversation
 
-[memory]
-suggest_lookback_days = 7   # memories the nightly suggest task reads
+[second_brain]
+suggest_lookback_days = 7   # items the nightly suggest task reads
 suggest_max = 3             # action items it may propose per run
 
 [science]

@@ -1,7 +1,9 @@
-"""An older database brought to the current table names before the schemas run.
+"""An older database brought to the current names: its tables before the schemas run, the module its rows name after.
 
 Every table is named after the module that owns it: app_ for the platform, <module>_ for a module. RENAMES is every
 name a table has had, old -> current; renaming a table is one more line here, and the schemas keep only the new name.
+MODULE_RENAMES is every name a module has had, old -> current; renaming a module is one more line here, and the rows
+that carry the name (MODULE_COLUMNS, `<module>.<task>` names, `modules.<module>.` settings, the start page) follow it.
 """
 
 from __future__ import annotations
@@ -29,19 +31,46 @@ RENAMES = {
     "topics": "education_topics",
     "questions": "education_questions",
     "question_parts": "education_question_parts",
-    "memories": "memory_items",
-    "memories_fts": "memory_fts",
     "feedback": "feedback_items",
     "db_queries": "database_queries",
     "search_topics": "web_search_topics",
     "search_findings": "web_search_findings",
+    # 2026-09-13: memories took the prefix of its module, memory; 2026-09-17: that module became second_brain
+    "memories": "second_brain_items",
+    "memories_fts": "second_brain_fts",
+    "memory_items": "second_brain_items",
+    "memory_tags": "second_brain_tags",
+    "memory_suggestions": "second_brain_suggestions",
+    "memory_fts": "second_brain_fts",
 }
+
+MODULE_RENAMES = {
+    # 2026-09-17
+    "memory": "second_brain",
+}
+
+# (table, column): every column that holds a module's name.
+MODULE_COLUMNS = (
+    ("app_tasks", "module"), ("app_jobs", "module"), ("app_events", "module"), ("app_sessions", "module"),
+    ("app_module_errors", "module"), ("app_llm_runs", "module"), ("feedback_items", "page"), ("feedback_items", "item_module"),
+)
 
 
 def pending(conn: sqlite3.Connection) -> dict[str, str]:
     """The renames this database still needs: every old name it holds a table under."""
     have = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     return {old: new for old, new in RENAMES.items() if old in have}
+
+
+def pending_modules(conn: sqlite3.Connection) -> dict[str, str]:
+    """The module renames this database still needs: every old name a row still carries in one of MODULE_COLUMNS."""
+    out = {}
+    for table, column in MODULE_COLUMNS:
+        if _exists(conn, table):
+            for (name,) in conn.execute(f'SELECT DISTINCT "{column}" FROM "{table}"').fetchall():
+                if name in MODULE_RENAMES:
+                    out[name] = MODULE_RENAMES[name]
+    return out
 
 
 def _exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -96,6 +125,44 @@ def rename_tables(store: Store, backup_dir: Path) -> list[str]:
         if len(broken) > broken_before:
             raise RuntimeError(f"tables reference missing rows after the rename: {broken[:5]}")
         return rebuild
+
+
+def rename_modules(store: Store, backup_dir: Path) -> list[str]:
+    """Rewrite every row that names a module by an old name, in one transaction, after a backup into backup_dir.
+
+    Runs after the schemas, so every table it touches exists. The module columns take the new name, and so does a
+    resource named after the module; task, job, run and cursor names swap their `<module>.` prefix, settings keys
+    their `modules.<module>.` prefix, and a start page set to the module moves with it. Returns the old names rewritten.
+    """
+    with store.raw() as conn:
+        todo = pending_modules(conn)
+        if not todo:
+            return []
+        store.backup(backup_dir / f"otto-{datetime.now():%Y%m%d-%H%M%S}-pre-module-rename.db")
+        conn.execute("BEGIN")
+        try:
+            for old, new in todo.items():
+                for table, column in MODULE_COLUMNS:
+                    if _exists(conn, table):
+                        conn.execute(f'UPDATE "{table}" SET "{column}" = ? WHERE "{column}" = ?', (new, old))
+                for table in ("app_tasks", "app_jobs"):
+                    conn.execute(f'UPDATE "{table}" SET resource = ? WHERE resource = ?', (new, old))
+                for table, column in (("app_tasks", "name"), ("app_jobs", "task"), ("app_llm_runs", "task"), ("app_cursors", "key")):
+                    _reprefix(conn, table, column, f"{old}.", f"{new}.")
+                _reprefix(conn, "app_settings", "key", f"modules.{old}.", f"modules.{new}.")
+                conn.execute("UPDATE app_settings SET value = json_quote(?) WHERE key = 'ui.start_page' AND value = json_quote(?)", (new, old))
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+        conn.execute("COMMIT")
+        return list(todo)
+
+
+def _reprefix(conn: sqlite3.Connection, table: str, column: str, old: str, new: str) -> None:
+    conn.execute(
+        f'UPDATE "{table}" SET "{column}" = ? || substr("{column}", ?) WHERE substr("{column}", 1, ?) = ?',
+        (new, len(old) + 1, len(old), old),
+    )
 
 
 def _objects_on(conn: sqlite3.Connection, table: str) -> list[tuple[str, str]]:

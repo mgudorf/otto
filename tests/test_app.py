@@ -1,4 +1,4 @@
-"""Routes through the real app: memory module end to end, and sessions with a fake CLI."""
+"""Routes through the real app: second_brain module end to end, and sessions with a fake CLI."""
 
 import json
 from pathlib import Path
@@ -10,12 +10,12 @@ from app.modules import Manifest, Module
 from app.store import now_iso
 from tests.conftest import fake_spawn, run
 
-INIT = json.dumps({"type": "system", "subtype": "init", "session_id": "s1", "tools": ["mcp__otto__memory_search"]})
-TOOL = json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "mcp__otto__memory_search", "input": {"query": "x"}}]}})
+INIT = json.dumps({"type": "system", "subtype": "init", "session_id": "s1", "tools": ["mcp__otto__second_brain_search"]})
+TOOL = json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "mcp__otto__second_brain_search", "input": {"query": "x"}}]}})
 TOOL_OK = json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "[]"}]}})
 TEXT = json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Nothing about that yet."}]}})
 RESULT = json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "Nothing about that yet.", "session_id": "s1"})
-CLOSE = json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": '{"title": "Search for x", "tags": ["memory", "search"]}', "session_id": "s2"})
+CLOSE = json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": '{"title": "Search for x", "tags": ["second_brain", "search"]}', "session_id": "s2"})
 
 
 def client_for(app):
@@ -50,51 +50,51 @@ def queue_module(pending: list[dict], todays: list[dict]) -> Module:
     )
 
 
-def test_memory_end_to_end(config):
+def test_second_brain_end_to_end(config):
     async def main():
         app = build(config)
         await app.state.runner.start()
         async with client_for(app) as c:
             shell = (await c.get("/api/shell")).json()
-            assert {m["name"] for m in shell["modules"]} >= {"home", "memory"} and shell["budget"]["max"] == config.nightly.max_sessions
-            r = await c.post("/api/memory/action/capture", json={"kind": "note", "text": "buy sqlite book", "tags": ["reading"]})
+            assert {m["name"] for m in shell["modules"]} >= {"home", "second_brain"} and shell["budget"]["max"] == config.nightly.max_sessions
+            r = await c.post("/api/second_brain/action/capture", json={"kind": "note", "text": "buy sqlite book", "tags": ["reading"]})
             assert r.status_code == 200, r.text
             mid = r.json()["id"]
-            await c.post("/api/memory/action/capture", json={"kind": "link", "text": "https://example.com the site"})
-            left = (await c.get("/api/memory/left?query=sqlite")).json()
+            await c.post("/api/second_brain/action/capture", json={"kind": "link", "text": "https://example.com the site"})
+            left = (await c.get("/api/second_brain/left?query=sqlite")).json()
             assert left["groups"][0]["rows"][0]["id"] == mid and left["showing"] == "1 / 1"
-            left = (await c.get("/api/memory/left?chip=Links")).json()
+            left = (await c.get("/api/second_brain/left?chip=Links")).json()
             assert left["groups"][0]["rows"][0]["leading"]["kind"] == "link"
-            item = (await c.get(f"/api/memory/item/{mid}")).json()
+            item = (await c.get(f"/api/second_brain/item/{mid}")).json()
             assert item["tags"] == ["reading"] and item["actions"][-1]["verb"] == "forget"
-            assert (await c.post("/api/memory/action/tag", json={"id": mid, "tags": ["books"]})).json()["tags"] == ["books", "reading"]
+            assert (await c.post("/api/second_brain/action/tag", json={"id": mid, "tags": ["books"]})).json()["tags"] == ["books", "reading"]
             home = (await c.get("/api/home/left")).json()
-            assert next(g for g in home["groups"] if g["module"] == "memory")["count"] == 2
+            assert next(g for g in home["groups"] if g["module"] == "second_brain")["count"] == 2
             numbers = (await c.get("/api/home/numbers")).json()
-            assert next(n for n in numbers if n["module"] == "memory")["value"] == 2
-            assert (await c.post("/api/memory/action/forget", json={"id": mid})).status_code == 200
-            assert (await c.get(f"/api/memory/item/{mid}")).status_code == 404
-            ev = (await c.get("/api/events?module=memory")).json()
+            assert next(n for n in numbers if n["module"] == "second_brain")["value"] == 2
+            assert (await c.post("/api/second_brain/action/forget", json={"id": mid})).status_code == 200
+            assert (await c.get(f"/api/second_brain/item/{mid}")).status_code == 404
+            ev = (await c.get("/api/events?module=second_brain")).json()
             assert [e["verb"] for e in ev["events"]][:2] == ["forgot", "tagged"]
             s = (await c.put("/api/settings", json={"ui.page_size": 20})).json()
             assert s["ui.page_size"] == 20
             assert (await c.put("/api/settings", json={"ui.page_size": 5})).status_code == 400
             # a module's own model and effort: one of the configured choices or default
-            assert (await c.put("/api/settings", json={"modules.memory.model": "gpt"})).status_code == 400
-            assert (await c.put("/api/settings", json={"modules.memory.effort": "extreme"})).status_code == 400
-            f = (await c.put("/api/settings", json={"modules.memory.model": config.claude.models[0], "modules.memory.effort": "low"})).json()
-            assert f["modules.memory.model"] == config.claude.models[0] and f["modules.memory.effort"] == "low"
-            mem = next(m for m in (await c.get("/api/shell")).json()["modules"] if m["name"] == "memory")
+            assert (await c.put("/api/settings", json={"modules.second_brain.model": "gpt"})).status_code == 400
+            assert (await c.put("/api/settings", json={"modules.second_brain.effort": "extreme"})).status_code == 400
+            f = (await c.put("/api/settings", json={"modules.second_brain.model": config.claude.models[0], "modules.second_brain.effort": "low"})).json()
+            assert f["modules.second_brain.model"] == config.claude.models[0] and f["modules.second_brain.effort"] == "low"
+            mem = next(m for m in (await c.get("/api/shell")).json()["modules"] if m["name"] == "second_brain")
             assert mem["model"] == config.claude.models[0] and mem["effort"] == "low"
             assert shell["claude"]["models"] == list(config.claude.models) and shell["claude"]["efforts"] == list(config.claude.efforts)
             # an export is every table as JSON rows
             r = (await c.post("/api/data/export")).json()
             dump = json.loads(Path(r["path"]).read_text("utf-8"))
-            assert dump["app_settings"] and "memory_items" in dump and (await c.get("/api/data")).json()["exports"] == 1
+            assert dump["app_settings"] and "second_brain_items" in dump and (await c.get("/api/data")).json()["exports"] == 1
             # every static file revalidates, so a restarted daemon never serves stale modules
             assert (await c.get("/shell.js")).headers["cache-control"] == "no-cache"
             # a run counts against the nightly budget from the moment it starts, so concurrent runs see each other
-            app.state.store.execute("INSERT INTO app_llm_runs(ts, module, task, status, budgeted) VALUES (?, 'memory', 'memory.suggest', 'running', 1)", (now_iso(),))
+            app.state.store.execute("INSERT INTO app_llm_runs(ts, module, task, status, budgeted) VALUES (?, 'second_brain', 'second_brain.suggest', 'running', 1)", (now_iso(),))
             assert (await c.get("/api/shell")).json()["budget"]["used"] == 1
         await app.state.runner.drain(1)
         app.state.store.close()
@@ -109,44 +109,44 @@ def test_session_turn_and_clear(config):
         app = build(config, spawn_fn=fake_spawn([INIT, TOOL, TOOL_OK, TEXT, RESULT], calls))
         await app.state.runner.start()
         async with client_for(app) as c:
-            app.state.store.set_setting("modules.memory.model", "sonnet")
-            app.state.store.set_setting("modules.memory.effort", "low")
-            r = await c.post("/api/session/memory/send", json={"text": "anything about x?"})
+            app.state.store.set_setting("modules.second_brain.model", "sonnet")
+            app.state.store.set_setting("modules.second_brain.effort", "low")
+            r = await c.post("/api/session/second_brain/send", json={"text": "anything about x?"})
             assert r.status_code == 200, r.text
             sid = r.json()["session"]
             await settle(app)
-            tabs = (await c.get("/api/session/memory")).json()
+            tabs = (await c.get("/api/session/second_brain")).json()
             assert [(t["id"], t["label"], t["busy"]) for t in tabs["sessions"]] == [(sid, "anything about x?", False)]
-            s = (await c.get(f"/api/session/memory/{sid}")).json()
+            s = (await c.get(f"/api/session/second_brain/{sid}")).json()
             roles = [(t["role"], t.get("tool"), t.get("status")) for t in s["turns"]]
-            assert roles == [("user", None, None), ("tool", "memory_search", "done"), ("model", None, None)]
+            assert roles == [("user", None, None), ("tool", "second_brain_search", "done"), ("model", None, None)]
             assert s["session"]["cli_started"] == 1 and s["busy"] is False
             args = calls[0]["args"]
             assert "--session-id" in args and "--restricted" in args and "--permission-prompts" in args and "--include-partial-messages" in args
             assert args[args.index("--model") + 1] == "sonnet" and args[args.index("--effort") + 1] == "low"   # the module's own picks
             assert "--tools" in args and "Write" not in args[args.index("--tools") + 1]
-            assert "mcp__otto__memory_add" in args[args.index("--allowedTools") + 1]
+            assert "mcp__otto__second_brain_add" in args[args.index("--allowedTools") + 1]
             assert not any(k.startswith("ANTHROPIC_") or k.startswith("CLAUDECODE") for k in calls[0]["env"])
             # second turn on the same tab resumes; a turn without an id opens a second tab
-            await c.post("/api/session/memory/send", json={"text": "and y?", "id": sid})
+            await c.post("/api/session/second_brain/send", json={"text": "and y?", "id": sid})
             await settle(app)
             assert "--resume" in calls[1]["args"]
-            sid2 = (await c.post("/api/session/memory/send", json={"text": "another thread"})).json()["session"]
+            sid2 = (await c.post("/api/session/second_brain/send", json={"text": "another thread"})).json()["session"]
             await settle(app)
             assert sid2 != sid and "--session-id" in calls[2]["args"]
-            assert [t["id"] for t in (await c.get("/api/session/memory")).json()["sessions"]] == [sid, sid2]
-            assert (await c.get("/api/session/memory/nope")).status_code == 404
+            assert [t["id"] for t in (await c.get("/api/session/second_brain")).json()["sessions"]] == [sid, sid2]
+            assert (await c.get("/api/session/second_brain/nope")).status_code == 404
             # /clear closes one tab with title and tags from the one-shot tagger; the other stays open
             app.state.claude.spawn = fake_spawn([CLOSE], calls)
-            r = await c.post("/api/session/memory/send", json={"text": "/clear", "id": sid})
+            r = await c.post("/api/session/second_brain/send", json={"text": "/clear", "id": sid})
             assert r.json() == {"cleared": True}
             await settle(app)
             row = app.state.store.one("SELECT * FROM app_sessions WHERE id = ?", (sid,))
-            assert row["closed_at"] and row["title"] == "Search for x" and json.loads(row["tags"]) == ["memory", "search"]
+            assert row["closed_at"] and row["title"] == "Search for x" and json.loads(row["tags"]) == ["second_brain", "search"]
             assert calls[3]["args"][calls[3]["args"].index("--max-turns") + 1] == "2"
-            assert [t["id"] for t in (await c.get("/api/session/memory")).json()["sessions"]] == [sid2]
-            assert (await c.post("/api/session/memory/send", json={"text": "/clear"})).json() == {"cleared": False}
-            assert (await c.post("/api/session/memory/send", json={"text": "/clear", "id": sid})).status_code == 404
+            assert [t["id"] for t in (await c.get("/api/session/second_brain")).json()["sessions"]] == [sid2]
+            assert (await c.post("/api/session/second_brain/send", json={"text": "/clear"})).json() == {"cleared": False}
+            assert (await c.post("/api/session/second_brain/send", json={"text": "/clear", "id": sid})).status_code == 404
         await app.state.runner.drain(1)
         app.state.store.close()
 
@@ -159,9 +159,9 @@ def test_failed_first_turn_retires_session(config):
         app = build(config, spawn_fn=fake_spawn([bad]))
         await app.state.runner.start()
         async with client_for(app) as c:
-            await c.post("/api/session/memory/send", json={"text": "hi"})
+            await c.post("/api/session/second_brain/send", json={"text": "hi"})
             await settle(app)
-            assert (await c.get("/api/session/memory")).json()["sessions"] == []
+            assert (await c.get("/api/session/second_brain")).json()["sessions"] == []
             rows = app.state.store.query("SELECT * FROM app_sessions")
             assert rows[0]["closed_at"] and rows[0]["title"] == "(failed to start)"
         await app.state.runner.drain(1)
@@ -178,9 +178,9 @@ def test_huge_stream_line_survives(config):
         app = build(config, spawn_fn=fake_spawn([INIT, TOOL, big, TEXT, RESULT]))
         await app.state.runner.start()
         async with client_for(app) as c:
-            sid = (await c.post("/api/session/memory/send", json={"text": "read the big one"})).json()["session"]
+            sid = (await c.post("/api/session/second_brain/send", json={"text": "read the big one"})).json()["session"]
             await settle(app)
-            s = (await c.get(f"/api/session/memory/{sid}")).json()
+            s = (await c.get(f"/api/session/second_brain/{sid}")).json()
             assert [t["role"] for t in s["turns"]] == ["user", "tool", "model"]
             assert s["turns"][1]["status"] == "done" and s["busy"] is False
         await app.state.runner.drain(1)
@@ -205,14 +205,14 @@ def test_home_review_group(config):
         st.store.set_setting("modules.queued.enabled", True)
         home = st.registry.get("home")
         async with client_for(app) as c:
-            await c.post("/api/memory/action/capture", json={"kind": "note", "text": "a note from today"})
+            await c.post("/api/second_brain/action/capture", json={"kind": "note", "text": "a note from today"})
 
             groups = (await c.get("/api/home/left")).json()["groups"]
             assert groups[0]["module"] == "queued" and groups[0]["label"] == "Review"
             assert groups[0]["count"] == 2 and groups[0]["more"] == 0
             assert [r["id"] for r in groups[0]["rows"]] == [7, 8]
             assert [g["module"] for g in groups if g["label"] == "Review"] == ["queued"]
-            assert any(g["module"] == "memory" and g["label"] == "Memory" for g in groups)
+            assert any(g["module"] == "second_brain" and g["label"] == "Second Brain" for g in groups)
             # one module, two groups: the page keys them label:module, so the keys stay distinct
             mine = [(g["label"], g["module"]) for g in groups if g["module"] == "queued"]
             assert mine == [("Review", "queued"), ("Queued", "queued")]
@@ -237,7 +237,7 @@ def test_home_review_group(config):
             st.registry.modules["quiet"] = quiet
             groups = (await c.get("/api/home/left")).json()["groups"]
             assert groups[0]["module"] == "quiet" and groups[0]["label"] == "Review" and groups[0]["page"] is False
-            assert next(g for g in groups if g["module"] == "memory")["page"] is True
+            assert next(g for g in groups if g["module"] == "second_brain")["page"] is True
         await app.state.runner.drain(1)
         app.state.store.close()
 
@@ -245,8 +245,8 @@ def test_home_review_group(config):
 
 
 FILED = json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": "s3", "result": json.dumps({
-    "kind": "bug", "title": "Forget leaves the inspector open", "summary": "Forgetting a memory should clear the inspector.",
-    "tags": ["memory", "bug", "inspector"], "ref": None, "draft": "# Forget leaves the inspector open\n\n- Where: memory item\n",
+    "kind": "bug", "title": "Forget leaves the inspector open", "summary": "Forgetting an item should clear the inspector.",
+    "tags": ["second_brain", "bug", "inspector"], "ref": None, "draft": "# Forget leaves the inspector open\n\n- Where: second_brain item\n",
 })})
 NOT_JSON = json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": "s4", "result": "I could not classify this."})
 
@@ -270,16 +270,16 @@ def test_feedback_end_to_end(config):
         async with client_for(app) as c:
             shell = (await c.get("/api/shell")).json()
             assert next(m for m in shell["modules"] if m["name"] == "feedback")["page"] is False   # listed for hue and icon, kept off the rail
-            assert (await c.post("/api/feedback/action/add", json={"page": "memory", "text": "  "})).status_code == 400
-            r = await c.post("/api/feedback/action/add", json={"page": "memory", "text": "forget should also clear the inspector", "item": {"module": "memory", "id": 7, "text": "buy sqlite book"}})
+            assert (await c.post("/api/feedback/action/add", json={"page": "second_brain", "text": "  "})).status_code == 400
+            r = await c.post("/api/feedback/action/add", json={"page": "second_brain", "text": "forget should also clear the inspector", "item": {"module": "second_brain", "id": 7, "text": "buy sqlite book"}})
             assert r.status_code == 200, r.text
             fid = r.json()["id"]
             await settle(app)
             assert (await c.get("/api/feedback/recent")).status_code == 422                    # the panel is per page; there is no page-less list
-            recent = (await c.get("/api/feedback/recent?page=memory")).json()
-            assert recent["page"] == "memory" and recent["rows"][0]["status"] == "filed" and recent["rows"][0]["kind"] == "bug"
+            recent = (await c.get("/api/feedback/recent?page=second_brain")).json()
+            assert recent["page"] == "second_brain" and recent["rows"][0]["status"] == "filed" and recent["rows"][0]["kind"] == "bug"
             row = (await c.get("/api/feedback/list")).json()[0]
-            assert row["id"] == fid and row["text"] == "forget should also clear the inspector" and row["item_id"] == "7" and row["tags"] == ["memory", "bug", "inspector"]
+            assert row["id"] == fid and row["text"] == "forget should also clear the inspector" and row["item_id"] == "7" and row["tags"] == ["second_brain", "bug", "inspector"]
             assert row["draft"].startswith("# Forget") and row["ref"] is None and row["job_id"]
             args = calls[0]["args"]
             assert "otto-read" in args[args.index("--mcp-config") + 1] and "--no-session-persistence" in args
@@ -288,7 +288,7 @@ def test_feedback_end_to_end(config):
             prompt = procs[0].stdin.data.decode("utf-8")
             assert f"Feedback #{fid}" in prompt and "buy sqlite book" in prompt
             assert app.state.store.one("SELECT budgeted FROM app_llm_runs WHERE module = 'feedback'")["budgeted"] == 0
-            ev = (await c.get("/api/events?module=memory")).json()["events"]
+            ev = (await c.get("/api/events?module=second_brain")).json()["events"]
             assert [e["verb"] for e in ev][:2] == ["filed", "feedback"]
             # a reply that is not JSON fails the note; retry requeues it
             app.state.claude.spawn = spying([NOT_JSON])
@@ -297,7 +297,7 @@ def test_feedback_end_to_end(config):
             await settle(app)
             recent = (await c.get("/api/feedback/recent?page=activity")).json()
             assert recent["rows"][0]["status"] == "failed" and "JSON" in recent["rows"][0]["error"]
-            assert [r["id"] for r in (await c.get("/api/feedback/recent?page=memory")).json()["rows"]] == [fid]   # never another page's notes
+            assert [r["id"] for r in (await c.get("/api/feedback/recent?page=second_brain")).json()["rows"]] == [fid]   # never another page's notes
             assert (await c.post("/api/feedback/action/retry", json={"id": fid})).status_code == 409
             app.state.claude.spawn = spying([FILED])
             assert (await c.post("/api/feedback/action/retry", json={"id": bad})).status_code == 200
@@ -305,14 +305,14 @@ def test_feedback_end_to_end(config):
             assert (await c.get("/api/feedback/recent?page=activity")).json()["rows"][0]["status"] == "filed"
             # a note sent during a drain is refused before any row exists
             app.state.runner.draining = True
-            assert (await c.post("/api/feedback/action/add", json={"page": "memory", "text": "late"})).status_code == 503
+            assert (await c.post("/api/feedback/action/add", json={"page": "second_brain", "text": "late"})).status_code == 503
             assert app.state.store.scalar("SELECT COUNT(*) FROM feedback_items") == 2
         await app.state.runner.drain(1)
         app.state.store.close()
         # a note whose filing job died with the last daemon reads failed at the next boot, so retry is offered
         app = build(config)
         st = app.state
-        st.store.execute("INSERT INTO feedback_items(created_at, page, text) VALUES ('2026-09-13T00:00:00+00:00', 'memory', 'orphan')")
+        st.store.execute("INSERT INTO feedback_items(created_at, page, text) VALUES ('2026-09-13T00:00:00+00:00', 'second_brain', 'orphan')")
         st.store.close()
         app = build(config)
         row = app.state.store.one("SELECT status, error FROM feedback_items WHERE text = 'orphan'")

@@ -60,8 +60,8 @@ def test_execute_writes(store):
 
 def test_owners_come_from_the_schemas():
     owners = query.owners()
-    assert owners["app_events"] == "app" and owners["memory_items"] == "memory" and owners["newsfeed_items"] == "newsfeed"
-    assert owners["memory_fts"] == "memory" and "scratch" not in owners
+    assert owners["app_events"] == "app" and owners["second_brain_items"] == "second_brain" and owners["newsfeed_items"] == "newsfeed"
+    assert owners["second_brain_fts"] == "second_brain" and "scratch" not in owners
 
 
 def test_database_run_explain_save(config):
@@ -72,38 +72,38 @@ def test_database_run_explain_save(config):
         await app.state.runner.start()
         async with client_for(app) as c:
             for text in ("a", "b", "c"):
-                await c.post("/api/memory/action/capture", json={"kind": "note", "text": text})
-            r = (await c.post("/api/database/action/run", json={"sql": "select id, text from memory_items order by id"})).json()
+                await c.post("/api/second_brain/action/capture", json={"kind": "note", "text": text})
+            r = (await c.post("/api/database/action/run", json={"sql": "select id, text from second_brain_items order by id"})).json()
             assert r["columns"] == ["id", "text"] and r["total"] == 2 and r["truncated"] is True and r["rows"][0][1] == "a"
-            r = (await c.post("/api/database/action/run", json={"sql": "delete from memory_items where text = 'c'"})).json()
+            r = (await c.post("/api/database/action/run", json={"sql": "delete from second_brain_items where text = 'c'"})).json()
             assert r["changed"] == 1 and r["columns"] == []
-            assert app.state.store.scalar("SELECT COUNT(*) FROM memory_items") == 2
-            r = (await c.post("/api/database/action/explain", json={"sql": "select * from memory_items where id = 1;"})).json()
-            assert r["lines"] and "memory_items" in r["lines"][0]
+            assert app.state.store.scalar("SELECT COUNT(*) FROM second_brain_items") == 2
+            r = (await c.post("/api/database/action/explain", json={"sql": "select * from second_brain_items where id = 1;"})).json()
+            assert r["lines"] and "second_brain_items" in r["lines"][0]
             # LEFT: the tables under their modules, app first then rail order; shadow tables and sqlite_* stay hidden
             left = (await c.get("/api/database/left")).json()
             names = [m["name"] for m in left["modules"]]
-            assert names[0] == "app" and names.index("email") < names.index("memory") < names.index("database") and "other" not in names
+            assert names[0] == "app" and names.index("email") < names.index("second_brain") < names.index("database") and "other" not in names
             modules = {m["name"]: m for m in left["modules"]}
-            memory = {t["name"]: t["rows"] for t in modules["memory"]["tables"]}
-            assert memory == {"memory_fts": 2, "memory_items": 2, "memory_suggestions": 0, "memory_tags": 0} and modules["memory"]["rows"] == 4
+            brain = {t["name"]: t["rows"] for t in modules["second_brain"]["tables"]}
+            assert brain == {"second_brain_fts": 2, "second_brain_items": 2, "second_brain_suggestions": 0, "second_brain_tags": 0} and modules["second_brain"]["rows"] == 4
             tables = {t["name"] for m in left["modules"] for t in m["tables"]}
-            assert "memory_fts_data" not in tables and "sqlite_sequence" not in tables
+            assert "second_brain_fts_data" not in tables and "sqlite_sequence" not in tables
             assert all(t["name"].startswith(f"{m['name']}_") for m in left["modules"] for t in m["tables"])
             # one table's schema
-            t = (await c.get("/api/database/table/memory_items")).json()
-            assert t["module"] == "memory" and t["rows"] == 2 and t["sql"].startswith("CREATE TABLE") and "memory_items" in t["sql"]
+            t = (await c.get("/api/database/table/second_brain_items")).json()
+            assert t["module"] == "second_brain" and t["rows"] == 2 and t["sql"].startswith("CREATE TABLE") and "second_brain_items" in t["sql"]
             assert [x["name"] for x in t["columns"]] == ["id", "kind", "text", "created_at", "updated_at", "done_at"]
             assert t["columns"][0] == {"name": "id", "type": "INTEGER", "notnull": False, "default": None, "pk": True}
-            assert t["columns"][1]["notnull"] is True and [i["name"] for i in t["indexes"]] == ["memory_items_created"]
-            assert {x["name"] for x in t["triggers"]} == {"memory_items_ad", "memory_items_ai", "memory_items_au"}
-            assert (await c.get("/api/database/table/memory_fts_data")).status_code == 404
+            assert t["columns"][1]["notnull"] is True and [i["name"] for i in t["indexes"]] == ["second_brain_items_created"]
+            assert {x["name"] for x in t["triggers"]} == {"second_brain_items_ad", "second_brain_items_ai", "second_brain_items_au"}
+            assert (await c.get("/api/database/table/second_brain_fts_data")).status_code == 404
             assert (await c.get("/api/database/table/nope")).status_code == 404
             # saved queries
-            qid = (await c.post("/api/database/action/save", json={"name": "recent", "sql": "select * from memory_items"})).json()["id"]
+            qid = (await c.post("/api/database/action/save", json={"name": "recent", "sql": "select * from second_brain_items"})).json()["id"]
             saved = (await c.get("/api/database/left")).json()["saved"]
             assert len(saved) == 1 and saved[0]["name"] == "recent" and saved[0]["id"] == qid and saved[0]["sql"].startswith("select")
-            assert (await c.post("/api/database/action/save", json={"name": "recent", "sql": "select id from memory_items"})).json()["id"] == qid
+            assert (await c.post("/api/database/action/save", json={"name": "recent", "sql": "select id from second_brain_items"})).json()["id"] == qid
             assert (await c.post("/api/database/action/save", json={"name": "", "sql": "x"})).status_code != 200
             assert (await c.post("/api/database/action/delete", json={"id": qid})).status_code == 200
             assert (await c.get("/api/database/left")).json()["saved"] == []
@@ -113,9 +113,9 @@ def test_database_run_explain_save(config):
             assert db["label"] == "database" and db["value"].endswith("B")
             ev = (await c.get("/api/events?module=database")).json()
             assert [e["verb"] for e in ev["events"]][:4] == ["deleted", "saved", "saved", "wrote"]
-            assert "1 rows: delete from memory_items" in next(e["text"] for e in ev["events"] if e["verb"] == "wrote")
+            assert "1 rows: delete from second_brain_items" in next(e["text"] for e in ev["events"] if e["verb"] == "wrote")
             ctx = app.state.registry.get("database").context(app.state.store, app.state.registry)
-            assert "\napp:\n" in ctx and "\nmemory:\n  memory_fts (2): text\n  memory_items (2): id, kind, text" in ctx
+            assert "\napp:\n" in ctx and "\nsecond_brain:\n  second_brain_fts (2): text\n  second_brain_items (2): id, kind, text" in ctx
             # a table no schema owns shows under `other`, last
             assert (await c.post("/api/database/action/run", json={"sql": "create table scratch(x)"})).json()["ddl"] is True
             left = (await c.get("/api/database/left")).json()

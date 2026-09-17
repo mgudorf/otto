@@ -8,7 +8,7 @@ from app.store import Store
 
 router = APIRouter(prefix="/api/graph")
 
-NODE_COLUMNS = "tag, count, memories, sessions, last_seen"
+NODE_COLUMNS = "tag, count, items, sessions, last_seen"
 
 
 def _row(r: dict) -> dict:

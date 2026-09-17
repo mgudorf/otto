@@ -58,7 +58,7 @@ class Chat:
 
 
 @dataclass(frozen=True)
-class Memory:
+class SecondBrain:
     suggest_lookback_days: int
     suggest_max: int
 
@@ -122,7 +122,7 @@ class Config:
     data: Data
     nightly: Nightly
     chat: Chat
-    memory: Memory
+    second_brain: SecondBrain
     science: Science
     education: Education
     database: Database
@@ -146,7 +146,7 @@ def load(root: Path = ROOT) -> Config:
         data=Data(db=root / raw["data"]["db"], workspace=root / raw["data"]["workspace"]),
         nightly=Nightly(**raw["nightly"]),
         chat=Chat(**raw["chat"]),
-        memory=Memory(**raw["memory"]),
+        second_brain=SecondBrain(**raw["second_brain"]),
         science=Science(**{**raw["science"], "root": root / raw["science"]["root"]}),
         education=Education(**raw["education"]),
         database=Database(**raw["database"]),

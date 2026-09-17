@@ -129,8 +129,8 @@ def main(argv: list[str], config) -> int:
     store = Store(config.data.db)
     try:
         with store.raw() as conn:
-            if migrate.pending(conn):   # the daemon renames tables at boot; touching them first would break the one still running
-                print("the database still has tables under older names; start the daemon on this code first (python -m app)", file=sys.stderr)
+            if migrate.pending(conn) or migrate.pending_modules(conn):   # the daemon renames at boot; touching rows first would break the one still running
+                print("the database still has tables or rows under older names; start the daemon on this code first (python -m app)", file=sys.stderr)
                 return 1
             add_cleared_at(conn)
         who = ", ".join(modules)

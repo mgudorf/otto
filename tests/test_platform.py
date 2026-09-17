@@ -31,9 +31,9 @@ def test_registry_loads_real_modules():
     reg = Registry()
     reg.load()
     assert reg.errors == {}
-    assert {"home", "memory", "system"} <= set(reg.modules)
-    assert reg.get("memory").manifest.agent is not None
-    assert "suggest" in reg.get("memory").tasks
+    assert {"home", "second_brain", "system"} <= set(reg.modules)
+    assert reg.get("second_brain").manifest.agent is not None
+    assert "suggest" in reg.get("second_brain").tasks
     # hooks take the store, never a request: a route handler must not shadow a hook name
     import inspect
 

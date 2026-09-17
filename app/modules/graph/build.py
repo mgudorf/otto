@@ -9,8 +9,8 @@ from collections import defaultdict
 from itertools import combinations
 
 SOURCES = """
-SELECT 'memory' AS src, m.id AS item, t.tag AS tag, m.created_at AS ts
-  FROM memory_tags t JOIN memory_items m ON m.id = t.memory_id
+SELECT 'second_brain' AS src, m.id AS item, t.tag AS tag, m.created_at AS ts
+  FROM second_brain_tags t JOIN second_brain_items m ON m.id = t.item_id
 UNION ALL
 SELECT 'session', s.id, j.value, COALESCE(s.closed_at, s.opened_at)
   FROM app_sessions s, json_each(s.tags) j
@@ -47,10 +47,10 @@ def rebuild(conn) -> tuple[int, int]:
     nodes: dict[str, dict] = {}
     per_item: dict[tuple[str, str], set[str]] = defaultdict(set)
     for src, item, tag, ts in sources(conn):
-        n = nodes.setdefault(tag, {"items": set(), "memories": 0, "sessions": 0, "last_seen": ""})
-        if (src, item) not in n["items"]:
-            n["items"].add((src, item))
-            n["memories" if src == "memory" else "sessions"] += 1
+        n = nodes.setdefault(tag, {"seen": set(), "items": 0, "sessions": 0, "last_seen": ""})
+        if (src, item) not in n["seen"]:
+            n["seen"].add((src, item))
+            n["items" if src == "second_brain" else "sessions"] += 1
         n["last_seen"] = max(n["last_seen"], ts)
         per_item[(src, item)].add(tag)
     cooccur: dict[tuple[str, str], int] = defaultdict(int)
@@ -68,8 +68,8 @@ def rebuild(conn) -> tuple[int, int]:
     conn.execute("DELETE FROM graph_edges")
     for tag, n in nodes.items():
         conn.execute(
-            "INSERT INTO graph_nodes(tag, count, memories, sessions, last_seen) VALUES (?, ?, ?, ?, ?)",
-            (tag, len(n["items"]), n["memories"], n["sessions"], n["last_seen"]),
+            "INSERT INTO graph_nodes(tag, count, items, sessions, last_seen) VALUES (?, ?, ?, ?, ?)",
+            (tag, len(n["seen"]), n["items"], n["sessions"], n["last_seen"]),
         )
     for (a, b), w in cooccur.items():
         conn.execute("INSERT INTO graph_edges(a, b, kind, weight) VALUES (?, ?, 'cooccur', ?)", (a, b, w))

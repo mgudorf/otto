@@ -1,6 +1,6 @@
 """MCP tools for the Graph architect. Read tools on both servers; curation writes on the full server only.
 
-Every write changes an overlay table and rebuilds the graph in the same transaction. Memories and sessions are never written.
+Every write changes an overlay table and rebuilds the graph in the same transaction. Items and sessions are never written.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ def register(read, full, store: Store, config) -> None:
         return {"ok": True, "nodes": nodes, "edges": edges}
 
     def graph_nodes(query: str = "", limit: int = 50) -> list[dict]:
-        """Tags in the graph whose name contains query, largest first: tag, count (items), memories, sessions, last_seen."""
+        """Tags in the graph whose name contains query, largest first: tag, count (items and sessions), items (Second Brain), sessions, last_seen."""
         needle = query.strip().lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         return store.query(
             f"SELECT {NODE_COLUMNS} FROM graph_nodes WHERE tag LIKE ? ESCAPE '\\' ORDER BY count DESC, tag LIMIT ?",
@@ -41,23 +41,23 @@ def register(read, full, store: Store, config) -> None:
         return [{"neighbor": r["b"] if r["a"] == k else r["a"], "kind": r["kind"], "weight": r["weight"], "note": r["note"]} for r in rows]
 
     def graph_items(tag: str, limit: int = 20) -> dict:
-        """The memories and tagged sessions carrying a tag (merged aliases included), newest first."""
+        """The Second Brain items and tagged sessions carrying a tag (merged aliases included), newest first."""
         k = key(tag)
         if not _node(k):
             return {"error": f"no node {k!r}"}
         hits = [(src, item) for src, item, t, _ in build.sources(store) if t == k]
-        mem_ids = sorted({int(i) for s, i in hits if s == "memory"})
+        item_ids = sorted({int(i) for s, i in hits if s == "second_brain"})
         sess_ids = sorted({i for s, i in hits if s == "session"})
         lim = max(1, min(limit, 200))
-        memories = store.query(
-            f"SELECT id, kind, text, created_at FROM memory_items WHERE id IN ({','.join('?' * len(mem_ids))}) ORDER BY created_at DESC LIMIT ?",
-            (*mem_ids, lim),
-        ) if mem_ids else []
+        items = store.query(
+            f"SELECT id, kind, text, created_at FROM second_brain_items WHERE id IN ({','.join('?' * len(item_ids))}) ORDER BY created_at DESC LIMIT ?",
+            (*item_ids, lim),
+        ) if item_ids else []
         sessions = store.query(
             f"SELECT id, module, title, closed_at FROM app_sessions WHERE id IN ({','.join('?' * len(sess_ids))}) ORDER BY closed_at DESC LIMIT ?",
             (*sess_ids, lim),
         ) if sess_ids else []
-        return {"tag": k, "memories": memories, "sessions": sessions}
+        return {"tag": k, "items": items, "sessions": sessions}
 
     def graph_link(a: str, b: str, note: str = "") -> dict:
         """Add a curated link between two nodes. Both must exist in the graph."""
