@@ -21,11 +21,11 @@
 ### A missing or non-numeric `id` on an action is a 500, not a 400
 
 - Kind: bug
-- Where: `app/modules/finance/routes.py` `_check_update` and `_check_id` (`int(body["id"])`)
-- Found: 2026-09-12, sync-architecture; 2026-09-13, the dismissal change found the same in Business and Social, retired into Newsfeed on 2026-09-16
+- Where: `app/modules/finance/routes.py` `_check_update`, `_check_id` and `_check_due`; `app/modules/second_brain/routes.py` `_forget`, `_tag`, `_untag` and `_done` (`int(body["id"])`)
+- Found: 2026-09-12, sync-architecture; 2026-09-13, the dismissal change found the same in Business and Social, retired into Newsfeed on 2026-09-16; 2026-09-17, sync-architecture found it in Second Brain's item actions
 - Status: open
 
-What happens: Finance promises that an action is validated before the job is queued, but the id is parsed with a bare `int()` before any check runs. Its `update`, `end` and `forget` posted without an `id` raise `KeyError`, and any of these posted with `"id": "abc"` raises `ValueError`, so the route answers 500 with a traceback in the log instead of the 400 the other checks produce. The page always sends integer ids, so only an agent or a hand-made request hits it. Second Brain and Newsfeed are clear of it: `_suggestion_id` answers 404 on anything that is not `s<digits>`, and Newsfeed's `_ref` answers 400 on anything that is not an integer or `s<digits>`.
+What happens: Finance promises that an action is validated before the job is queued, but the id is parsed with a bare `int()` before any check runs. Its `update`, `due`, `end` and `forget` posted without an `id` raise `KeyError`, and any of these posted with `"id": "abc"` raises `ValueError`, so the route answers 500 with a traceback in the log instead of the 400 the other checks produce. The page always sends integer ids, so only an agent or a hand-made request hits it. Second Brain's item actions `forget`, `tag`, `untag` and `done` parse the id the same way and fail the same way. Its suggestion ids and Newsfeed are clear of it: `_suggestion_id` answers 404 on anything that is not `s<digits>`, and Newsfeed's `_ref` answers 400 on anything that is not an integer or `s<digits>`.
 
 Expected: a malformed id is a 400 naming the field, like every other validation failure in those routes.
 
