@@ -392,7 +392,7 @@ def start_turn(st, mod, sid: str, started: bool, text: str, prompt: str, key: st
     store: Store = st.store
     add_turn(store, sid, "user", text=text)
     st.broadcast.publish(key, {"role": "user", "text": text, "ts": now_iso()})
-    st.session_busy.add(sid)
+    st.session_busy[sid] += 1
 
     async def turn(ctx):
         tool_rows: dict[str, int] = {}
@@ -432,8 +432,10 @@ def start_turn(st, mod, sid: str, started: bool, text: str, prompt: str, key: st
                 store.execute("UPDATE app_sessions SET closed_at = ?, title = ? WHERE id = ?", (now_iso(), "(failed to start)", sid))
             raise
         finally:
-            st.session_busy.discard(sid)
-            st.broadcast.publish(key, {"role": "idle", "ts": now_iso()})
+            st.session_busy[sid] -= 1
+            if st.session_busy[sid] <= 0:      # the last queued turn of this session ended; a second one keeps the pane busy
+                del st.session_busy[sid]
+                st.broadcast.publish(key, {"role": "idle", "ts": now_iso()})
 
     return st.runner.submit(f"{mod.name}.turn", mod.name, f"session:{sid}", "session", turn)
 

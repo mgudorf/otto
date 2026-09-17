@@ -60,7 +60,7 @@ def test_execute_writes(store):
 
 def test_owners_come_from_the_schemas():
     owners = query.owners()
-    assert owners["app_events"] == "app" and owners["memory_items"] == "memory" and owners["web_search_findings"] == "web_search"
+    assert owners["app_events"] == "app" and owners["memory_items"] == "memory" and owners["newsfeed_items"] == "newsfeed"
     assert owners["memory_fts"] == "memory" and "scratch" not in owners
 
 

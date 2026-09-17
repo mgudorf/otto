@@ -58,11 +58,6 @@ class Chat:
 
 
 @dataclass(frozen=True)
-class Business:
-    leads_per_run: int
-
-
-@dataclass(frozen=True)
 class Memory:
     suggest_lookback_days: int
     suggest_max: int
@@ -101,16 +96,8 @@ class Email:
 
 
 @dataclass(frozen=True)
-class WebSearch:
-    max_findings: int
-
-
-@dataclass(frozen=True)
-class Social:
-    cities: tuple[str, ...]
-    radius_miles: int
-    horizon_days: int
-    events_per_run: int
+class Newsfeed:
+    items_per_run: int   # entries a search may add per run when it names no cap of its own
 
 
 @dataclass(frozen=True)
@@ -135,14 +122,12 @@ class Config:
     data: Data
     nightly: Nightly
     chat: Chat
-    business: Business
     memory: Memory
     science: Science
     education: Education
     database: Database
     email: Email
-    web_search: WebSearch
-    social: Social
+    newsfeed: Newsfeed
     feedback: Feedback
     ui: Ui
 
@@ -161,7 +146,6 @@ def load(root: Path = ROOT) -> Config:
         data=Data(db=root / raw["data"]["db"], workspace=root / raw["data"]["workspace"]),
         nightly=Nightly(**raw["nightly"]),
         chat=Chat(**raw["chat"]),
-        business=Business(**raw["business"]),
         memory=Memory(**raw["memory"]),
         science=Science(**{**raw["science"], "root": root / raw["science"]["root"]}),
         education=Education(**raw["education"]),
@@ -171,8 +155,7 @@ def load(root: Path = ROOT) -> Config:
             "client_file": root / raw["email"]["client_file"],
             "token_file": root / raw["email"]["token_file"],
         }),
-        web_search=WebSearch(**raw["web_search"]),
-        social=Social(**{**raw["social"], "cities": tuple(raw["social"]["cities"])}),
+        newsfeed=Newsfeed(**raw["newsfeed"]),
         feedback=Feedback(**raw["feedback"]),
         ui=Ui(**raw["ui"]),
     )

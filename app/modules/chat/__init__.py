@@ -1,4 +1,4 @@
-"""Chat: the owner's general conversations with Claude, kept forever. Web search on demand, files in and out, the nightly search's topics."""
+"""Chat: the owner's general conversations with Claude, kept forever. Web search on demand, files in and out."""
 
 from app.modules import Agent, Manifest
 
@@ -10,9 +10,7 @@ MANIFEST = Manifest(
     order=1,   # ties with Email; the registry loads packages alphabetically and sorts stably, so Chat sits first after Home
     agent=Agent(
         placeholder="Ask anything…",
-        skills=("web", "files", "topics"),
+        skills=("web", "files"),
         builtins=("Write", "Edit"),
-        read_tools=("search_findings", "search_topics"),
-        write_tools=("search_topic_add", "search_topic_remove"),
     ),
 )

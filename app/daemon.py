@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import Counter
 import os
 import socket
 import subprocess
@@ -95,7 +96,7 @@ def build(config: Config, spawn_fn=None) -> FastAPI:
     st.started_at = now_iso()
     st.server = None
     st.broadcast = api.Broadcast()
-    st.session_busy = set()
+    st.session_busy = Counter()   # turns queued or running per session id; a session reads busy until it is back at zero
 
     app.include_router(api.router)
     for m in registry.ordered():

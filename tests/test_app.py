@@ -33,7 +33,7 @@ async def settle(app):
 
 
 def queue_module(pending: list[dict], todays: list[dict]) -> Module:
-    """A page module with both hooks, as web_search will have: a queue and today's rows."""
+    """A page module with both hooks, as Newsfeed has: a queue and today's rows."""
     return Module(
         manifest=Manifest(name="queued", title="Queued", hue="#d9915b", icon="", order=9),
         path=Path(__file__).parent,

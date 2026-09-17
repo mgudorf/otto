@@ -2,7 +2,7 @@
 
 A module is a package under app/modules/<name>/ with:
   __init__.py   MANIFEST
-  schema.sql    its own tables (optional)
+  schema.sql    its own tables, every one named <module>_<table> (optional)
   tasks.py      async def <task>(ctx) for each declared schedule (optional)
   routes.py     router (APIRouter) plus hooks numbers(store), today(store), queue(store), item(store, id),
                 context(store, registry) (all optional; route handlers must not share these names)

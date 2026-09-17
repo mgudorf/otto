@@ -16,7 +16,7 @@ Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps 
 | Store | one SQLite file `data/otto.db` in WAL mode, platform and module tables together, every table named `<module>_<name>` (`app_` for the platform), timestamps as UTC ISO strings. `app/migrate.py` brings an older database to the current names at boot, before any schema runs: a backup into `data/backups/` first, then one transaction that drops the indexes and triggers of each moving table (the schemas recreate them under their new names), drops an FTS5 table that moves or whose content table moves (a rename leaves its `content=` behind; the schemas recreate it and it is rebuilt), and renames; a new name already held by a table with rows is refused (`tests/test_migrate.py`) |
 | LLM | the Claude Code CLI (2.1.263) headless under the owner's claude.ai Max login; no API key exists anywhere in the app |
 | Frontend | static ES modules, Preact + htm vendored, marked + KaTeX vendored for markdown and LaTeX in MIDDLE and in the session pane, inline styles ported from the artboard; no build step, no Node |
-| Modules built | Home, Chat, Email, Education, Memory, Science, Finance, Business, Graph, Database have pages; System, Feedback and Search have none. The rail shows only modules whose package exists and that declare a page |
+| Modules built | Home, Chat, Email, Education, Memory, Science, Newsfeed, Finance, Graph, Database have pages; System and Feedback have none. The rail shows only modules whose package exists and that declare a page |
 
 Run: `python -m app` checks the port and code revision, starts or restarts the daemon, then opens the window. `python -m app setup` registers the Windows Task Scheduler entry `Otto` that starts the daemon at logon. `python -m app status` prints health. `python -m app.modules.email.gmail consent` runs the Gmail OAuth flow once and writes the token file. Tests: `.venv/Scripts/python.exe -m pytest -q`, offline; the CLI is mocked at `app.claude.spawn` and a real invocation raises; no Jupyter kernel is started.
 
@@ -33,7 +33,7 @@ app/revision.py   sha256 of app/** and config.toml, served by /health
 app/claude.py     CLI spawn, event stream, read-only allowlist, nightly budget
 app/modules/      registry, agent_base.md, one package per module (contract under Daemon)
 app/static/       index.html, shell.js, session.js, rows.js, api.js, feedback.js, md.js, pages/<name>.js, vendor/
-data/             otto.db, daemon.log and its rotations, secrets/, workspace/ (Science's root: business/, chat/<id>/ and the owner's notebooks, scripts and folders), backups/, exports/; .gitignore covers data/*.log and data/*.log.*, the db, secrets, workspace, backups and exports
+data/             otto.db, daemon.log and its rotations, secrets/, workspace/ (Science's root: chat/<id>/ and the owner's notebooks, scripts and folders), backups/, exports/; .gitignore covers data/*.log and data/*.log.*, the db, secrets, workspace, backups and exports
 .claude/          skills/ (feature-flow, feedback-queue, sync-architecture): the repo's own workflows
 ```
 
@@ -92,14 +92,12 @@ The UI is a view of daemon state. Pages render from the store and poll or subscr
 | data | db, workspace (working directory of every Claude run; file tools are confined to it) |
 | nightly | window (local time), max_sessions per day (at least one per nightly LLM task), max_turns and max_minutes per run, stagger_minutes between one nightly run and the next |
 | chat | upload_max_mb (an attachment past it is a 413), replay_chars (tail of the stored transcript replayed when the CLI has lost a conversation) |
-| business | leads_per_run |
 | memory | suggest_lookback_days, suggest_max |
 | science | python (the interpreter every kernel and script runs on), root (the workspace itself: the tree LEFT shows, created at boot), idle_minutes, tool_output_chars |
 | education | per_night, start_difficulty, flow_low, flow_high |
 | database | max_rows, max_seconds |
 | email | client_file, token_file, backfill_days, triage_batch |
-| web_search | max_findings |
-| social | cities (the towns the scout covers), radius_miles, horizon_days, events_per_run |
+| newsfeed | items_per_run (entries a search may add per run when the agent set no cap on it) |
 | feedback | max_turns |
 | ui | start_page, refresh_seconds, time_format (`24h` or `12h`), page_size |
 
@@ -117,7 +115,7 @@ System prompt: `app/modules/agent_base.md` (shared rules) + the module's `agent.
 
 Budget: when a task run starts, `app_llm_runs` rows of the local day with `budgeted = 1` and status `running`, `done` or `failed` are counted against `max_sessions`; the run then writes its own `running` row before the CLI spawns and updates it to `done` or `failed` after, so concurrent runs see each other; a refusal writes a `skipped` row and the runner records the job `skipped`. Activity shows runs used, the window, and whether it is open now.
 
-Sessions: `app_sessions(id, module, opened_at, closed_at, title, tags, cli_started)` and `app_session_turns(role user|model|tool|system, text, tool, status)`. Four helpers in `api.py` are the only paths. `new_session(store, module)` opens one. `pane_turn(st, mod, text, prompt)` is a module route's turn of the pane (Education's answer): the module's newest open tab, or a new one when none is open, gets `text` shown as the owner's turn and `prompt` sent to the CLI. `start_turn(st, mod, sid, started, text, prompt, key, replay, on_done)` stores the owner's words, marks the session busy (busy is per session id) and queues a job of kind `session` on resource `session:<sid>`, so one session's turns serialize and different sessions run concurrently; `text` is stored, `prompt` is what the CLI gets. `tag_session(st, mod, sid, key, close)` queues a `oneshot` whose `{"title", "tags"}` is written to the row (fallback: first user line, no tags) with `closed_at` set only when `close` is true, then event `closed` or `tagged` and a `tagged` broadcast; Graph reads `app_sessions.tags`. The module panes keep any number of open sessions per module: `GET /api/session/<module>` lists them oldest first with a label (the title once tagged, until then the first user line), `GET /api/session/<module>/<id>` gives one with its turns and busy state, `POST /api/session/<module>/send` takes `{text, id?}` (no `id` opens a new session; an unknown or closed one is a 404), each streams on key `<module>:<id>` over `GET /api/session/<module>/<id>/events`, and `/clear` with an `id` tags and closes that one. Chat keeps many on its own page, streams on `chat:<id>`, and tags after the first completed turn without closing. Events: `user`, `model`, `delta` (text as it is written, never stored; the panes ignore it), `tool`, `tool_result`, `result`, `error`, `idle`, `tagged`. A first turn that fails retires its session row so the next turn starts clean. A resumed turn the CLI answers with `error_during_execution`, no turns and stderr `No conversation found with session ID` (`ClaudeError.lost_transcript`) is re-sent under the same id as a new session with the caller's `replay` preamble when one was given, after a `system` turn `resumed from Otto's record`. Any other message starting with `/` is passed to the CLI unchanged, so Claude Code commands and skills work from the pane.
+Sessions: `app_sessions(id, module, opened_at, closed_at, title, tags, cli_started)` and `app_session_turns(role user|model|tool|system, text, tool, status)`. Four helpers in `api.py` are the only paths. `new_session(store, module)` opens one. `pane_turn(st, mod, text, prompt)` is a module route's turn of the pane (Education's answer): the module's newest open tab, or a new one when none is open, gets `text` shown as the owner's turn and `prompt` sent to the CLI. `start_turn(st, mod, sid, started, text, prompt, key, replay, on_done)` stores the owner's words, marks the session busy (a count of queued and running turns per session id; `idle` goes out when it reaches zero) and queues a job of kind `session` on resource `session:<sid>`, so one session's turns serialize and different sessions run concurrently; `text` is stored, `prompt` is what the CLI gets. `tag_session(st, mod, sid, key, close)` queues a `oneshot` whose `{"title", "tags"}` is written to the row (fallback: first user line, no tags) with `closed_at` set only when `close` is true, then event `closed` or `tagged` and a `tagged` broadcast; Graph reads `app_sessions.tags`. The module panes keep any number of open sessions per module: `GET /api/session/<module>` lists them oldest first with a label (the title once tagged, until then the first user line), `GET /api/session/<module>/<id>` gives one with its turns and busy state, `POST /api/session/<module>/send` takes `{text, id?}` (no `id` opens a new session; an unknown or closed one is a 404), each streams on key `<module>:<id>` over `GET /api/session/<module>/<id>/events`, and `/clear` with an `id` tags and closes that one. Chat keeps many on its own page, streams on `chat:<id>`, and tags after the first completed turn without closing. Events: `user`, `model`, `delta` (text as it is written, never stored; the panes ignore it), `tool`, `tool_result`, `result`, `error`, `idle`, `tagged`. A first turn that fails retires its session row so the next turn starts clean. A resumed turn the CLI answers with `error_during_execution`, no turns and stderr `No conversation found with session ID` (`ClaudeError.lost_transcript`) is re-sent under the same id as a new session with the caller's `replay` preamble when one was given, after a `system` turn `resumed from Otto's record`. Any other message starting with `/` is passed to the CLI unchanged, so Claude Code commands and skills work from the pane.
 
 MCP servers are `mcp` 2.2.0 `MCPServer` instances mounted stateless with JSON responses; module `tools.py` files register read tools on both servers and write tools on `otto` only.
 
@@ -127,7 +125,7 @@ A module is a package `app/modules/<name>/` plus `app/static/pages/<name>.js`. T
 
 | File | Obligation |
 |---|---|
-| `__init__.py` | `MANIFEST = Manifest(name, title, hue, icon (SVG inner markup, 20x20), order, schedules=(Schedule(task, every "60s\|15m\|24h", resource, llm),), agent=Agent(placeholder, skills, read_tools, write_tools, builtins), page=True)`; `builtins` are CLI tools beyond the read set, given to session turns only. A module with `page=False` (System, Feedback, Search) is still listed by `/api/shell` with `page: false` so its hue and icon resolve, read by Home's hooks, and keeps its `runs`, `model` and `effort` on Settings > Modules, since it has no page to hold them. Optionally `setup(config)`, called once at build after every schema is applied (a raise records the module in `app_module_errors` and drops it), and `async shutdown()`, awaited at lifespan exit after the drain, for a module holding process resources |
+| `__init__.py` | `MANIFEST = Manifest(name, title, hue, icon (SVG inner markup, 20x20), order, schedules=(Schedule(task, every "60s\|15m\|24h", resource, llm),), agent=Agent(placeholder, skills, read_tools, write_tools, builtins), page=True)`; `builtins` are CLI tools beyond the read set, given to session turns only. A module with `page=False` (System, Feedback) is still listed by `/api/shell` with `page: false` so its hue and icon resolve, read by Home's hooks, and keeps its `runs`, `model` and `effort` on Settings > Modules, since it has no page to hold them. Optionally `setup(config)`, called once at build after every schema is applied (a raise records the module in `app_module_errors` and drops it), and `async shutdown()`, awaited at lifespan exit after the drain, for a module holding process resources |
 | `schema.sql` | the module's tables, every one named `<module>_<name>` and every index and trigger after its table (`test_tables_are_named_after_their_module`), applied at boot (optional; `Store.migrate` only creates, so a column added to an existing table is the module's `setup` to add, and a table that changes its name is a line in `app/migrate.py` `RENAMES`) |
 | `tasks.py` | `async def <task>(ctx)` per schedule; `ctx.store` (read), `ctx.commit(cursor=...)` (the only write), `ctx.log`, `ctx.event`, `ctx.run_task(prompt, tools)`; return a string, or `Skipped("why")`; a `BudgetExceeded` out of `run_task` needs no catch, the runner records it as skipped |
 | `routes.py` | `router = APIRouter(prefix="/api/<name>")` with `GET left`, `GET item/{id}`, `POST action/{verb}` (through `runner.run_action`), plus hooks `numbers(store) -> {value, label}`, `today(store) -> rows`, `queue(store) -> rows` (everything still waiting on the owner; Home lists every one), `item(store, id)`, `context(store, registry) -> str`. Route handlers must not share a hook's name. Each action `item` offers is `{verb, label, primary?, confirm?, href?, removes?}`: without an `href` the verb must be a key of the module's own action table, since Home posts it verbatim with `{id}`, and `removes: true` says the row leaves the list, which is how a page and Home know to close the inspector standing on it. `tests/test_platform.py::test_item_verbs_are_routes_the_module_serves` walks every module's action literals against its table |
@@ -137,7 +135,7 @@ A module is a package `app/modules/<name>/` plus `app/static/pages/<name>.js`. T
 
 Wire shape for LEFT: `{groups: [{label, count, rows: [{id, module, text, stamp, leading?: {kind|dot|ext|pct}, done?, mono?}]}], chips?, chip?, showing?, more?}`. External systems follow one pattern: tasks get a read client, action routes get a write client, and a test proves the split.
 
-**Dismissed and deleted rows leave every list.** A row the owner dismisses (a Social event, a Business lead, a Search finding, a Memory suggestion) or deletes (an Education question) is gone from the module's LEFT, from `today`, from `queue` and from the agent's `context`, and its item offers no verb but a link. The row stays in its table, which is what stops a scout or generator producing it a second time: each of those prompts lists what is already recorded and says a dismissed one shows what to stop bringing. `done` on a row is for a state the owner reached, not one they refused: a completed Memory task and an ended Finance entry stay listed, struck through.
+**Dismissed and deleted rows leave every list.** A row the owner dismisses (a Newsfeed entry, a Memory suggestion) or deletes (an Education question) is gone from the module's LEFT, from `today`, from `queue` and from the agent's `context`, and its item offers no verb but a link. The row stays in its table, which is what stops a scout or generator producing it a second time: each of those prompts lists what is already recorded and says a dismissed one shows what to stop bringing. `done` on a row is for a state the owner reached, not one they refused: a completed Memory task and an ended Finance entry stay listed, struck through.
 
 ### Platform tables
 
@@ -171,11 +169,9 @@ One doc per module, `docs/<module>/CLAUDE.md`: the owner's requirements, `## Bui
 | Memory [3] | `docs/memory/CLAUDE.md` |
 | Science [4] | `docs/science/CLAUDE.md` |
 | Finance [5] | `docs/finance/CLAUDE.md` |
-| Business [6] | `docs/business/CLAUDE.md` |
+| Newsfeed [6] | `docs/newsfeed/CLAUDE.md` |
 | Graph [7] | `docs/graph/CLAUDE.md` |
 | Database [8] | `docs/database/CLAUDE.md` |
-| Search [9, no page] | `docs/web_search/CLAUDE.md` |
-| Social [10] | `docs/social/CLAUDE.md` |
 | System [99, no page] | `docs/system/CLAUDE.md` |
 | Feedback [99, no page] | `docs/feedback/CLAUDE.md` |
 
@@ -202,7 +198,7 @@ Every page uses three fixed tracks. Selection swaps what renders inside MIDDLE a
 | Ground / panel / raised | `#101114` / `#1a1c21` / `#23262c` (selection, inputs, user bubbles) |
 | Text / muted / dim | `#e6e7ea` / `#8b8f98` / `#5f636c` |
 | Hairline / row hover / table row hover | `rgba(230,231,234,.08)` / `#202329` / `#16181c` |
-| Hues and rail order | home `#e6e7ea` 0, chat `#d9915b` 1 (not in the artboard; speech-bubble icon; ties with email and sorts first), email `#cf7b7b` 1, education `#7a9fd6` 2, memory `#d1a36a` 3, science `#6fb3b8` 4, finance `#7fb894` 5 (the artboard's Money hue and banknote icon), business `#c98ba8` 6 (not in the artboard; briefcase icon), graph `#b3b06a` 7, database `#a68bd0` 8, social `#8f95d6` 10 (not in the artboard; two-figures icon); web_search `#d9915b` 9 (magnifier icon) and System and Feedback `#8b8f98` 99 have no rail entry, and Search's hue colours its Home rows |
+| Hues and rail order | home `#e6e7ea` 0, chat `#d9915b` 1 (not in the artboard; speech-bubble icon; ties with email and sorts first), email `#cf7b7b` 1, education `#7a9fd6` 2, memory `#d1a36a` 3, science `#6fb3b8` 4, finance `#7fb894` 5 (the artboard's Money hue and banknote icon), newsfeed `#c98ba8` 6 (not in the artboard; feed-arcs icon), graph `#b3b06a` 7, database `#a68bd0` 8; System and Feedback `#8b8f98` 99 have no rail entry |
 | Type | Inter 15px/1.4 body, 13px meta, 20px/600 title; JetBrains Mono 13px stamps and code, 28px/500 numbers; vendored with `system-ui` / `ui-monospace` fallbacks |
 | Rows | 36px list rows, 32px compact rows, 28px group headers, padding `0 12px`, gap 12px, radius 6; leading slot is a kind label (40px, hue), a 6px dot, an extension, or a 40px progress bar; `mono` rows set the text in JetBrains Mono |
 | Chips / buttons | padding `3px 9px` / `5px 10px`, radius 6, 13px; active or primary is hue background with `#101114` text; inactive or secondary is `#8b8f98` text with a 1px inset ring on hover |
@@ -222,38 +218,12 @@ Activity: LEFT is the `events` log by day with a chip per module; MIDDLE blank s
 ### Departures from the artboard
 
 - Activity's MIDDLE blank state is the task table, required by the Daemon section.
-- Finance and Business are separate modules; the artboard had one `Money` entry.
+- Finance is the artboard's `Money` entry; the web scouting that sat in Business and Social is Newsfeed's, a module the artboard does not have.
 - The rail shows only built modules with a page.
 - The header carries `settings` and `feedback` controls the artboard does not have; module settings live there instead of on the Settings page.
 - Each module's own departures are the `Departures` row of its doc's `## Built` table.
 
 ## Patches
-
-### The module contract does not state the table naming rule
-
-- Kind: gap
-- Where: `app/modules/__init__.py` module docstring, its `schema.sql` line; the rule it omits is enforced by `tests/test_platform.py::test_tables_are_named_after_their_module` and stated in the module contract above
-- Found: 2026-09-16, sync-architecture
-- Status: open
-
-What happens: the docstring every module author reads describes `schema.sql` as "its own tables (optional)" and says nothing about the `<module>_<name>` prefix the 2026-09-13 rename made mandatory. A new module whose schema names a table `items` reads as correct against the contract and fails the suite.
-
-Expected: the contract states the naming rule where it names `schema.sql`, so the docstring and the test say the same thing.
-
-Fix: one line in `app/modules/__init__.py`, `schema.sql    its own tables, every one named <module>_<table> (optional)`. That edit is sitting uncommitted in `main`'s working tree; committing it closes this entry.
-
-### Busy state drops early when two turns are queued on one session
-
-- Kind: bug
-- Where: `app/api.py` `start_turn` (`st.session_busy` is a set; the `finally` discards the id when the first turn ends while a second waits on the `session:<sid>` lock); reached by `app/modules/education/routes.py` `answer`, which queues a turn without checking busy
-- Found: 2026-09-13, the education quiz work
-- Status: open
-
-What happens: two answers submitted in quick succession queue two turns on the same session. The runner serializes them on `session:<sid>`, but `session_busy` holds one entry per session id, so the first turn's `finally` discards it and publishes `idle` while the second is still queued. The pane drops `thinking…` and the send route accepts a third message early; the second turn then streams its `model` event with the pane idle. Nothing is lost, the indicator is wrong for the length of one turn.
-
-Expected: the pane reads busy until the last queued turn of that session has ended.
-
-Fix: count turns per session id (a `Counter`, decremented in `finally`, idle published at zero), or have `start_turn` refuse a second turn while one is queued and let Education's answer route report that the tutor is still busy.
 
 ### Daemon does not start at logon on this machine
 

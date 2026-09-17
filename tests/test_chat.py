@@ -6,12 +6,12 @@ import json
 from app.config import Chat
 from app.daemon import build
 from app.modules.graph import build as graph_build
-from app.modules.web_search import tasks as search_tasks
+from app.modules.newsfeed import tasks as feed_tasks
 from app.runner import JobFailed
 from tests.conftest import FakeProc, run
 from tests.test_app import client_for, settle
 
-INIT = json.dumps({"type": "system", "subtype": "init", "session_id": "c1", "tools": ["Write", "mcp__otto__search_topic_add"]})
+INIT = json.dumps({"type": "system", "subtype": "init", "session_id": "c1", "tools": ["Write", "WebSearch"]})
 WRITE = json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Write", "input": {"file_path": "notes.md", "content": "x"}}]}})
 WRITE_OK = json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "File created"}]}})
 DELTA = json.dumps({"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "Saved it "}}})
@@ -48,7 +48,7 @@ def test_chat_conversation_lifecycle(config):
         async with client_for(app) as c:
             shell = (await c.get("/api/shell")).json()
             chat = next(m for m in shell["modules"] if m["name"] == "chat")
-            assert chat["page"] is True and chat["agent"]["skills"] == ["web", "files", "topics"]
+            assert chat["page"] is True and chat["agent"]["skills"] == ["web", "files"]
             assert [m["name"] for m in shell["modules"] if m["page"]][:2] == ["home", "chat"]
             assert (await c.post("/api/chat/send", json={"text": "  "})).status_code == 400
             r = await c.post("/api/chat/send", json={"text": "save a note about x"})
@@ -60,13 +60,13 @@ def test_chat_conversation_lifecycle(config):
             assert item["title"] == "Notes about x" and item["tags"] == ["notes", "chat"] and item["busy"] is False
             row = st.store.one("SELECT * FROM app_sessions WHERE id = ?", (sid,))
             assert row["module"] == "chat" and row["cli_started"] == 1 and row["closed_at"] is None
-            # the turn: a new CLI session with Write and Edit, the search tools, partial messages on
+            # the turn: a new CLI session with Write and Edit, no Otto tools, partial messages on
             args = calls[0]["args"]
             assert "--session-id" in args and "--include-partial-messages" in args and "--restricted" in args
             builtins = args[args.index("--tools") + 1].split(",")
             assert {"Read", "WebSearch", "Write", "Edit"} <= set(builtins) and "Bash" not in builtins
             allowed = args[args.index("--allowedTools") + 1]
-            assert "mcp__otto__search_topic_add" in allowed and "mcp__otto__search_findings" in allowed and "Write" in allowed
+            assert "mcp__otto__" not in allowed and "Write" in allowed
             folder = config.data.workspace / "chat" / sid
             prompt = procs[0].stdin.data.decode("utf-8")
             assert prompt.startswith("save a note about x") and f"Conversation folder: {folder}" in prompt and folder.is_dir()
@@ -101,8 +101,10 @@ def test_chat_conversation_lifecycle(config):
             assert (await c.get(f"/api/chat/item/{sid2}")).status_code == 404
             # a scheduled run through the same seam never gets the write built-ins
             st.claude.config = dataclasses.replace(config, nightly=dataclasses.replace(config.nightly, window="00:00-23:59"))
-            st.store.execute("INSERT INTO web_search_topics(kind, text, created_at) VALUES ('work', 'x', '2026-09-01T00:00:00+00:00')")
-            job = st.runner.submit("web_search.nightly", "web_search", "web_search", "scheduled", search_tasks.nightly)
+            st.store.execute(
+                "INSERT INTO newsfeed_searches(name, prompt, every_days, cap, created_at, next_run) VALUES ('x', 'find x', 1, 3, '2026-09-01T00:00:00+00:00', '2000-01-01')"
+            )
+            job = st.runner.submit("newsfeed.run", "newsfeed", "newsfeed", "scheduled", feed_tasks.run)
             try:
                 await job.done
             except JobFailed:

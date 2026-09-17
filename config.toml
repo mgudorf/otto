@@ -33,9 +33,6 @@ stagger_minutes = 15          # gap the scheduler leaves between one nightly LLM
 upload_max_mb = 50            # an attachment larger than this is refused
 replay_chars = 20000          # characters of the stored transcript replayed when the CLI has lost a conversation
 
-[business]
-leads_per_run = 3           # new leads the nightly scout may queue per run
-
 [memory]
 suggest_lookback_days = 7   # memories the nightly suggest task reads
 suggest_max = 3             # action items it may propose per run
@@ -64,14 +61,8 @@ triage_batch = 40             # messages the nightly triage prioritizes per run
 read_on_open = true           # opening an unread message marks it read in Gmail
 consent_warn_days = 2         # days before the refresh token dies that Home starts warning
 
-[web_search]
-max_findings = 3            # findings the nightly search may queue per run
-
-[social]
-cities = ["Woodstock, GA", "Roswell, GA", "Canton, GA", "Alpharetta, GA", "Marietta, GA"]
-radius_miles = 15           # how far around each of those towns the scout may reach
-horizon_days = 30           # how far ahead it looks for events
-events_per_run = 5          # new events the nightly scout may queue per run
+[newsfeed]
+items_per_run = 3           # entries a search may add per nightly run when the agent set no cap on it
 
 [feedback]
 max_turns = 12             # per filing run: list docs, read a few, reply
