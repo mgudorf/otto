@@ -16,7 +16,7 @@
 | Schedule | `second_brain.suggest`, every 24h inside the nightly window, resource `second_brain`: proposes up to `suggest_max` action items from the undone items of the last `suggest_lookback_days` days as a JSON array of `{text, item_ids}`, every prior suggestion listed in the prompt, tools `second_brain_search` and `second_brain_get`, inserted with `INSERT OR IGNORE`, cursor `second_brain.suggest` |
 | Page | LEFT: search, kind chips, rows by day with the kind as leading slot; MIDDLE blank: capture box (kind chips, textarea, tags, `Save`, Ctrl+Enter) and open suggestions with `Accept` / `Dismiss`; MIDDLE selected: inspector with tags (add on Enter, click to remove), `Open` for links, `Done` for tasks, `Forget` |
 | Dismissal | an accepted or dismissed suggestion leaves the blank state, `queue` and the agent's context. The row stays in `second_brain_suggestions`, which is what stops `second_brain.suggest` proposing it again: the prompt lists every prior suggestion whatever its status. `Done` on a task is not a dismissal, so a completed task stays on LEFT, struck through |
-| Departures | this module is the artboard's `Memory` entry, hue and icon kept; the blank state (capture box) is not in the artboard, which left it unspecified |
+| Departures | the blank state (capture box) is not in the artboard, which left it unspecified |
 
 ## Patches
 

@@ -8,7 +8,7 @@ MANIFEST = Manifest(
     name="second_brain",
     title="Second Brain",
     hue="#d1a36a",
-    icon='<rect x="4" y="3" width="12" height="14" rx="2"></rect><path d="M7 8h6M7 11h6M7 14h4"></path>',
+    icon='<path d="M10 4C8.6 2.6 5.4 3.2 5.6 5.8C2.8 6.4 2.6 10.2 4.6 11.2C3.4 13.6 6.2 15.8 8.2 14.6C8.8 15.6 9.4 16.2 10 16.2C10.6 16.2 11.2 15.6 11.8 14.6C13.8 15.8 16.6 13.6 15.4 11.2C17.4 10.2 17.2 6.4 14.4 5.8C14.6 3.2 11.4 2.6 10 4Z"></path><path d="M10 4v12.2"></path><path d="M6.4 8.4c1.2-.2 2 .6 2.2 1.8M13.6 8.4c-1.2-.2-2 .6-2.2 1.8"></path>',
     order=3,
     schedules=(Schedule(task="suggest", every="24h", resource="second_brain", llm=True),),
     agent=Agent(

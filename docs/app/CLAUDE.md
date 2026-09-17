@@ -198,7 +198,7 @@ Every page uses three fixed tracks. Selection swaps what renders inside MIDDLE a
 | Ground / panel / raised | `#101114` / `#1a1c21` / `#23262c` (selection, inputs, user bubbles) |
 | Text / muted / dim | `#e6e7ea` / `#8b8f98` / `#5f636c` |
 | Hairline / row hover / table row hover | `rgba(230,231,234,.08)` / `#202329` / `#16181c` |
-| Hues and rail order | home `#e6e7ea` 0, chat `#d9915b` 1 (not in the artboard; speech-bubble icon; ties with email and sorts first), email `#cf7b7b` 1, education `#7a9fd6` 2, second_brain `#d1a36a` 3 (the artboard's Memory hue and icon), science `#6fb3b8` 4, finance `#7fb894` 5 (the artboard's Money hue and banknote icon), newsfeed `#c98ba8` 6 (not in the artboard; feed-arcs icon), graph `#b3b06a` 7, database `#a68bd0` 8; System and Feedback `#8b8f98` 99 have no rail entry |
+| Hues and rail order | home `#e6e7ea` 0, chat `#d9915b` 1 (not in the artboard; speech-bubble icon; ties with email and sorts first), email `#cf7b7b` 1, education `#7a9fd6` 2, second_brain `#d1a36a` 3, science `#6fb3b8` 4, finance `#7fb894` 5 (the artboard's Money hue and banknote icon), newsfeed `#c98ba8` 6 (not in the artboard; feed-arcs icon), graph `#b3b06a` 7, database `#a68bd0` 8; System and Feedback `#8b8f98` 99 have no rail entry |
 | Type | Inter 15px/1.4 body, 13px meta, 20px/600 title; JetBrains Mono 13px stamps and code, 28px/500 numbers; vendored with `system-ui` / `ui-monospace` fallbacks |
 | Rows | 36px list rows, 32px compact rows, 28px group headers, padding `0 12px`, gap 12px, radius 6; leading slot is a kind label (40px, hue), a 6px dot, an extension, or a 40px progress bar; `mono` rows set the text in JetBrains Mono |
 | Chips / buttons | padding `3px 9px` / `5px 10px`, radius 6, 13px; active or primary is hue background with `#101114` text; inactive or secondary is `#8b8f98` text with a 1px inset ring on hover |
@@ -219,7 +219,6 @@ Activity: LEFT is the `events` log by day with a chip per module; MIDDLE blank s
 
 - Activity's MIDDLE blank state is the task table, required by the Daemon section.
 - Finance is the artboard's `Money` entry; the web scouting that sat in Business and Social is Newsfeed's, a module the artboard does not have.
-- Second Brain is the artboard's `Memory` entry.
 - The rail shows only built modules with a page.
 - The header carries `settings` and `feedback` controls the artboard does not have; module settings live there instead of on the Settings page.
 - Each module's own departures are the `Departures` row of its doc's `## Built` table.
