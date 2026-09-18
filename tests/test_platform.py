@@ -163,3 +163,13 @@ def test_tables_are_named_after_their_module():
             else:
                 assert name.startswith(f"{table}_"), f"{path.parent.name}/schema.sql: {kind} {name} is not named after {table}"
         conn.close()
+
+
+def test_build_makes_icon_and_exe(tmp_path: Path):
+    """The window icon derives from the logo and the launcher compiles under it, with only what Windows ships."""
+    from app import build
+
+    ico, exe = tmp_path / "otto.ico", tmp_path / "Otto.exe"
+    build.icon(ROOT / "otto.png", ico)
+    build.exe(ico, exe)
+    assert ico.read_bytes()[:6] == bytes([0, 0, 1, 0, 4, 0]) and exe.stat().st_size > 0   # reserved, type icon, four frames

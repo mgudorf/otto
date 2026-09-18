@@ -7,6 +7,7 @@ Every command you run by hand. Run them in PowerShell from the repo root, `C:\Us
 | Command | What it does |
 |---|---|
 | `.venv/Scripts/python.exe -m app` | Opens Otto. Starts the daemon if it is down, restarts it if the code changed since it started, then opens the window in Chrome. |
+| `Otto.exe` | Opens Otto the same way, under the Otto icon and with no terminal: double-click it or pin it. A failed launch shows its message in a box. Built by `python -m app build`; while Otto is open, a pinned `Otto.exe` and the window are two taskbar buttons. |
 | `.venv/Scripts/python.exe -m app status` | Prints the daemon's health: code revision, process id, start time, running jobs. `null` means it is not running. |
 
 ## Recurring
@@ -21,6 +22,7 @@ Every command you run by hand. Run them in PowerShell from the repo root, `C:\Us
 |---|---|
 | `py -3.14 -m venv .venv` then `.venv/Scripts/python.exe -m pip install -r requirements.txt` | Creates the Python environment and installs the pinned packages. |
 | `.venv/Scripts/python.exe -m app setup` | Registers the Windows scheduled task `Otto`, which starts the daemon at every logon. Not yet run on this machine; until it is, the daemon runs only after `python -m app`. Check it with `Get-ScheduledTask -TaskName Otto`. |
+| `.venv/Scripts/python.exe -m app build` | Derives `app/static/otto.ico` from `otto.png` and compiles `Otto.exe` at the repo root. Run it again after changing the logo. Needs nothing beyond Windows: PowerShell and the .NET Framework C# compiler. |
 | `.venv/Scripts/python.exe -m app.modules.email.gmail consent` | The first Gmail authorization. Needs the Google OAuth client file at `data/secrets/google_client.json` first. |
 
 Otto also needs Google Chrome installed and the Claude Code command-line tool logged in to your claude.ai account. Otto has no API key.

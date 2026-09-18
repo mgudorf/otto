@@ -16,3 +16,4 @@ data/*.log.*
 data/exports/
 data/workspace/
 app/.chrome-profile/
+/Otto.exe
