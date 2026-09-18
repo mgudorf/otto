@@ -15,17 +15,17 @@ export const nums = { fontVariantNumeric: 'tabular-nums' };
 export const code13 = { fontFamily: T.mono, fontSize: 13 };
 const pad2 = (n) => String(n).padStart(2, '0');
 
-// DD-MM-YYYY of an ISO timestamp, today's when none.
+// MM-DD-YYYY of an ISO timestamp, today's when none.
 export function dayLabel(iso) {
   const d = iso ? new Date(iso) : new Date();
-  return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()}`;
+  return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}-${d.getFullYear()}`;
 }
 
-// DD-MM-YYYY of a plain date the server keeps as YYYY-MM-DD; a trailing time is dropped.
+// MM-DD-YYYY of a plain date the server keeps as YYYY-MM-DD; a trailing time is dropped.
 export function dateLabel(ymd) {
   if (!ymd) return '';
   const [y, m, d] = ymd.slice(0, 10).split('-');
-  return `${d}-${m}-${y}`;
+  return `${m}-${d}-${y}`;
 }
 
 export function clock(iso, fmt) {
@@ -34,7 +34,7 @@ export function clock(iso, fmt) {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
-// Same day: time. Otherwise DD-MM-YYYY.
+// Same day: time. Otherwise MM-DD-YYYY.
 export function stamp(iso, fmt) {
   if (!iso) return '';
   const d = new Date(iso);
@@ -152,8 +152,8 @@ export function input(hue, extra = {}) {
   return { height: 30, padding: '0 10px', border: 0, borderRadius: 6, background: T.panel, color: T.text, fontSize: 13, '--hue': hue, ...extra };
 }
 
-// Dates are typed as DD-MM-YYYY: digits only, the dashes placed as they come, the rest of the format dim until it is filled.
-const MASK = 'DD-MM-YYYY';
+// Dates are typed as MM-DD-YYYY: digits only, the dashes placed as they come, the rest of the format dim until it is filled.
+const MASK = 'MM-DD-YYYY';
 
 export function maskDate(raw) {
   const d = raw.replace(/\D/g, '').slice(0, 8);
@@ -164,7 +164,7 @@ export function maskDate(raw) {
 export function isoDate(shown) {
   if (!shown) return '';
   const m = /^(\d\d)-(\d\d)-(\d{4})$/.exec(shown);
-  return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+  return m ? `${m[3]}-${m[1]}-${m[2]}` : null;
 }
 
 export function DateInput({ value, onInput, onEnter, hue, surface = T.panel, width = 116 }) {

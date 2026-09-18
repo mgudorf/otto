@@ -47,7 +47,7 @@
         <input value="{{ query }}" onChange="{{ setQuery }}" placeholder="Search" style="width:100%;height:36px;margin-bottom:16px;padding:0 12px;border:0;border-radius:6px;background:#23262c;color:#e6e7ea;font:inherit;font-size:15px" style-focus="box-shadow:0 0 0 1px {{ agentHue }}">
         <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
         <div style="display:flex;flex-direction:column;gap:20px">
-          <span style="font-size:13px;font-variant-numeric:tabular-nums;color:#5f636c;padding:0 12px">05-09-2026</span>
+          <span style="font-size:13px;font-variant-numeric:tabular-nums;color:#5f636c;padding:0 12px">09-05-2026</span>
           <div style="display:flex;flex-direction:column;gap:4px">
             <div style="display:flex;align-items:center;gap:8px;height:28px;padding:0 12px;color:#cf7b7b;font-weight:500"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="14" height="10" rx="2"></rect><path d="M3 7l7 5 7-5"></path></svg></div>
             <sc-for list="{{ homeEmail }}" as="r" hint-placeholder-count="5">
@@ -299,7 +299,7 @@
           </sc-if>
           <sc-if value="{{ setData }}" hint-placeholder-val="{{ false }}">
             <div style="display:flex;align-items:center;height:36px;padding:0 12px">Database<span style="margin-left:auto;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">~/.dash/store.sqlite</span></div>
-            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Last backup<span style="margin-left:auto;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">05-09-2026 03:00</span></div>
+            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Last backup<span style="margin-left:auto;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">09-05-2026 03:00</span></div>
             <div style="display:flex;align-items:center;gap:8px;height:36px;padding:0 12px;margin-top:8px"><span style="padding:5px 10px;border-radius:6px;background:#e6e7ea;color:#101114;font-size:13px;font-weight:500;cursor:pointer">Back up now</span><span style="padding:5px 10px;border-radius:6px;color:#8b8f98;font-size:13px;cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">Export</span><span style="padding:5px 10px;border-radius:6px;color:#8b8f98;font-size:13px;cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">Vacuum</span></div>
           </sc-if>
         </div>
@@ -372,7 +372,7 @@ class Component extends DCLogic {
     };
   }
   hhmm(i, f, start) { let m = start - i * (7 + Math.round(f * 40)); if (m < 0) m = 24 * 60 + m; return `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; }
-  dates() { return ['05-09-2026', '04-09-2026', '03-09-2026', '02-09-2026', '01-09-2026', '31-08-2026', '30-08-2026', '29-08-2026']; }
+  dates() { return ['09-05-2026', '09-04-2026', '09-03-2026', '09-02-2026', '09-01-2026', '08-31-2026', '08-30-2026', '08-29-2026']; }
   groups(key, per, counts) {
     const n = (this.props.pageSize ?? 40) + this.state.more * 40, out = []; let left = n, k = 0;
     while (left > 0 && k < 8) {
@@ -417,8 +417,8 @@ class Component extends DCLogic {
     const modHue = { Email: this.HUES.email, Education: this.HUES.edu, 'Second Brain': this.HUES.mem, Science: this.HUES.sci, Money: this.HUES.biz, Graph: this.HUES.graph, Database: this.HUES.db };
     ag.out.forEach((g, gi) => g.rows.forEach((r, i) => { const m = mods[Math.floor(this.rnd(gi * 97 + i * 13) * 7)]; r.mod = m; r.hue = modHue[m]; r.verb = verbs[Math.floor(this.rnd(gi * 5 + i * 3) * verbs.length)]; }));
     if (st.actChip !== 'All') ag.out.forEach(g => { g.rows = g.rows.filter(r => r.mod === st.actChip); });
-    const eduGroups = [['05-09-2026', 3, 3], ['06-09-2026', 7, 11], ['13-09-2026', 6, 48]].map(([label, c, n], k) => ({ label, count: String(n), rows: Array.from({ length: c }, (_, i) => this.row('ed' + k, i, { time: (j, f) => k === 0 ? this.hhmm(-j, f, 780) : k === 1 ? `${String(6 + j).padStart(2, '0')} Sep` : `${String(13 + j * 2).padStart(2, '0')} Sep` })) }));
-    const files = [['05-09-2026', [['analysis.ipynb', 1], ['etl.py', 0], ['features.ipynb', 1]]], ['04-09-2026', [['eval.ipynb', 0], ['plots.py', 0], ['utils.py', 0]]], ['02-09-2026', [['baseline.ipynb', 0], ['sweep.py', 0]]], ['28-08-2026', [['scratch.ipynb', 0], ['ingest.py', 0], ['schema.py', 0]]]];
+    const eduGroups = [['09-05-2026', 3, 3], ['09-06-2026', 7, 11], ['09-13-2026', 6, 48]].map(([label, c, n], k) => ({ label, count: String(n), rows: Array.from({ length: c }, (_, i) => this.row('ed' + k, i, { time: (j, f) => k === 0 ? this.hhmm(-j, f, 780) : k === 1 ? `${String(6 + j).padStart(2, '0')} Sep` : `${String(13 + j * 2).padStart(2, '0')} Sep` })) }));
+    const files = [['09-05-2026', [['analysis.ipynb', 1], ['etl.py', 0], ['features.ipynb', 1]]], ['09-04-2026', [['eval.ipynb', 0], ['plots.py', 0], ['utils.py', 0]]], ['09-02-2026', [['baseline.ipynb', 0], ['sweep.py', 0]]], ['08-28-2026', [['scratch.ipynb', 0], ['ingest.py', 0], ['schema.py', 0]]]];
     const sciGroups = files.map(([label, fs], k) => ({ label, count: String(fs.length), rows: fs.map(([name, live], i) => { const r = this.row('sc' + k, i, { time: (j, f) => this.hhmm(j, f, k === 0 ? 581 : 1380) }); r.name = name; r.nameColor = live ? this.HUES.sci : '#e6e7ea'; return r; }) }));
     const tables = [['second_brain_items', '48,212'], ['emails', '31,904'], ['threads', '6,118'], ['courses', '14'], ['lessons', '412'], ['events', '9,140'], ['links', '12,774'], ['embeddings', '48,212'], ['documents', '128']].map(([name, rows]) => ({ name, rows, bg: st.table === name && st.sql ? this.SEL : 'transparent', color: st.table === name && st.sql ? '#e6e7ea' : '#8b8f98', pick: () => this.setState({ table: name, sql: `select *\nfrom ${name}\norder by rowid desc\nlimit 40;`, ran: false }) }));
     const savedQueries = [['recent-items', '09:39'], ['unread-by-sender', '08:41'], ['lesson-progress', '04 Sep'], ['orphan-links', '02 Sep']].map(([name, time]) => ({ name, time, pick: () => this.setState({ sql: `-- ${name}\nselect id, kind, ts, text, score\nfrom second_brain_items\nwhere ts > date('now', '-7 day')\norder by ts desc;`, ran: false }) }));

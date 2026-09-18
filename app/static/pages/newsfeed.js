@@ -39,7 +39,7 @@ function Tags({ id, tags, hue, onChange }) {
   </div>`;
 }
 
-// The day an entry happens: "Fri 09-10-2026", plus the time when the listing gave one.
+// The day an entry happens: "Fri 10-09-2026", plus the time when the listing gave one.
 function when(starts) {
   const [day, clock] = starts.split('T');
   const d = new Date(`${day}T12:00`);

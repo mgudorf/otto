@@ -47,8 +47,8 @@ def to_date(value) -> str | None:
 
 
 def day_label(iso_date: str) -> str:
-    """05-10-2026, the date format the rest of the UI uses."""
-    return date.fromisoformat(iso_date).strftime("%d-%m-%Y")
+    """10-05-2026, the date format the rest of the UI uses."""
+    return date.fromisoformat(iso_date).strftime("%m-%d-%Y")
 
 
 def amount_text(r: dict) -> str:

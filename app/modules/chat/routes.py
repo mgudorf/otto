@@ -108,7 +108,7 @@ def left(request: Request, query: str = "", page: int = 0) -> dict:
     )
     groups: list[dict] = []
     for r in rows:
-        label = parse(r["last_ts"]).astimezone().strftime("%d-%m-%Y")
+        label = parse(r["last_ts"]).astimezone().strftime("%m-%d-%Y")
         if not groups or groups[-1]["label"] != label:
             groups.append({"label": label, "count": 0, "rows": []})
         groups[-1]["rows"].append({"id": r["id"], "module": MODULE, "text": _title(store, r), "stamp": r["last_ts"]})

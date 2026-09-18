@@ -30,7 +30,7 @@ export function Left({ app, data, mod }) {
   </div>`;
 }
 
-const capture = { open: false, kind: 'account', name: '', amount: '', cadence: 'monthly', note: '', due_on: '' };   // due_on as typed, DD-MM-YYYY
+const capture = { open: false, kind: 'account', name: '', amount: '', cadence: 'monthly', note: '', due_on: '' };   // due_on as typed, MM-DD-YYYY
 let amountDraft = '';
 let dueDraft = { id: null, from: '', value: '' };   // follows the entry and the date it was synced from, so a write lands back in the box
 

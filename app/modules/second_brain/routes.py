@@ -26,7 +26,7 @@ def _row(r: dict) -> dict:
 
 
 def _day_label(ts: str) -> str:
-    return parse(ts).astimezone().strftime("%d-%m-%Y")
+    return parse(ts).astimezone().strftime("%m-%d-%Y")
 
 
 def _group_by_day(rows: list[dict]) -> list[dict]:

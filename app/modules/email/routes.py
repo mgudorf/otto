@@ -68,7 +68,7 @@ def _row(r: dict) -> dict:
 def _group_by_day(rows: list[dict]) -> list[dict]:
     groups: list[dict] = []
     for r in rows:
-        label = parse(r["internal_date"]).astimezone().strftime("%d-%m-%Y")
+        label = parse(r["internal_date"]).astimezone().strftime("%m-%d-%Y")
         if not groups or groups[-1]["label"] != label:
             groups.append({"label": label, "count": 0, "rows": []})
         groups[-1]["rows"].append(_row(r))

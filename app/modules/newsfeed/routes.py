@@ -21,11 +21,11 @@ RESOURCE = "newsfeed"
 
 
 def _day(ts: str) -> str:
-    return parse(ts).astimezone().strftime("%d-%m-%Y")
+    return parse(ts).astimezone().strftime("%m-%d-%Y")
 
 
 def _happens(starts_at: str) -> str:
-    return datetime.fromisoformat(starts_at).strftime("%a %d-%m-%Y")
+    return datetime.fromisoformat(starts_at).strftime("%a %m-%d-%Y")
 
 
 def _row(r: dict) -> dict:
