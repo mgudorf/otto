@@ -1,7 +1,8 @@
-"""python -m app [open|setup|status|daemon]
+"""python -m app [open|setup|build|status|daemon]
 
 open    (default) make sure the daemon runs on the current code revision, then open the window
 setup   register the Windows Task Scheduler entry that starts the daemon at logon
+build   derive app/static/otto.ico from otto.png and compile Otto.exe, the launcher under that icon, at the repo root
 status  print the running daemon's health
 daemon  run the daemon in this process (what the scheduled task runs)
 """
@@ -111,6 +112,10 @@ def main(argv: list[str]) -> None:
         daemon_main()
     elif cmd == "setup":
         setup(config)
+    elif cmd == "build":
+        from app.build import main as build_main
+
+        build_main(config.root)
     elif cmd == "status":
         print(json.dumps(health(config), indent=2))
     elif cmd == "open":

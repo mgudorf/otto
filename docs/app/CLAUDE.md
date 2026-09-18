@@ -12,16 +12,17 @@ Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps 
 | Piece | What it is |
 |---|---|
 | Daemon | FastAPI + uvicorn on `127.0.0.1:8765`, started detached under `pythonw`, logging to `data/daemon.log` (rotated at 1 MB, three kept); loopback only, no authentication |
-| Window | Google Chrome in app mode on its own profile in `app/.chrome-profile/`, first-run, default-browser and sync prompts off. The app never touches Microsoft Edge |
+| Window | Google Chrome in app mode on its own profile in `app/.chrome-profile/`, first-run, default-browser and sync prompts off; its title bar and taskbar button show the Otto icon, which Chrome takes from the shell's favicon `app/static/otto.ico`. The app never touches Microsoft Edge |
 | Store | one SQLite file `data/otto.db` in WAL mode, platform and module tables together, every table named `<module>_<name>` (`app_` for the platform), timestamps as UTC ISO strings. `app/migrate.py` brings an older database to the current names at boot, before any schema runs: a backup into `data/backups/` first, then one transaction that drops the indexes and triggers of each moving table (the schemas recreate them under their new names), drops an FTS5 table that moves or whose content table moves (a rename leaves its `content=` behind; the schemas recreate it and it is rebuilt), and renames; a new name already held by a table with rows is refused. After the schemas, `MODULE_RENAMES` rewrites the rows that still name a module by an old name (module columns, `<module>.<task>` names, cursor and `modules.<module>.` settings keys, the start page), behind its own backup (`tests/test_migrate.py`) |
 | LLM | the Claude Code CLI (2.1.263) headless under the owner's claude.ai Max login; no API key exists anywhere in the app |
 | Frontend | static ES modules, Preact + htm vendored, marked + KaTeX vendored for markdown and LaTeX in MIDDLE and in the session pane, inline styles ported from the artboard; no build step, no Node |
 | Modules built | Home, Chat, Email, Education, Second Brain, Science, Newsfeed, Finance, Graph, Database have pages; System and Feedback have none. The rail shows only modules whose package exists and that declare a page |
 
-Run: `python -m app` checks the port and code revision, starts or restarts the daemon, then opens the window. `python -m app setup` registers the Windows Task Scheduler entry `Otto` that starts the daemon at logon. `python -m app status` prints health. `python -m app.modules.email.gmail consent` runs the Gmail OAuth flow once and writes the token file. Tests: `.venv/Scripts/python.exe -m pytest -q`, offline; the CLI is mocked at `app.claude.spawn` and a real invocation raises; no Jupyter kernel is started.
+Run: `Otto.exe` at the repo root, tracked in git, is how Otto is opened: it runs `.venv/Scripts/python.exe -m app` from its own directory with no console, which checks the port and code revision, starts or restarts the daemon, then opens the window; a failed launch's output shows in a box. A pinned `Otto.exe` and the open window are two taskbar buttons, since the window carries Chrome's app identity. `python -m app setup` registers the Windows Task Scheduler entry `Otto` that starts the daemon at logon. `python -m app build` derives `app/static/otto.ico` from `otto.png` and recompiles `Otto.exe`; both are committed, so it runs only after the logo or the launcher source changes. `python -m app status` prints health. `python -m app.modules.email.gmail consent` runs the Gmail OAuth flow once and writes the token file. Tests: `.venv/Scripts/python.exe -m pytest -q`, offline; the CLI is mocked at `app.claude.spawn` and a real invocation raises; no Jupyter kernel is started.
 
 ```
-app/__main__.py   launcher: open | setup | status | daemon
+app/__main__.py   launcher: open | setup | build | status | daemon
+app/build.py      otto.png -> app/static/otto.ico (the window's icon) -> Otto.exe (the launcher under it): PowerShell with System.Drawing scales the logo, the .NET Framework C# compiler builds the exe
 app/daemon.py     app factory, lifespan, detached start, port wait, restart
 app/api.py        platform routes: health, restart, shell, tasks, jobs, events, settings, data, sessions; event_stream for any broadcast key
 app/config.py     config.toml -> typed Config; every key required, missing keys fail at boot
@@ -32,9 +33,11 @@ app/runner.py     one queue, per-resource locks, worker count = cap, job rows an
 app/revision.py   sha256 of app/** and config.toml, served by /health
 app/claude.py     CLI spawn, event stream, read-only allowlist, nightly budget
 app/modules/      registry, agent_base.md, one package per module (contract under Daemon)
-app/static/       index.html, shell.js, session.js, rows.js, api.js, feedback.js, md.js, pages/<name>.js, vendor/
+app/static/       index.html, otto.ico, shell.js, session.js, rows.js, api.js, feedback.js, md.js, pages/<name>.js, vendor/
 data/             otto.db, daemon.log and its rotations, secrets/, workspace/ (Science's root: chat/<id>/ and the owner's notebooks, scripts and folders), backups/, exports/; .gitignore covers data/*.log and data/*.log.*, the db, secrets, workspace, backups and exports
 .claude/          skills/ (feature-flow, feedback-queue, sync-architecture, data-migration): the repo's own workflows
+otto.png          the logo, the one source of otto.ico and of Otto.exe's icon
+Otto.exe          tracked, rebuilt by python -m app build; runs .venv/Scripts/python.exe -m app from its own directory with no console
 ```
 
 ## Daemon
@@ -150,11 +153,12 @@ Wire shape for LEFT: `{groups: [{label, count, rows: [{id, module, text, stamp, 
 | ipykernel | 7.3.0 in the user-wide Python; the kernel process Science launches |
 | Claude Code CLI | 2.1.263 at `C:\Users\gudo\.local\bin\claude.exe`, claude.ai login, subscription max |
 | Google Chrome | found through the `App Paths\chrome.exe` registry key |
+| Windows PowerShell 5.1 with System.Drawing, .NET Framework C# compiler | ship with Windows; `python -m app build` scales the logo and compiles `Otto.exe` with them (`%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`) |
 | SQLite with FTS5 and JSON | 3.50.4, stdlib |
 | Vendored frontend | `app/static/vendor/`: preact.mjs, htm.mjs, marked.esm.js 18.0.12, katex/ 0.18.7 (module, stylesheet, 20 woff2 fonts), highlight/ 11.11.1 (core and the python grammar, ES builds), Inter 400/500/600, JetBrains Mono 400/500, pinned by `SHA256SUMS` |
 | Google OAuth client and token | `data/secrets/google_client.json` (web client, redirect `http://localhost:8756/m/email/api/oauth/callback`), `data/secrets/token.json`, scope `gmail.modify`, refreshed in place |
 
-Not used: Node, APScheduler, pywebview, `claude-agent-sdk`, nbclient, an Anthropic API key, paid search APIs, a graph database, Microsoft Edge.
+Not used: Node, APScheduler, pywebview, PyInstaller, `claude-agent-sdk`, nbclient, an Anthropic API key, paid search APIs, a graph database, Microsoft Edge.
 
 ## Modules
 
