@@ -14,7 +14,7 @@ Every command you run by hand. Run them in PowerShell from the repo root, `C:\Us
 
 | When | Command | What it does |
 |---|---|---|
-| Every 7 days; next by 2026-09-19 17:39 | `.venv/Scripts/python.exe -m app.modules.email.gmail consent` | Renews Gmail access. Opens a Google consent page in the browser and writes `data/secrets/token.json`. Without it, the mail sync fails every five minutes and every Email page action fails. Home shows a notice when the token is about to expire. Setting the Google Cloud consent screen to Production ends the 7-day cycle (see the Email doc's Patches). |
+| Every 7 days; next by 2026-09-24 20:32 | `.venv/Scripts/python.exe -m app.modules.email.gmail consent` | Renews Gmail access. Opens a Google consent page in the browser and writes `data/secrets/token.json`. Without it, the mail sync fails every five minutes and every Email page action fails. Home shows a notice when the token is about to expire. Setting the Google Cloud consent screen to Production ends the 7-day cycle (see the Email doc's Patches). |
 
 ## Once per machine
 
