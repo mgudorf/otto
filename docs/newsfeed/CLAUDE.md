@@ -19,9 +19,19 @@
 | Config | `[newsfeed]`: `items_per_run` (the cap a search gets when the agent sets none) |
 | Page | LEFT: search, the three chips, boxed entries by the day found, an open entry bright and a decided one muted, the day it happens (`Fri 10-09-2026`) as the stamp when it has one and no date otherwise; MIDDLE blank: the searches, one boxed row each with the name, its open count in the hue, `next MM-DD-YYYY` and its tags, a bad last reply in red, and `×` (kill, confirmed); MIDDLE selected: the entry (the day it happens, summary, url, its search and `follow up MM-DD-YYYY` when set, tag chips with remove on click and a `+ tag` box, `Accept` / `Dismiss` / `Open`) or the search (prompt verbatim, `every N d · N per run · next MM-DD-YYYY`, a bad last reply, tags, `Kill`) |
 | Dismissal | a dismissed entry leaves every chip, `today`, `queue` and the agent's context, and its item offers only the url. The row stays in `newsfeed_items`, which is what stops the run proposing the same url again |
-| Migration | `python -m app.modules.newsfeed migrate` from the primary checkout: a backup to `data/backups/otto-<stamp>-pre-newsfeed.db`, then one transaction that turns the Business plans into the `business` search (cap 3, tag `business`) and its leads into entries, the Social scout's towns, radius, horizon, categories and no-drinking rule into the `social` search (cap 5, tag `social`) and its events into entries tagged with their category and town (`going` → accepted, `T00:00` → the date alone), and each Search topic into a search of its own (cap 3, tagged with its kind) with its findings (`agreed` → accepted, `disagreed` → dismissed). Idempotent: a search is found by name, an entry by url. The old tables are left in place |
 | Departures | not in the artboard: title, hue `#c98ba8` (Business's), the feed-arcs icon and rail order 6 are Otto's. LEFT and MIDDLE follow the shape Business and Social had; MIDDLE blank is the search list rather than a capture box, since capture is the agent's. One url is one entry: a listing that repeats a url on another date is not proposed twice, where Social kept each date |
 
 ## Patches
 
-None open.
+### The one-time migration still ships
+
+- Kind: defect
+- Where: `app/modules/newsfeed/migrate.py`, `app/modules/newsfeed/__main__.py`, `tests/test_newsfeed.py::test_migrate_converts_the_retired_modules`
+- Found: 2026-09-18, CLAUDE.md audit
+- Status: open
+
+What happens: the live database was already converted, yet `python -m app.modules.newsfeed migrate` and its test remain, reading tables of modules that no longer exist.
+
+Expected: code that has done its one job is deleted; git keeps it.
+
+Fix: delete `migrate.py`, `__main__.py` and the test; the old Business, Social and Search tables are dropped only when the owner asks in words.

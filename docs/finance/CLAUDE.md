@@ -14,7 +14,7 @@
 | Tools | read only: `finance_list` and `finance_get` carry `due_on` and `next_due`, `finance_totals`. The manifest declares no write tools |
 | Totals | recurring and budget amounts normalize to a month as yearly / 12 and weekly x 52 / 12; accounts and holdings sum as entered |
 | Page | LEFT: search, kind chips, one group per kind of boxed rows with the amount (and the next date, `MM-DD-YYYY`, on a dated recurring row) in the stamp slot, ended entries last in their group, struck through and muted; MIDDLE blank: the totals with `+` at their right, which opens the capture form (kind chips, `name` and `amount`, cadence chips with a `due` box for a recurring entry, `note`, `↵`; Enter in any box saves, Esc closes); MIDDLE selected: the entry, an `amount` box, a `due` box on a recurring entry (Enter or `Set date` posts it, blank clears), its amount history by date, `Update`, `End`, `Forget`. A date box is `DateInput`: typed as `MM-DD-YYYY` with the unfilled part shown dim, sent only once complete |
-| Departures | the artboard's Money page was a document list, now Business: chips are the four kinds, rows group by kind rather than day, item actions are `Update` / `Set date` / `End` / `Forget` |
+| Departures | the artboard's Money page is a document list: chips are the four kinds, rows group by kind rather than day, item actions are `Update` / `Set date` / `End` / `Forget` |
 
 ## Patches
 

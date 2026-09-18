@@ -19,12 +19,17 @@ Otto, a personification of the word "auto" is a PERSONALIZED dashboard applicati
    - Before merging: `git merge main` into the branch first; the branch resolves, `main` stays clean.
    - Resolving: keep both sides in rail order. The contract docstring and shared tests take `main`'s side, then re-add anything only the branch had. Run the suite on `main` before committing the merge.
 
+## Commands
+
+1. `.venv/Scripts/python.exe -m pytest -q` runs the suite, offline; in a worktree it is `../otto/.venv/Scripts/python.exe -m pytest -q`. `README.md` lists every other command.
+2. `data/otto.db` and `.venv` exist only in the primary checkout, so commands that read or write the database run there, never in a `wt-*` worktree.
+
 ## Layout
 
-1. `app/` is the daemon. Platform files sit flat at the top: `__main__.py` launcher, `daemon.py` app factory and lifespan, `api.py` platform routes, `config.py` typed config from `config.toml`, `store.py` and `schema.sql` for SQLite and the platform tables, `migrate.py` the table names an older database used and the boot step that renames them, `scheduler.py` the clock, `runner.py` the job queue, `claude.py` the only path to the Claude CLI, `revision.py` the source hash the launcher compares.
+1. `app/` is the daemon. Platform files sit flat at the top: `__main__.py` launcher, `daemon.py` app factory and lifespan, `api.py` platform routes, `config.py` typed config from `config.toml`, `store.py` and `schema.sql` for SQLite and the platform tables, `migrate.py` the table names an older database used and the boot step that renames them, `scheduler.py` the clock, `runner.py` the job queue, `claude.py` the only path to the Claude CLI, `revision.py` the source hash the launcher compares, `build.py` the step that turns `otto.png` into `app/static/otto.ico` and `Otto.exe`.
 2. `app/modules/<name>/` is one package per module. The contract (manifest, `schema.sql`, `tasks.py`, `routes.py`, `tools.py`, `agent.md`) is the docstring in `app/modules/__init__.py`; `agent_base.md` is the prompt every module agent shares. System and Feedback have no page.
-3. `app/static/` is the browser side, no build step. `shell.js` is the frame and the `PAGES` map, `pages/<name>.js` one file per module page plus `activity.js` and `settings.js`, `rows.js` tokens and shared components, `session.js` the agent pane, `vendor/` pinned copies of Preact, htm, marked, KaTeX, highlight.js and the fonts.
-4. `tests/` is one file per module plus `test_app.py`, `test_migrate.py`, `test_platform.py`, `test_runner.py` and `test_scheduler.py` for the platform. `conftest.py` mocks the Claude and Gmail seams so the suite runs offline.
+3. `app/static/` is the browser side, no build step. `shell.js` is the frame and the `PAGES` map, `pages/<name>.js` one file per module page plus `activity.js` and `settings.js`, `rows.js` tokens and shared components, `session.js` the agent pane, `api.js` the fetch helpers, `md.js` markdown with LaTeX, `feedback.js` and `module_settings.js` the header's two panels, `vendor/` pinned copies of Preact, htm, marked, KaTeX, highlight.js and the fonts.
+4. `tests/` is one file per module (Home and System have none; the shared tests cover them) plus `test_app.py`, `test_migrate.py`, `test_platform.py`, `test_runner.py` and `test_scheduler.py` for the platform. `conftest.py` mocks the Claude and Gmail seams so the suite runs offline.
 5. `data/` is runtime state, gitignored: the SQLite file, the daemon log, `secrets/` for the Google OAuth files, `workspace/` as the working directory every Claude session is confined to.
 6. `.claude/skills/` are the repo's own workflows: `feature-flow` (worktree, change, module doc, merge), `feedback-queue` (my feedback and the open patches for a module, listed and cleared), `sync-architecture` (the docs checked against `main` when a change bypassed feature-flow), `data-migration` (the live database sized against free space, confirmed when large, backed up, the migration proved on the suite and a copy, then run once).
 

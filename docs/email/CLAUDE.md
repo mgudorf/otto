@@ -23,14 +23,14 @@
 
 ## Patches
 
-### Gmail refresh token expires around 2026-09-12
+### Gmail refresh token expires every 7 days
 
 - Kind: gap
 - Where: Email requirement 1 (Gmail OAuth); `data/secrets/token.json`, `app/modules/email/gmail.py`
 - Found: 2026-09-09, sync-architecture
 - Status: open, owner action; recurring while the consent screen stays in Testing
 
-What happens: the token still carries `refresh_token_expires_in`, 205,388 seconds as of 2026-09-10 and 1,075 seconds at the 2026-09-12 sync, because it was issued while the OAuth consent screen for project `central-shift-507603-b1` was in Testing. From 2026-09-12 the refresh stops working: `email.sync` fails every five minutes, `email.triage` has nothing new to read, and every action route on the Email page fails. On 2026-09-12 it did stop: 216 `email.sync` failures over eight hours (`invalid_grant`, then `invalid_client` once the client secret was deleted). The secret was rotated and a new token issued at 17:39 local with `refresh_token_expires_in` 604799, so it died about 2026-09-19 17:39. The consent flow was run again on 2026-09-17 evening; the token now carries `refresh_expires_at` 2026-09-25T00:32:21Z, so it dies about 2026-09-24 20:32 local (read at the 2026-09-18 sync). The owner declined Production, so this repeats every 7 days.
+What happens: the OAuth consent screen for project `central-shift-507603-b1` is in Testing, so every refresh token Google issues lives 7 days. The current one carries `refresh_expires_at` 2026-09-25T00:32:21Z and dies about 09-24-2026 20:32 local. Once it dies, `email.sync` fails every five minutes (`invalid_grant`), `email.triage` has nothing new to read, and every action route on the Email page fails. The owner declined Production, so this repeats every 7 days.
 
 Expected: a refresh token with no expiry, so the mirror and the bulk actions keep working without the owner touching them.
 
@@ -40,10 +40,10 @@ Fix: every 7 days meanwhile, `.venv/Scripts/python.exe -m app.modules.email.gmai
 
 - Kind: gap
 - Where: Email requirement 2; `app/modules/email/routes.py` (`_where` hard-codes `INBOX`), `app/modules/email/gmail.py` (`GmailRead` has no `labels`, `list_ids` omits spam and trash), `app/modules/email/tasks.py`, `app/static/pages/email.js`
-- Found: 2026-09-12, the owner's request; decisions taken 2026-09-12, first change landed 2026-09-13
+- Found: 2026-09-12, the owner's request
 - Status: open, not started
 
-What happens: `_where` puts `INBOX` into every query, so Spam, Trash and Gmail's categories cannot be reached from Otto at all, and the owner's own labels are neither shown nor applied nor created. The selection, action, sync and read-on-click half of this gap landed on 2026-09-13; this is the rest.
+What happens: `_where` puts `INBOX` into every query, so Spam, Trash and Gmail's categories cannot be reached from Otto at all, and the owner's own labels are neither shown nor applied nor created.
 
 Expected: eleven partitions from Gmail's own labels (Inbox, Starred, Important, Personal, Social, Updates, Promotions, Forums, Purchases, Spam, Trash) as a chip row, `_where` taking the partition instead of forcing `INBOX`, the backfill passing `includeSpamTrash=true`, and Purchases as a column `is_purchase` that `sync` sets from one `list_ids("category:purchases")` per run (verified live 2026-09-12: 412 messages and no label id; `category:reservations` answers 0 and is out). Then user labels: `email_labels(id, name, kind system|user, synced_at)` mirrored by `sync` through a new `GmailRead.labels`, verbs `label`, `unlabel` (`{label_id}`) and `create_label` (`{name}`) through a new `GmailWrite.create_label`, and a read tool `email_labels`. `email_flag` stays the only write tool and no agent tool touches a label. `numbers` and `today` stay scoped to `INBOX`. Rejected: fourteen chips in one row, a checkbox column, a Gmail round-trip per partition, permanent delete (outside `gmail.modify`).
 

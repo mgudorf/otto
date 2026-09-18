@@ -65,6 +65,6 @@
 
 What happens: no module, task or page picks a technology or asks about it; the Education topics are the fourteen fixed domains.
 
-Expected: a decision on where the technology comes from (the nightly search's `work` findings are the obvious feed), how one is picked, and how the owner's understanding is checked.
+Expected: a decision on where the technology comes from (a Newsfeed search is the obvious feed), how one is picked, and how the owner's understanding is checked.
 
-Fix: the owner decides whether it is a mode of Education or of Search; then one change through `/feature-flow`.
+Fix: the owner decides whether it is a mode of Education or of Newsfeed; then one change through `/feature-flow`.
