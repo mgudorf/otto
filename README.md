@@ -49,6 +49,12 @@ What Otto does not do yet. The full entry is under `## Patches` in the named doc
 | `docs/email/CLAUDE.md` | The Email page shows only the inbox. Spam, Trash, Gmail's categories and your own labels cannot be reached, applied or created. The design is decided: a row of eleven label chips first, then your labels. |
 | `docs/second_brain/CLAUDE.md` | Accepting a suggestion does the same as dismissing it: the suggestion leaves the list and nothing is created. You chose to leave it for now; the recommended fix makes Accept create a task from the suggestion. |
 
+## Useful commands; Claude and otherwise:
+
+1. "What automations do you recommend for this project"? 
+2. "Audit my CLAUDE.md files" 
+
+
 ## Where things are
 
 | Path | What |

@@ -245,4 +245,25 @@ Activity: LEFT is the `events` log by day with a chip per module, each row boxed
 
 ## Patches
 
-None open.
+### Activity lists system twice among its chips
+- Kind: bug
+- Where: `app/static/pages/activity.js` `load`
+- Found: 2026-09-18, the UI review
+- Status: open
+
+What happens: the chip strip is built as `All`, every module the shell lists, then `system` appended; the shell now lists System as a module, so `system` appears twice and the strip wraps to a fifth line.
+
+Expected: one `system` chip.
+
+Fix: drop the appended `system` in `load`; the shell's module list already carries it.
+### Visual system reads as generated
+- Kind: roadmap
+- Where: `app/static/index.html`, `app/static/rows.js` (`T`, `rowStyle`, `Row`, `Chips`, `Button`, `Plus`, `Enter`), `app/static/shell.js` (rail, header, tracks), `app/static/session.js`, `app/static/pages/settings.js` (the native select), `docs/design/Personal Dashboard App.dc.html`
+- Found: 2026-09-18, the owner's request (the UI review)
+- Status: open
+
+What happens: every surface is one of four greys a few percent apart with no edge or light direction; every row is a 6px-radius box with a hairline ring on a panel of the same shape, as are chips, buttons, inputs and tabs; the dim grey `#5f636c` carries every date, stamp, group label, empty state and blank-state line at 2.8:1 against the panel; the type scale is 13/15/20 in Inter at default tracking; `+ × ↵ ▸ /` are typed characters beside drawn icons and Settings uses a native select; the rail stacks eight pastel hues; MIDDLE is one dim line on Email, Second Brain, Science, Chat and Settings and RIGHT an empty plate until a tab opens, while LEFT truncates titles to fit a full date. The owner reads this as flat and generated.
+
+Expected: a sleek, dense instrument: matte plates under one light, white readings, module hues as small marks only, readable greys, one type scale with a display size for numbers and titles, drawn icons, no dead track.
+
+Fix: in `T` and `index.html`: ground `#0f1013`, plate `#16171c` with `inset 0 1px 0 rgba(255,255,255,.05)` and a `0 0 0 1px rgba(0,0,0,.35)` outline, field `#1e2026` (inputs get an inset shadow), text `#f2f3f5` / `#a3a7b0` / `#7a7f89`, radius 10 plates, 8 rail and fields, 6 controls, 4 tags; rows flat 30px on the plate (hover field, selected field with the 2px hue bar, no ring, a hairline only between groups, the stamp in a fixed right column); type IBM Plex Sans 14/1.45 body, 12.5 meta, 12 labels, 22/600 title at -0.01em, 38/500 numbers at -0.025em tabular, IBM Plex Mono for code and tool lines (vendored; keeping Inter with the same scale is the owner's alternative); rail icons in the tertiary grey with the hue on the active and hovered one only; `+ × ↵ ▸ /` drawn as 20-grid SVG at stroke 1.6 and the select replaced by chips; column gap 2.5% with the width to LEFT; RIGHT collapsed to a 44px strip until a tab is open; each module's blank MIDDLE a panel of its state (content per module is the owner's call); the artboard restyled in the same change. Owner decisions before the change: typeface, the RIGHT collapse, the track split, each blank state's content. A mock of Home in this system was rendered on 2026-09-18 for the review.
