@@ -1,9 +1,8 @@
-// Second Brain: LEFT = chips + rows by day · MIDDLE blank = capture box and open suggestions.
-import { html, T, mono13, Row, GroupHeader, Chips, Search, Button, Empty, fmtInt, TextArea } from '../rows.js';
+// Second Brain: LEFT = search, All · Tasks, rows by day · MIDDLE blank = the capture box and open suggestions.
+// A capture is a note, a link when it starts with a URL, or a task when the chip is on; the kind is never written out.
+import { html, T, meta13, Row, GroupHeader, Chips, Search, Button, Empty, More, TextArea, submitOnEnter, Enter, input } from '../rows.js';
 import { get, post } from '../api.js';
 import { Inspector } from '../shell.js';
-
-const KIND_HUE = '#d1a36a';
 
 export async function load(app) {
   const { query, chip, more } = app.state;
@@ -12,34 +11,22 @@ export async function load(app) {
   return { left, blank };
 }
 
-export function meta(app) {
-  const c = app.state.data && app.state.data.blank.counts;
-  if (!c) return '';
-  const total = Object.values(c).reduce((a, b) => a + b, 0);
-  return `${fmtInt(total)}`;
-}
-
-export function Left({ app, data, mod, fmt }) {
+export function Left({ app, data, mod }) {
   const sel = app.state.sel;
   const rerun = (patch) => app.setState(patch, () => app.refresh());
   return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20 }}>
     <${Search} value=${app.state.query} hue=${mod.hue} onInput=${(v) => rerun({ query: v, more: 0 })} />
     <${Chips} chips=${data.left.chips} active=${data.left.chip} hue=${mod.hue} onPick=${(c) => rerun({ chip: c, more: 0 })} />
     ${data.left.groups.length === 0 && html`<${Empty} text=${app.state.query ? 'no matches' : 'nothing captured yet'} />`}
-    ${data.left.groups.map((g) => html`<div key=${g.label} style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <${GroupHeader} label=${g.label} count=${g.count} />
-      ${g.rows.map((r) => html`<${Row} key=${r.id} row=${r} hue=${KIND_HUE} fmt=${fmt} selected=${!!sel && String(sel.id) === String(r.id)} onSelect=${() => app.select({ module: 'second_brain', id: r.id })} />`)}
+    ${data.left.groups.map((g) => html`<div key=${g.label} style=${{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <${GroupHeader} label=${g.label} />
+      ${g.rows.map((r) => html`<${Row} key=${r.id} row=${r} hue=${mod.hue} selected=${!!sel && String(sel.id) === String(r.id)} onSelect=${() => app.select({ module: 'second_brain', id: r.id })} />`)}
     </div>`)}
-    <div style=${{ display: 'flex', alignItems: 'center', gap: 16, height: 32, padding: '0 12px', ...mono13, color: T.dim }}>${data.left.showing}
-      ${data.left.more && html`<span class="ring" onClick=${() => rerun({ more: app.state.more + 1 })} style=${{ cursor: 'pointer', color: T.muted, padding: '3px 8px', borderRadius: 6 }}>more</span>`}
-    </div>
+    ${data.left.more && html`<${More} onClick=${() => rerun({ more: app.state.more + 1 })} />`}
   </div>`;
 }
 
-class Capture {
-  constructor() { this.kind = 'note'; this.text = ''; this.tags = ''; }
-}
-const capture = new Capture();
+const capture = { task: false, text: '', tags: '' };
 let tagDraft = '';
 
 export function Middle({ app, data, mod, fmt }) {
@@ -53,11 +40,11 @@ export function Middle({ app, data, mod, fmt }) {
       if (a.removes) app.select(null); else app.loadItem(app.state.sel);
       app.refresh();
     };
-    const tags = item && !item.error ? html`<div style=${{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', ...mono13, color: T.muted }}>
+    const tags = item && !item.error ? html`<div style=${{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', ...meta13, color: T.muted }}>
       ${(item.tags || []).map((t) => html`<span key=${t} class="ring" title="remove" onClick=${async () => { await post('/api/second_brain/action/untag', { id: item.id, tag: t }); app.loadItem(app.state.sel); }} style=${{ padding: '2px 8px', borderRadius: 6, cursor: 'pointer', boxShadow: 'inset 0 0 0 1px rgba(230,231,234,.1)' }}>${t}</span>`)}
-      <input placeholder="add tag" value=${tagDraft} onInput=${(e) => { tagDraft = e.target.value; }}
+      <input placeholder="+ tag" value=${tagDraft} onInput=${(e) => { tagDraft = e.target.value; }}
         onKeyDown=${async (e) => { if (e.key === 'Enter' && e.target.value.trim()) { const v = e.target.value.trim(); tagDraft = ''; e.target.value = ''; await post('/api/second_brain/action/tag', { id: item.id, tags: [v] }); app.loadItem(app.state.sel); app.refresh(); } }}
-        style=${{ width: 120, height: 26, padding: '0 8px', border: 0, borderRadius: 6, background: T.raised, color: T.text, fontSize: 13, '--hue': hue }} />
+        style=${input(hue, { width: 96, height: 26, background: T.raised })} />
     </div>` : null;
     return html`<${Inspector} app=${app} item=${item} mod=${mod} fmt=${fmt} onAction=${act}>${tags}<//>`;
   }
@@ -65,27 +52,21 @@ export function Middle({ app, data, mod, fmt }) {
   const save = async () => {
     const text = capture.text.trim();
     if (!text) return;
-    await post('/api/second_brain/action/capture', { kind: capture.kind, text, tags: capture.tags.split(',').map((t) => t.trim()).filter(Boolean) });
-    capture.text = ''; capture.tags = '';
+    const kind = capture.task ? 'task' : /^https?:\/\//i.test(text) ? 'link' : 'note';
+    await post('/api/second_brain/action/capture', { kind, text, tags: capture.tags.split(',').map((t) => t.trim()).filter(Boolean) });
+    capture.text = ''; capture.tags = ''; capture.task = false;
     app.refresh();
   };
   return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-    <div style=${{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-      ${b.kinds.map((k) => html`<span key=${k} class="ring" onClick=${() => { capture.kind = k; app.forceUpdate(); }} style=${{ padding: '3px 9px', borderRadius: 6, fontSize: 13, cursor: 'pointer', background: capture.kind === k ? hue : 'transparent', color: capture.kind === k ? T.ground : T.muted }}>${k}</span>`)}
-      <span style=${{ marginLeft: 'auto', ...mono13, color: T.dim }}>${Object.entries(b.counts).map(([k, n]) => `${n} ${k}`).join(' · ') || 'empty'}</span>
-    </div>
-    <${TextArea} value=${capture.text} placeholder=${capture.kind === 'link' ? 'https://… (then a note)' : 'Capture in your own words…'}
-      onInput=${(e) => { capture.text = e.target.value; }}
-      onKeyDown=${(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); } }} hue=${hue} style=${{ background: T.panel }} />
+    <${TextArea} value=${capture.text} onInput=${(e) => { capture.text = e.target.value; }} onKeyDown=${submitOnEnter(save)} hue=${hue} style=${{ background: T.panel }} />
     <div style=${{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <${Button} label="Save" primary=${true} hue=${hue} onClick=${save} />
-      <input placeholder="tags, comma separated" value=${capture.tags} onInput=${(e) => { capture.tags = e.target.value; }}
-        style=${{ flex: 1, height: 30, padding: '0 10px', border: 0, borderRadius: 6, background: T.panel, color: T.text, fontSize: 13, '--hue': hue }} />
-      <span style=${{ ...mono13, color: T.dim }}>ctrl+enter</span>
+      <span class="ring" onClick=${() => { capture.task = !capture.task; app.forceUpdate(); }} style=${{ padding: '3px 9px', borderRadius: 6, fontSize: 13, cursor: 'pointer', background: capture.task ? hue : 'transparent', color: capture.task ? T.ground : T.muted }}>task</span>
+      <input placeholder="tags" value=${capture.tags} onInput=${(e) => { capture.tags = e.target.value; }} onKeyDown=${(e) => { if (e.key === 'Enter') save(); }} style=${input(hue, { flex: 1 })} />
+      <${Enter} onClick=${save} />
     </div>
-    ${b.suggestions.length > 0 && html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 16 }}>
-      <${GroupHeader} label="suggested" count=${b.suggestions.length} />
-      ${b.suggestions.map((s) => html`<div key=${s.id} style=${{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 36, padding: '6px 12px', borderRadius: 6 }}>
+    ${b.suggestions.length > 0 && html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 16 }}>
+      <${GroupHeader} label="suggested" />
+      ${b.suggestions.map((s) => html`<div key=${s.id} style=${{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 36, padding: '6px 12px', borderRadius: 6, background: T.panel }}>
         <span style=${{ flex: 1, minWidth: 0 }}>${s.text}</span>
         <${Button} label="Accept" hue=${hue} onClick=${async () => { await post('/api/second_brain/action/accept', { id: s.id }); app.refresh(); }} />
         <${Button} label="Dismiss" onClick=${async () => { await post('/api/second_brain/action/dismiss', { id: s.id }); app.refresh(); }} />

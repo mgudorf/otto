@@ -15,7 +15,7 @@
 | Hooks | `numbers` (nodes), `context` (totals, the ten largest tags, merges, prunes, curated link count) |
 | Tools | read: `graph_nodes`, `graph_neighbors`, `graph_items` (a tag's Second Brain items and sessions, aliases included); write: `graph_link` (both ends must be nodes), `graph_unlink` (curated links only), `graph_merge`, `graph_prune`, `graph_restore`, each in one transaction with the rebuild and each writing an event |
 | Schedule | `graph.rebuild` every 15m, plain SQL and no LLM, `build.rebuild` shared with every write tool, the cursor `graph.rebuild` served as `built_at`: tags on the same item become a `cooccur` edge weighted by shared items, a curated link an edge of weight 1 |
-| Page | LEFT: search and tags by count; MIDDLE: a ring of nodes with their edges, selecting a tag lights its neighbours |
+| Page | LEFT: search and boxed tag rows with their counts, no header; a neighbour of the selected tag reads in the hue; MIDDLE: a ring of nodes with their edges, selecting a tag lights its neighbours and says how many are linked |
 | Departures | `extract-entities` chip dropped and `neighbors` added; ring radius comes from a hash of the tag so a node stays put when the list reorders; counts are live |
 
 ## Patches

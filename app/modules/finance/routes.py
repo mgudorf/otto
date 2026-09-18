@@ -8,7 +8,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
-from app.modules.finance import MANIFEST
+from app.modules import int_id
 from app.store import Store, iso, now_iso
 
 router = APIRouter(prefix="/api/finance")
@@ -20,9 +20,7 @@ LABELS = dict(zip(KINDS, ("Accounts", "Recurring", "Holdings", "Budgets")))
 SUFFIX = {"monthly": "/mo", "yearly": "/yr", "weekly": "/wk"}
 PER_MONTH = {"monthly": Decimal(1), "yearly": Decimal(1) / 12, "weekly": Decimal(52) / 12}
 PERIOD_MONTHS = {"monthly": 1, "yearly": 12}
-MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 RESOURCE = "finance"
-HUE = MANIFEST.hue
 
 
 def to_cents(value) -> int:
@@ -49,9 +47,8 @@ def to_date(value) -> str | None:
 
 
 def day_label(iso_date: str) -> str:
-    """05 Oct, the stamp format the rest of the UI uses."""
-    d = date.fromisoformat(iso_date)
-    return f"{d.day:02d} {MONTHS[d.month - 1]}"
+    """05-10-2026, the date format the rest of the UI uses."""
+    return date.fromisoformat(iso_date).strftime("%d-%m-%Y")
 
 
 def amount_text(r: dict) -> str:
@@ -94,7 +91,6 @@ def _row(r: dict, today: date) -> dict:
         "text": r["name"],
         "stamp": r["updated_at"],
         "stampText": amount_text(r) + (f" · {day_label(nxt)}" if nxt else ""),
-        "leading": {"dot": "transparent" if r["ended_at"] else HUE},
         "done": bool(r["ended_at"]),
     }
 
@@ -211,17 +207,17 @@ def _check_capture(store: Store, body: dict) -> dict:
 
 
 def _check_update(store: Store, body: dict) -> dict:
-    r = _get(store, int(body["id"]))
+    r = _get(store, int_id(body))
     note = r["note"] if "note" not in body else ((body.get("note") or "").strip() or None)
     return {"row": r, "amount": to_cents(body.get("amount", "")), "note": note}
 
 
 def _check_id(store: Store, body: dict) -> dict:
-    return {"row": _get(store, int(body["id"]))}
+    return {"row": _get(store, int_id(body))}
 
 
 def _check_due(store: Store, body: dict) -> dict:
-    r = _get(store, int(body["id"]))
+    r = _get(store, int_id(body))
     if r["kind"] != "recurring":
         raise HTTPException(400, "only a recurring payment has a due date")
     return {"row": r, "due_on": to_date(body.get("due_on"))}

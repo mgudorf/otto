@@ -108,12 +108,12 @@ def left(request: Request, query: str = "", page: int = 0) -> dict:
     )
     groups: list[dict] = []
     for r in rows:
-        label = parse(r["last_ts"]).astimezone().strftime("%d %b")
+        label = parse(r["last_ts"]).astimezone().strftime("%d-%m-%Y")
         if not groups or groups[-1]["label"] != label:
             groups.append({"label": label, "count": 0, "rows": []})
         groups[-1]["rows"].append({"id": r["id"], "module": MODULE, "text": _title(store, r), "stamp": r["last_ts"]})
         groups[-1]["count"] += 1
-    return {"groups": groups, "showing": f"{min(limit, total)} / {total}", "more": total > limit}
+    return {"groups": groups, "more": total > limit}
 
 
 @router.get("/item/{sid}")

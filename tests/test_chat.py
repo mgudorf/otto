@@ -88,16 +88,16 @@ def test_chat_conversation_lifecycle(config):
             resources = {j["resource"] for j in st.store.query("SELECT resource FROM app_jobs WHERE task = 'chat.turn'")}
             assert resources == {f"session:{sid}", f"session:{sid2}"}
             left = (await c.get("/api/chat/left")).json()
-            assert left["showing"] == "2 / 2" and [r["text"] for r in left["groups"][0]["rows"]] == ["something else", "Notes about x"]
+            assert left["more"] is False and [r["text"] for r in left["groups"][0]["rows"]] == ["something else", "Notes about x"]
             assert [r["id"] for r in (await c.get("/api/chat/left?query=heading")).json()["groups"][0]["rows"]] == [sid]
-            assert (await c.get("/api/chat/left?query=zzz")).json()["showing"] == "0 / 0"
+            assert (await c.get("/api/chat/left?query=zzz")).json()["groups"] == []
             n = next(n for n in (await c.get("/api/home/numbers")).json() if n["module"] == "chat")
             assert n["value"] == 2 and n["label"] == "conversations"
             # delete is the only removal: row, turns and folder
             assert (await c.post("/api/chat/delete", json={"id": sid2})).status_code == 200
             assert st.store.one("SELECT id FROM app_sessions WHERE id = ?", (sid2,)) is None
             assert st.store.scalar("SELECT COUNT(*) FROM app_session_turns WHERE session_id = ?", (sid2,)) == 0
-            assert not (config.data.workspace / "chat" / sid2).exists() and (await c.get("/api/chat/left")).json()["showing"] == "1 / 1"
+            assert not (config.data.workspace / "chat" / sid2).exists() and len((await c.get("/api/chat/left")).json()["groups"][0]["rows"]) == 1
             assert (await c.get(f"/api/chat/item/{sid2}")).status_code == 404
             # a scheduled run through the same seam never gets the write built-ins
             st.claude.config = dataclasses.replace(config, nightly=dataclasses.replace(config.nightly, window="00:00-23:59"))

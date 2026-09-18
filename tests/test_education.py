@@ -91,7 +91,7 @@ def test_education_end_to_end(config):
             left = (await c.get("/api/education/left")).json()
             row = left["groups"][0]["rows"][0]
             assert left["chips"] == ["active", "completed"] and left["chip"] == "active"
-            assert left["groups"][0]["label"] == "due" and row["id"] == qid and row["leading"] == {"pct": 0} and "done" not in row
+            assert left["groups"][0]["label"] == "" and row["id"] == qid and row["leading"] == {"pct": 0} and "done" not in row
             assert (await c.get("/api/education/left?chip=completed")).json()["groups"] == []
             n = next(x for x in (await c.get("/api/home/numbers")).json() if x["module"] == "education")
             assert n["value"] == 1 and n["label"] == "due"
@@ -187,7 +187,7 @@ def test_education_end_to_end(config):
             assert store.scalar("SELECT difficulty FROM education_topics WHERE id = ?", (tid,)) == start_d + 1
             # LEFT: the completed tab lists it by day with its score; the active tab holds the generated one
             left = (await c.get("/api/education/left?chip=completed")).json()
-            assert left["chip"] == "completed" and [r["id"] for g in left["groups"] for r in g["rows"]] == [qid] and left["showing"] == "1 / 1"
+            assert left["chip"] == "completed" and [r["id"] for g in left["groups"] for r in g["rows"]] == [qid] and left["more"] is False
             assert left["groups"][0]["rows"][0]["leading"] == {"pct": 88}
             left = (await c.get("/api/education/left")).json()
             assert [r["id"] for g in left["groups"] for r in g["rows"]] == [gid]
@@ -195,15 +195,15 @@ def test_education_end_to_end(config):
             assert (t["completed"], t["asked"], t["average"], t["recent"]) == (1, 2, 88, [88])
             assert next(x for x in (await c.get("/api/home/numbers")).json() if x["module"] == "education")["value"] == 1
             # search reads title, setup, tags and part titles, within the tab
-            assert (await c.get("/api/education/left?chip=completed&query=sky")).json()["showing"] == "1 / 1"
+            assert (await c.get("/api/education/left?chip=completed&query=sky")).json()["groups"] != []
             assert (await c.get("/api/education/left?query=sky")).json()["groups"] == []
-            assert (await c.get("/api/education/left?query=gradient")).json()["showing"] == "1 / 1"
+            assert (await c.get("/api/education/left?query=gradient")).json()["groups"] != []
             assert (await c.get("/api/education/left?chip=completed&query=zzz")).json()["groups"] == []
             # tags, on a completed question too: trimmed, unique, searchable
             r = await c.post("/api/education/action/tags", json={"id": qid, "tags": [" hard ", "hard", "", "bootstrap"]})
             assert r.status_code == 200 and r.json()["tags"] == ["hard", "bootstrap"]
             assert (await c.get(f"/api/education/item/{qid}")).json()["tags"] == ["hard", "bootstrap"]
-            assert (await c.get("/api/education/left?chip=completed&query=bootstrap")).json()["showing"] == "1 / 1"
+            assert (await c.get("/api/education/left?chip=completed&query=bootstrap")).json()["groups"] != []
             assert (await c.post("/api/education/action/tags", json={"id": qid, "tags": "x"})).status_code == 400
             # delete: an active question leaves both slices and every count, and is kept whole so it can never be asked again
             store.execute("INSERT INTO education_feedback(ts, topic_id, question_id, text) VALUES (?, ?, ?, ?)", (now_iso(), tid, gid, "too easy"))

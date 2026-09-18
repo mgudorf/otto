@@ -41,13 +41,15 @@ def test_finance_end_to_end(config):
             assert [a["verb"] for a in item["actions"]] == ["update", "end", "forget"]
             assert (await c.post("/api/finance/action/end", json={"id": acct})).status_code == 200
             left = (await c.get("/api/finance/left?chip=Accounts")).json()
-            assert left["groups"][0]["rows"][0]["done"] is True and left["groups"][0]["rows"][0]["leading"] == {"dot": "transparent"}
+            assert left["groups"][0]["rows"][0]["done"] is True and "leading" not in left["groups"][0]["rows"][0]
             assert (await c.get("/api/finance/blank")).json()["totals"]["accounts"] == 0
             numbers = (await c.get("/api/home/numbers")).json()
             fin_n = next(n for n in numbers if n["module"] == "finance")
             assert fin_n["value"] == 3 and fin_n["label"] == "records"
             home = (await c.get("/api/home/left")).json()
             assert next(g for g in home["groups"] if g["module"] == "finance")["count"] == 4
+            for bad in ({}, {"id": "abc"}, {"id": None}):   # a malformed id is a 400 naming the field, like every other check
+                assert (await c.post("/api/finance/action/forget", json=bad)).status_code == 400
             assert (await c.post("/api/finance/action/forget", json={"id": acct})).status_code == 200
             assert (await c.get(f"/api/finance/item/{acct}")).status_code == 404
             assert app.state.store.scalar("SELECT COUNT(*) FROM finance_amounts WHERE entry_id = ?", (acct,)) == 0

@@ -59,9 +59,10 @@ def test_newsfeed_end_to_end(config):
             assert left["chip"] == "All" and left["chips"] == ["All", "Open", "Accepted"]
             assert [r["id"] for g in left["groups"] for r in g["rows"]] == [a, b]
             rows = {r["id"]: r for g in left["groups"] for r in g["rows"]}
-            assert rows[a]["leading"] == {"dot": "#c98ba8"} and "stampText" not in rows[a] and rows[b]["stampText"].endswith(rows[b]["stampText"][-6:])
-            assert (await c.get("/api/newsfeed/left?query=game")).json()["showing"] == "1 / 1"      # a tag is searchable
-            assert (await c.get("/api/newsfeed/left?query=acme")).json()["showing"] == "1 / 1"
+            assert rows[a]["unread"] is True and "stampText" not in rows[a]                      # open reads as unread; no dot
+            assert len(rows[b]["stampText"]) == 14 and rows[b]["stampText"][6] == "-"            # "Fri 09-10-2026"
+            assert (await c.get("/api/newsfeed/left?query=game")).json()["groups"] != []      # a tag is searchable
+            assert (await c.get("/api/newsfeed/left?query=acme")).json()["groups"] != []
             assert (await c.get("/api/newsfeed/left?chip=Accepted")).json()["groups"] == []
 
             item = (await c.get(f"/api/newsfeed/item/{a}")).json()

@@ -1,6 +1,6 @@
 // The frame: rail · header · loading line · three fixed tracks. Pages only fill the tracks.
 import { render, Component } from './vendor/preact.mjs';
-import { html, T, Icon, mono13, Button, dayLabel } from './rows.js';
+import { html, T, Icon, meta13, nums, Button, dayLabel, clock } from './rows.js';
 import { get, inflight } from './api.js';
 import { Session } from './session.js';
 import { Feedback } from './feedback.js';
@@ -111,7 +111,7 @@ class App extends Component {
   }
 
   render(_, s) {
-    if (!s.shell) return html`<div style=${{ height: '100vh', display: 'grid', placeItems: 'center', background: T.ground, color: T.dim, fontFamily: 'Inter, system-ui, sans-serif', ...mono13 }}>${s.error || 'connecting…'}</div>`;
+    if (!s.shell) return html`<div style=${{ height: '100vh', display: 'grid', placeItems: 'center', background: T.ground, color: T.dim, ...meta13 }}>${s.error || 'connecting…'}</div>`;
     const fmt = s.shell.settings['ui.time_format'] || '24h';
     const mod = this.module(s.page);
     const impl = PAGES[s.page];
@@ -119,8 +119,7 @@ class App extends Component {
     const railBtn = (m, active) => html`<div key=${m.name} title=${m.error ? `${m.title}: ${m.error}` : m.title} onClick=${() => !m.error && this.go(m.name)}
         style=${{ width: 32, height: 32, display: 'grid', placeItems: 'center', borderRadius: 6, cursor: m.error ? 'not-allowed' : 'pointer', color: m.error ? T.dim : m.hue, background: active ? T.raised : 'transparent', opacity: m.error ? 0.5 : 1 }}>
         <${Icon} svg=${m.icon || '<circle cx="10" cy="10" r="7"></circle>'} size=${20} sw=${1.5} /></div>`;
-    const meta = impl && impl.meta ? impl.meta(this) : '';
-    return html`<div style=${{ height: '100vh', display: 'flex', background: T.ground, color: T.text, fontFamily: 'Inter, system-ui, sans-serif', fontSize: 15, lineHeight: 1.4, overflow: 'hidden', '--hue': mod.hue }}>
+    return html`<div style=${{ height: '100vh', display: 'flex', background: T.ground, color: T.text, fontSize: 15, lineHeight: 1.4, overflow: 'hidden', '--hue': mod.hue }}>
       <div style=${{ width: 56, flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '14px 0', gap: 6 }}>
         ${rail.map((m) => railBtn(m, s.page === m.name))}
         <div style=${{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -128,11 +127,10 @@ class App extends Component {
         </div>
       </div>
       <div style=${{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <div style=${{ height: 48, flex: 'none', display: 'flex', alignItems: 'baseline', gap: 12, padding: '14px 32px 0' }}>
+        <div style=${{ height: 48, flex: 'none', display: 'flex', alignItems: 'center', gap: 12, padding: '14px 32px 0' }}>
           <span style=${{ fontSize: 20, fontWeight: 600, lineHeight: 1.2 }}>${mod.title}</span>
-          <span style=${{ ...mono13, color: T.dim }}>${meta}</span>
-          <span style=${{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: 12 }}>
-            ${s.error && html`<span style=${{ ...mono13, color: '#cf7b7b' }}>${s.error}</span>`}
+          <span style=${{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            ${s.error && html`<span style=${{ ...meta13, color: '#cf7b7b' }}>${s.error}</span>`}
             ${mod.page && !mod.error && html`<${ModuleSettings} mod=${mod} claude=${s.shell.claude} onSaved=${() => this.refresh()} />`}
             <${Feedback} page=${s.page} hue=${mod.hue} sel=${s.sel} item=${s.item} recent=${s.feedback} onSent=${() => this.refresh()} />
           </span>
@@ -150,24 +148,24 @@ class App extends Component {
           ${impl && impl.Right
             ? impl.Right({ app: this, data: s.data, mod, fmt })
             : mod.agent
-            ? html`<${Session} module=${s.page} hue=${mod.hue} fmt=${fmt} selected=${!!s.sel} prefill=${s.prefill} tick=${s.tick} onIdle=${() => this.refresh()} />`
-            : html`<div style=${{ minWidth: 0, minHeight: 0, background: T.panel, borderRadius: 6, padding: '16px 12px 12px', ...mono13, color: T.dim }}>no agent on this page</div>`}
+            ? html`<${Session} module=${s.page} hue=${mod.hue} fmt=${fmt} prefill=${s.prefill} tick=${s.tick} onIdle=${() => this.refresh()} />`
+            : html`<div style=${{ minWidth: 0, minHeight: 0, background: T.panel, borderRadius: 6 }} />`}
         </div>
       </div>
     </div>`;
   }
 }
 
-// Generic item inspector for modules that return {text, kind?, created_at, tags?, actions[]}.
+// Generic item inspector for modules that return {text, created_at, tags?, actions[]}.
 export function Inspector({ app, item, mod, fmt, children, onAction }) {
-  if (!item) return html`<div style=${{ ...mono13, color: T.dim }}>loading…</div>`;
-  if (item.error) return html`<div style=${{ ...mono13, color: '#cf7b7b' }}>${item.error}</div>`;
+  if (!item) return html`<div style=${{ ...meta13, color: T.dim }}>loading…</div>`;
+  if (item.error) return html`<div style=${{ ...meta13, color: '#cf7b7b' }}>${item.error}</div>`;
   const hue = (app.module(item.module) || mod).hue;
   const icon = (app.module(item.module) || mod).icon;
   return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20 }}>
     <div style=${{ display: 'flex', alignItems: 'center', gap: 12 }}>
       <span style=${{ display: 'grid', placeItems: 'center', width: 16, height: 16, color: hue }}><${Icon} svg=${icon} /></span>
-      <span style=${{ ...mono13, color: T.muted }}>${item.kind || item.verb || ''}${item.created_at ? ` · ${dayLabel(item.created_at)} ${new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: fmt === '12h' })}` : ''}</span>
+      <span style=${{ ...meta13, ...nums, color: T.dim }}>${item.created_at ? `${dayLabel(item.created_at)} ${clock(item.created_at, fmt)}` : ''}</span>
       <span class="bright-hover" onClick=${() => app.select(null)} style=${{ marginLeft: 'auto', cursor: 'pointer', color: T.dim, padding: '0 4px', lineHeight: 1 }}>×</span>
     </div>
     <${Markdown} text=${item.text} />

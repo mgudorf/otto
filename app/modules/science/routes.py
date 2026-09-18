@@ -12,7 +12,6 @@ from app.store import Store, iso, now_iso, parse
 
 router = APIRouter(prefix="/api/science")
 
-HUE = "#6fb3b8"
 KEY = "science"          # broadcast key for the events stream
 RESOURCE = "science"     # jobs that touch the root, not one kernel
 
@@ -26,7 +25,7 @@ def _live(file_id: str) -> bool:
 
 
 def _row(f: dict) -> dict:
-    return {"id": f["id"], "module": "science", "text": f["name"], "stamp": f["mtime"], "leading": {"dot": HUE if _live(f["id"]) else None}, "mono": True}
+    return {"id": f["id"], "module": "science", "text": f["name"], "stamp": f["mtime"], "live": _live(f["id"])}
 
 
 def _mark(nodes: list[dict]) -> int:
@@ -44,8 +43,8 @@ def _mark(nodes: list[dict]) -> int:
 @router.get("/left")
 def left(request: Request) -> dict:
     tree = notebook.tree(_root())
-    n = _mark(tree)
-    return {"tree": tree, "showing": f"{n} files"}
+    _mark(tree)
+    return {"tree": tree}
 
 
 @router.get("/blank")

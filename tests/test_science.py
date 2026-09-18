@@ -53,7 +53,7 @@ def test_science_tree_and_reads(sci):
         async with client_for(app) as c:
             left = (await c.get("/api/science/left")).json()
             assert [(n["id"], n["kind"]) for n in left["tree"]] == [("sub", "dir"), ("analysis.ipynb", "ipynb"), ("etl.py", "py")]
-            assert [n["id"] for n in left["tree"][0]["children"]] == ["sub/deep.py"] and left["showing"] == "3 files"
+            assert [n["id"] for n in left["tree"][0]["children"]] == ["sub/deep.py"] and left["tree"][1]["live"] is False
             assert all(n["live"] is False for n in flat(left["tree"]) if n["kind"] != "dir")
             item = (await c.get("/api/science/item/analysis.ipynb")).json()
             assert item["kind"] == "ipynb" and item["kernel"] is None and item["schedule"] is None

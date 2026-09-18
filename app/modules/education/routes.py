@@ -33,7 +33,7 @@ def _row(q: dict) -> dict:
 
 
 def _day_label(ts: str) -> str:
-    return parse(ts).astimezone().strftime("%d %b")
+    return parse(ts).astimezone().strftime("%d-%m-%Y")
 
 
 def _group_by_day(rows: list[dict]) -> list[dict]:
@@ -91,13 +91,13 @@ def left(request: Request, query: str = "", chip: str = "active", page: int = 0)
     out = {"chips": list(TABS), "chip": tab}
     if tab == "active":
         rows = store.query(f"{SELECT} WHERE {LISTED} AND {ACTIVE}{where} ORDER BY q.started_at IS NULL, q.created_at", params)
-        groups = [{"label": "due", "count": len(rows), "rows": [_row(q) for q in rows]}] if rows else []
-        return {**out, "groups": groups, "showing": f"{len(rows)} / {len(rows)}", "more": False}
+        groups = [{"label": "", "count": len(rows), "rows": [_row(q) for q in rows]}] if rows else []   # one group, no header
+        return {**out, "groups": groups, "more": False}
     size = int(store.setting("ui.page_size"))
     limit = size * (page + 1)
     total = store.scalar(f"SELECT COUNT(*) FROM education_questions q WHERE {LISTED} AND NOT ({ACTIVE}){where}", params)
     rows = store.query(f"{SELECT} WHERE {LISTED} AND NOT ({ACTIVE}){where} ORDER BY q.completed_at DESC LIMIT ?", (*params, limit))
-    return {**out, "groups": _group_by_day(rows), "showing": f"{min(limit, total)} / {total}", "more": total > limit}
+    return {**out, "groups": _group_by_day(rows), "more": total > limit}
 
 
 @router.get("/blank")

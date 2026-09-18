@@ -12,7 +12,7 @@ NODE_COLUMNS = "tag, count, items, sessions, last_seen"
 
 
 def _row(r: dict) -> dict:
-    return {"id": r["tag"], "module": "graph", "text": r["tag"], "stamp": r["last_seen"], "leading": {"dot": None}, "count": r["count"]}
+    return {"id": r["tag"], "module": "graph", "text": r["tag"], "stamp": r["last_seen"], "count": r["count"]}
 
 
 def _page(store: Store, query: str, page: int) -> tuple[list[dict], int, int]:
@@ -33,7 +33,6 @@ def left(request: Request, query: str = "", page: int = 0) -> dict:
     rows, total, limit = _page(request.app.state.store, query, page)
     return {
         "groups": [{"label": "tags", "count": total, "rows": [_row(r) for r in rows]}],
-        "showing": f"{min(limit, total)} / {total}",
         "more": total > limit,
     }
 

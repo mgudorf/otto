@@ -1,5 +1,5 @@
 // Graph: LEFT = tags by count · MIDDLE = ring of nodes with edges; selecting a tag lights its neighbours.
-import { html, T, mono13, GroupHeader, Search, Empty, stamp, fmtInt } from '../rows.js';
+import { html, T, meta13, nums, rowStyle, Search, Empty, More } from '../rows.js';
 import { get } from '../api.js';
 
 export async function load(app) {
@@ -7,12 +7,6 @@ export async function load(app) {
   const q = new URLSearchParams({ query, page: String(more) });
   const [left, graph] = await Promise.all([get(`/api/graph/left?${q}`), get(`/api/graph/graph?${q}`)]);
   return { left, graph };
-}
-
-export function meta(app) {
-  const d = app.state.data;
-  if (!d) return '';
-  return `${fmtInt(d.graph.totals.nodes)} nodes · ${fmtInt(d.graph.totals.edges)} edges`;
 }
 
 function neighbours(graph, tag) {
@@ -25,28 +19,22 @@ function neighbours(graph, tag) {
   return s;
 }
 
-export function Left({ app, data, mod, fmt }) {
+export function Left({ app, data, mod }) {
   const selTag = app.state.sel && app.state.sel.id;
   const near = neighbours(data.graph, selTag);
   const g = data.left.groups[0];
   const rerun = (patch) => app.setState(patch, () => app.refresh());
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 4 }}>
     <${Search} value=${app.state.query} hue=${mod.hue} onInput=${(v) => rerun({ query: v, more: 0, sel: null, item: null })} />
-    <${GroupHeader} label="tags" count=${g.count} />
     ${g.rows.length === 0 && html`<${Empty} text=${app.state.query ? 'no matches' : 'nothing tagged yet'} />`}
     ${g.rows.map((r) => {
       const on = r.id === selTag, nb = near.has(r.id);
-      return html`<div class="row" key=${r.id} onClick=${() => app.select({ module: 'graph', id: r.id, local: r })}
-        style=${{ display: 'flex', alignItems: 'center', gap: 12, height: 32, padding: '0 12px', borderRadius: 6, cursor: 'pointer', background: on ? T.raised : 'transparent' }}>
-        <span style=${{ width: 6, height: 6, borderRadius: 3, flex: 'none', background: on || nb ? mod.hue : 'rgba(230,231,234,.2)' }} />
-        <span style=${{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${r.text}</span>
-        <span style=${{ flex: 'none', ...mono13, color: T.dim }}>${r.count}</span>
-        <span style=${{ flex: 'none', marginLeft: 'auto', ...mono13, color: T.dim }}>${stamp(r.stamp, fmt)}</span>
+      return html`<div class="row" key=${r.id} onClick=${() => app.select({ module: 'graph', id: r.id, local: r })} style=${rowStyle({ selected: on, hue: mod.hue, height: 32 })}>
+        <span style=${{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: nb ? mod.hue : 'inherit' }}>${r.text}</span>
+        <span style=${{ flex: 'none', marginLeft: 'auto', ...meta13, ...nums, color: T.dim }}>${r.count}</span>
       </div>`;
     })}
-    <div style=${{ display: 'flex', alignItems: 'center', gap: 16, height: 32, padding: '0 12px', ...mono13, color: T.dim }}>${data.left.showing}
-      ${data.left.more && html`<span class="ring" onClick=${() => rerun({ more: app.state.more + 1 })} style=${{ cursor: 'pointer', color: T.muted, padding: '3px 8px', borderRadius: 6 }}>more</span>`}
-    </div>
+    ${data.left.more && html`<${More} onClick=${() => rerun({ more: app.state.more + 1 })} />`}
   </div>`;
 }
 
@@ -73,7 +61,7 @@ export function Middle({ app, data, mod }) {
   if (nodes.length === 0) return html`<${Empty} text=${app.state.query ? 'no matches' : 'nothing tagged yet'} />`;
   const pos = Object.fromEntries(nodes.map((n) => [n.tag, n]));
   return html`<div style=${{ height: '100%', minHeight: 420, display: 'flex', flexDirection: 'column', gap: 12 }}>
-    <div style=${{ display: 'flex', alignItems: 'center', gap: 12, height: 24, ...mono13, color: T.dim }}>
+    <div style=${{ display: 'flex', alignItems: 'center', gap: 12, height: 24, ...meta13, ...nums, color: T.dim }}>
       <span>${selTag ? `${selTag} · ${near.size} linked` : ''}</span>
       <span class="bright-hover" onClick=${() => app.select(null)} style=${{ marginLeft: 'auto', cursor: 'pointer', padding: '0 4px', lineHeight: 1, color: selTag ? T.dim : 'transparent' }}>×</span>
     </div>
@@ -95,7 +83,7 @@ export function Middle({ app, data, mod }) {
             left: right ? 'auto' : `calc(${(n.x / 8).toFixed(2)}% - ${n.r}px)`, right: right ? `calc(${(100 - n.x / 8).toFixed(2)}% - ${n.r}px)` : 'auto' }}>
           <span style=${{ flex: 'none', borderRadius: '50%', boxSizing: 'border-box', width: n.r * 2, height: n.r * 2,
             border: `1.5px solid ${on || nb ? hue : 'rgba(230,231,234,.3)'}`, background: on ? hue : T.panel }} />
-          <span style=${{ ...mono13, whiteSpace: 'nowrap', color: dim ? 'rgba(230,231,234,.25)' : on ? T.text : T.muted }}>${n.tag}</span>
+          <span style=${{ ...meta13, whiteSpace: 'nowrap', color: dim ? 'rgba(230,231,234,.25)' : on ? T.text : T.muted }}>${n.tag}</span>
         </div>`;
       })}
     </div>

@@ -10,12 +10,12 @@
 <helmet data-dc-atomics><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"><style>html,body{margin:0;height:100%;background:#101114}a{color:#e6e7ea}a:hover{color:#fff}*{box-sizing:border-box;scrollbar-width:none}*::-webkit-scrollbar{display:none}textarea,input{outline:none}</style></helmet>
 <!--
   FRAME CONTRACT — every module page uses the same three fixed regions:
-    LEFT   = line items + stamps, on a panel surface (one line per row, stamp right after the item text)
+    LEFT   = boxed line items on a panel surface (one line per row, no stamp under a day label; unread bright, read muted)
     MIDDLE = inspector on the flat ground; when nothing is selected it shows the module's notion of
              "blank" (Home: numbers · Database: empty query box · Science: nothing until a file is picked)
     RIGHT  = Claude session on a panel surface (same shell everywhere; agent/skills/rules differ per module;
              user turns are bubbles, model turns are plain text)
-  Tracks are fixed by the grid (4fr · 9fr · 4fr), never by content — selection must not move or resize anything.
+  Tracks are fixed by the grid (2fr · 5fr · 2fr, 5% gaps), never by content — selection must not move or resize anything.
   Surfaces: ground #101114 · panel #1a1c21 · raised-on-panel #23262c (selection, inputs, bubbles).
 -->
 <div style="height:100vh;display:flex;background:#101114;color:#e6e7ea;font-family:Inter,system-ui,sans-serif;font-size:15px;line-height:1.4;overflow:hidden">
@@ -36,38 +36,37 @@
   <div style="flex:1;min-width:0;display:flex;flex-direction:column">
     <div style="height:48px;flex:none;display:flex;align-items:baseline;gap:12px;padding:14px 32px 0">
       <span style="font-size:20px;font-weight:600;line-height:1.2">{{ moduleName }}</span>
-      <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c">{{ moduleMeta }}</span>
     </div>
     <div style="height:1px;margin:0 32px;position:relative;overflow:hidden;flex:none">{{ loadingBar }}</div>
 
     <!-- three fixed tracks: LEFT list · MIDDLE inspector · RIGHT claude session -->
-    <div style="flex:1;min-height:0;display:grid;grid-template-columns:minmax(220px,4fr) minmax(300px,9fr) minmax(220px,4fr);gap:0 24px;padding:19px 24px 24px;opacity:{{ op }};transition:opacity 120ms ease">
+    <div style="flex:1;min-height:0;display:grid;grid-template-columns:2fr 5fr 2fr;gap:0 5%;padding:19px 24px 24px;opacity:{{ op }};transition:opacity 120ms ease">
 
       <!-- LEFT (panel) -->
       <div style="min-width:0;min-height:0;overflow:auto;background:#1a1c21;border-radius:6px;padding:12px 8px 24px">
         <input value="{{ query }}" onChange="{{ setQuery }}" placeholder="Search" style="width:100%;height:36px;margin-bottom:16px;padding:0 12px;border:0;border-radius:6px;background:#23262c;color:#e6e7ea;font:inherit;font-size:15px" style-focus="box-shadow:0 0 0 1px {{ agentHue }}">
         <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
         <div style="display:flex;flex-direction:column;gap:20px">
-          <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c;padding:0 12px">05 Sep</span>
-          <div style="display:flex;flex-direction:column;gap:2px">
-            <div style="display:flex;align-items:center;gap:8px;height:28px;padding:0 12px;color:#cf7b7b;font-weight:500"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="14" height="10" rx="2"></rect><path d="M3 7l7 5 7-5"></path></svg><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c;font-weight:400">61</span></div>
+          <span style="font-size:13px;font-variant-numeric:tabular-nums;color:#5f636c;padding:0 12px">05-09-2026</span>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <div style="display:flex;align-items:center;gap:8px;height:28px;padding:0 12px;color:#cf7b7b;font-weight:500"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="14" height="10" rx="2"></rect><path d="M3 7l7 5 7-5"></path></svg></div>
             <sc-for list="{{ homeEmail }}" as="r" hint-placeholder-count="5">
-              <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }}" style-hover="background:#202329"><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.34);width:{{ r.w1 }}px"></span><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.2);width:{{ r.w3 }}px"></span><span style="flex:none;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c">{{ r.time }}</span></div>
+              <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }};box-shadow:{{ r.ring }}" style-hover="background:#252830"><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.34);width:{{ r.w1 }}px"></span><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.2);width:{{ r.w3 }}px"></span></div>
             </sc-for>
-            <div onClick="{{ goEmail }}" style="display:flex;align-items:center;height:32px;padding:0 12px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c;cursor:pointer;border-radius:6px" style-hover="color:#8b8f98">+56</div>
+            <div onClick="{{ goEmail }}" style="display:flex;align-items:center;height:32px;padding:0 12px;font-size:13px;font-variant-numeric:tabular-nums;color:#5f636c;cursor:pointer;border-radius:6px" style-hover="color:#8b8f98">+56</div>
           </div>
-          <div style="display:flex;flex-direction:column;gap:2px">
-            <div style="display:flex;align-items:center;gap:8px;height:28px;padding:0 12px;color:#7a9fd6;font-weight:500"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 8l8-4 8 4-8 4-8-4Z"></path><path d="M6 10v4c0 1.2 2 2 4 2s4-.8 4-2v-4"></path><path d="M18 8v5"></path></svg><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c;font-weight:400">3</span></div>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <div style="display:flex;align-items:center;gap:8px;height:28px;padding:0 12px;color:#7a9fd6;font-weight:500"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 8l8-4 8 4-8 4-8-4Z"></path><path d="M6 10v4c0 1.2 2 2 4 2s4-.8 4-2v-4"></path><path d="M18 8v5"></path></svg></div>
             <sc-for list="{{ homeEdu }}" as="r" hint-placeholder-count="3">
-              <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }}" style-hover="background:#202329"><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.22);width:{{ r.w3 }}px"></span><span style="flex:none;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c">{{ r.time }}</span></div>
+              <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }};box-shadow:{{ r.ring }}" style-hover="background:#252830"><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.22);width:{{ r.w3 }}px"></span></div>
             </sc-for>
           </div>
-          <div style="display:flex;flex-direction:column;gap:2px">
-            <div style="display:flex;align-items:center;gap:8px;height:28px;padding:0 12px;color:#d1a36a;font-weight:500"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 4C8.6 2.6 5.4 3.2 5.6 5.8C2.8 6.4 2.6 10.2 4.6 11.2C3.4 13.6 6.2 15.8 8.2 14.6C8.8 15.6 9.4 16.2 10 16.2C10.6 16.2 11.2 15.6 11.8 14.6C13.8 15.8 16.6 13.6 15.4 11.2C17.4 10.2 17.2 6.4 14.4 5.8C14.6 3.2 11.4 2.6 10 4Z"></path><path d="M10 4v12.2"></path><path d="M6.4 8.4c1.2-.2 2 .6 2.2 1.8M13.6 8.4c-1.2-.2-2 .6-2.2 1.8"></path></svg><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c;font-weight:400">318</span></div>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <div style="display:flex;align-items:center;gap:8px;height:28px;padding:0 12px;color:#d1a36a;font-weight:500"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 4C8.6 2.6 5.4 3.2 5.6 5.8C2.8 6.4 2.6 10.2 4.6 11.2C3.4 13.6 6.2 15.8 8.2 14.6C8.8 15.6 9.4 16.2 10 16.2C10.6 16.2 11.2 15.6 11.8 14.6C13.8 15.8 16.6 13.6 15.4 11.2C17.4 10.2 17.2 6.4 14.4 5.8C14.6 3.2 11.4 2.6 10 4Z"></path><path d="M10 4v12.2"></path><path d="M6.4 8.4c1.2-.2 2 .6 2.2 1.8M13.6 8.4c-1.2-.2-2 .6-2.2 1.8"></path></svg></div>
             <sc-for list="{{ homeMem }}" as="r" hint-placeholder-count="5">
-              <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }}" style-hover="background:#202329"><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.22);width:{{ r.w3 }}px"></span><span style="flex:none;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c">{{ r.time }}</span></div>
+              <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }};box-shadow:{{ r.ring }}" style-hover="background:#252830"><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.22);width:{{ r.w3 }}px"></span></div>
             </sc-for>
-            <div onClick="{{ goMem }}" style="display:flex;align-items:center;height:32px;padding:0 12px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c;cursor:pointer;border-radius:6px" style-hover="color:#8b8f98">+313</div>
+            <div onClick="{{ goMem }}" style="display:flex;align-items:center;height:32px;padding:0 12px;font-size:13px;font-variant-numeric:tabular-nums;color:#5f636c;cursor:pointer;border-radius:6px" style-hover="color:#8b8f98">+313</div>
           </div>
         </div>
         </sc-if>
@@ -78,24 +77,24 @@
             <sc-for list="{{ emailChips }}" as="c" hint-placeholder-count="3"><span onClick="{{ c.pick }}" style="padding:3px 9px;border-radius:6px;font-size:13px;cursor:pointer;background:{{ c.bg }};color:{{ c.color }}" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">{{ c.label }}</span></sc-for>
           </div>
           <sc-for list="{{ emailGroups }}" as="g" hint-placeholder-count="3">
-            <div style="display:flex;flex-direction:column;gap:2px">
-              <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">{{ g.label }}<span style="color:#5f636c">{{ g.count }}</span></div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">{{ g.label }}</div>
               <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="6">
-                <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }}" style-hover="background:#202329"><span style="width:6px;height:6px;border-radius:3px;flex:none;background:{{ r.dot }}"></span><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.34);width:{{ r.w1 }}px"></span><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.2);width:{{ r.w3 }}px"></span><span style="flex:none;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c">{{ r.time }}</span></div>
+                <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }};box-shadow:{{ r.ring }}" style-hover="background:#252830"><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.34);width:{{ r.w1 }}px"></span><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.2);width:{{ r.w3 }}px"></span></div>
               </sc-for>
             </div>
           </sc-for>
-          <div style="display:flex;align-items:center;gap:16px;height:32px;padding:0 12px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c">{{ emailShowing }}<span onClick="{{ loadMore }}" style="cursor:pointer;color:#8b8f98;padding:3px 8px;border-radius:6px" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">more</span></div>
+          <div style="display:flex;align-items:center;gap:16px;height:32px;padding:0 12px;font-size:13px;font-variant-numeric:tabular-nums;color:#5f636c"><span onClick="{{ loadMore }}" style="cursor:pointer;color:#8b8f98;padding:3px 8px;border-radius:6px" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">more</span></div>
         </div>
         </sc-if>
 
         <sc-if value="{{ isEdu }}" hint-placeholder-val="{{ false }}">
         <div style="display:flex;flex-direction:column;gap:20px">
           <sc-for list="{{ eduGroups }}" as="g" hint-placeholder-count="3">
-            <div style="display:flex;flex-direction:column;gap:2px">
-              <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">{{ g.label }}<span style="color:#5f636c">{{ g.count }}</span></div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">{{ g.label }}</div>
               <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="4">
-                <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }}" style-hover="background:#202329"><span style="width:40px;height:2px;flex:none;background:rgba(230,231,234,.1);position:relative;overflow:hidden;border-radius:1px"><span style="position:absolute;left:0;top:0;bottom:0;background:#7a9fd6;width:{{ r.pct }}%"></span></span><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.28);width:{{ r.w3 }}px"></span><span style="flex:none;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c">{{ r.time }}</span></div>
+                <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }};box-shadow:{{ r.ring }}" style-hover="background:#252830"><span style="width:40px;height:2px;flex:none;background:rgba(230,231,234,.1);position:relative;overflow:hidden;border-radius:1px"><span style="position:absolute;left:0;top:0;bottom:0;background:#7a9fd6;width:{{ r.pct }}%"></span></span><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.28);width:{{ r.w3 }}px"></span></div>
               </sc-for>
             </div>
           </sc-for>
@@ -108,24 +107,24 @@
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><sc-for list="{{ memChips }}" as="c" hint-placeholder-count="4"><span onClick="{{ c.pick }}" style="padding:3px 9px;border-radius:6px;font-size:13px;cursor:pointer;background:{{ c.bg }};color:{{ c.color }}" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">{{ c.label }}</span></sc-for></div>
           </div>
           <sc-for list="{{ memGroups }}" as="g" hint-placeholder-count="3">
-            <div style="display:flex;flex-direction:column;gap:2px">
-              <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">{{ g.label }}<span style="color:#5f636c">{{ g.count }}</span></div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">{{ g.label }}</div>
               <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="6">
-                <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }}" style-hover="background:#202329"><span style="flex:none;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#d1a36a;width:40px">{{ r.kind }}</span><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.22);width:{{ r.w3 }}px"></span><span style="flex:none;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c">{{ r.time }}</span></div>
+                <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }};box-shadow:{{ r.ring }}" style-hover="background:#252830"><span style="width:10px;height:10px;border-radius:2px;flex:none;box-shadow:inset 0 0 0 1.5px #d1a36a;display:{{ r.task }}"></span><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.22);width:{{ r.w3 }}px"></span></div>
               </sc-for>
             </div>
           </sc-for>
-          <div style="display:flex;align-items:center;gap:16px;height:32px;padding:0 12px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c">{{ memShowing }}<span onClick="{{ loadMore }}" style="cursor:pointer;color:#8b8f98;padding:3px 8px;border-radius:6px" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">more</span></div>
+          <div style="display:flex;align-items:center;gap:16px;height:32px;padding:0 12px;font-size:13px;font-variant-numeric:tabular-nums;color:#5f636c"><span onClick="{{ loadMore }}" style="cursor:pointer;color:#8b8f98;padding:3px 8px;border-radius:6px" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">more</span></div>
         </div>
         </sc-if>
 
         <sc-if value="{{ isSci }}" hint-placeholder-val="{{ false }}">
         <div style="display:flex;flex-direction:column;gap:20px">
           <sc-for list="{{ sciGroups }}" as="g" hint-placeholder-count="3">
-            <div style="display:flex;flex-direction:column;gap:2px">
-              <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">{{ g.label }}<span style="color:#5f636c">{{ g.count }}</span></div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">{{ g.label }}</div>
               <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="4">
-                <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;background:{{ r.bg }}" style-hover="background:#202329"><span style="width:6px;height:6px;border-radius:3px;flex:none;background:{{ r.dot }}"></span><span style="color:#e6e7ea">{{ r.name }}</span><span style="color:#5f636c">{{ r.time }}</span></div>
+                <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }};box-shadow:{{ r.ring }}" style-hover="background:#252830"><span style="color:{{ r.nameColor }}">{{ r.name }}</span></div>
               </sc-for>
             </div>
           </sc-for>
@@ -138,10 +137,10 @@
             <sc-for list="{{ bizChips }}" as="c" hint-placeholder-count="4"><span onClick="{{ c.pick }}" style="padding:3px 9px;border-radius:6px;font-size:13px;cursor:pointer;background:{{ c.bg }};color:{{ c.color }}" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">{{ c.label }}</span></sc-for>
           </div>
           <sc-for list="{{ bizGroups }}" as="g" hint-placeholder-count="3">
-            <div style="display:flex;flex-direction:column;gap:2px">
-              <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">{{ g.label }}<span style="color:#5f636c">{{ g.count }}</span></div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">{{ g.label }}</div>
               <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="5">
-                <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }}" style-hover="background:#202329"><span style="flex:none;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#7fb894;width:40px">{{ r.ext }}</span><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.28);width:{{ r.w3 }}px"></span><span style="flex:none;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c">{{ r.time }}</span></div>
+                <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }};box-shadow:{{ r.ring }}" style-hover="background:#252830"><span style="flex:none;font-size:13px;font-variant-numeric:tabular-nums;color:#7fb894;width:40px">{{ r.ext }}</span><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.28);width:{{ r.w3 }}px"></span></div>
               </sc-for>
             </div>
           </sc-for>
@@ -149,23 +148,22 @@
         </sc-if>
 
         <sc-if value="{{ isGraph }}" hint-placeholder-val="{{ false }}">
-        <div style="display:flex;flex-direction:column;gap:2px">
-          <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">tags<span style="color:#5f636c">{{ graphTagCount }}</span></div>
+        <div style="display:flex;flex-direction:column;gap:4px">
           <sc-for list="{{ graphNodes }}" as="n" hint-placeholder-count="12">
-            <div onClick="{{ n.select }}" style="display:flex;align-items:center;gap:12px;height:32px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ n.bg }}" style-hover="background:#202329"><span style="width:6px;height:6px;border-radius:3px;flex:none;background:{{ n.dotColor }}"></span><span style="font-size:15px;color:#e6e7ea;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ n.label }}</span><span style="flex:none;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c">{{ n.count }}</span><span style="flex:none;margin-left:auto;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c">{{ n.time }}</span></div>
+            <div onClick="{{ n.select }}" style="display:flex;align-items:center;gap:12px;height:32px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ n.bg }};box-shadow:{{ n.ring }}" style-hover="background:#252830"><span style="font-size:15px;color:{{ n.listColor }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ n.label }}</span><span style="flex:none;margin-left:auto;font-size:13px;font-variant-numeric:tabular-nums;color:#5f636c">{{ n.count }}</span></div>
           </sc-for>
         </div>
         </sc-if>
 
         <sc-if value="{{ isDb }}" hint-placeholder-val="{{ false }}">
-        <div style="display:flex;flex-direction:column;gap:2px">
-          <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">tables<span style="color:#5f636c">9</span></div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">tables</div>
           <sc-for list="{{ tables }}" as="t" hint-placeholder-count="9">
-            <div onClick="{{ t.pick }}" style="display:flex;align-items:center;gap:12px;height:32px;padding:0 12px;border-radius:6px;cursor:pointer;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;background:{{ t.bg }};color:{{ t.color }}" style-hover="background:#202329">{{ t.name }}<span style="color:#5f636c">{{ t.rows }}</span></div>
+            <div onClick="{{ t.pick }}" style="display:flex;align-items:center;gap:12px;height:32px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ t.bg }};box-shadow:inset 0 0 0 1px rgba(230,231,234,.08);color:{{ t.color }}" style-hover="background:#252830">{{ t.name }}<span style="color:#5f636c">{{ t.rows }}</span></div>
           </sc-for>
-          <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;margin-top:18px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">saved<span style="color:#5f636c">4</span></div>
+          <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;margin-top:18px;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">saved</div>
           <sc-for list="{{ savedQueries }}" as="q" hint-placeholder-count="4">
-            <div onClick="{{ q.pick }}" style="display:flex;align-items:center;gap:12px;height:32px;padding:0 12px;border-radius:6px;cursor:pointer;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98" style-hover="background:#202329">{{ q.name }}<span style="color:#5f636c">{{ q.time }}</span></div>
+            <div onClick="{{ q.pick }}" style="display:flex;align-items:center;gap:12px;height:32px;padding:0 12px;border-radius:6px;cursor:pointer;background:#1e2126;box-shadow:inset 0 0 0 1px rgba(230,231,234,.08);color:#8b8f98" style-hover="background:#252830">{{ q.name }}</div>
           </sc-for>
         </div>
         </sc-if>
@@ -176,21 +174,21 @@
             <sc-for list="{{ actChips }}" as="c" hint-placeholder-count="5"><span onClick="{{ c.pick }}" style="padding:3px 9px;border-radius:6px;font-size:13px;cursor:pointer;background:{{ c.bg }};color:{{ c.color }}" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">{{ c.label }}</span></sc-for>
           </div>
           <sc-for list="{{ actGroups }}" as="g" hint-placeholder-count="3">
-            <div style="display:flex;flex-direction:column;gap:2px">
-              <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">{{ g.label }}<span style="color:#5f636c">{{ g.count }}</span></div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;align-items:baseline;gap:10px;height:28px;padding:0 12px;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">{{ g.label }}</div>
               <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="8">
-                <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:32px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }}" style-hover="background:#202329"><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c;width:44px;flex:none">{{ r.time }}</span><span style="width:6px;height:6px;border-radius:3px;flex:none;background:{{ r.hue }}"></span><span style="font-size:13px;color:#8b8f98;width:64px;flex:none">{{ r.verb }}</span><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.2);width:{{ r.w4 }}px"></span></div>
+                <div onClick="{{ r.select }}" style="display:flex;align-items:center;gap:12px;height:32px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ r.bg }};box-shadow:{{ r.ring }}" style-hover="background:#252830"><span style="font-size:13px;font-variant-numeric:tabular-nums;color:#5f636c;width:44px;flex:none">{{ r.time }}</span><span style="font-size:13px;color:{{ r.hue }};width:64px;flex:none">{{ r.verb }}</span><span style="display:inline-block;flex:0 1 auto;min-width:8px;height:9px;border-radius:2px;background:rgba(230,231,234,.2);width:{{ r.w4 }}px"></span></div>
               </sc-for>
             </div>
           </sc-for>
-          <div style="display:flex;align-items:center;gap:16px;height:32px;padding:0 12px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c">{{ actShowing }}<span onClick="{{ loadMore }}" style="cursor:pointer;color:#8b8f98;padding:3px 8px;border-radius:6px" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">more</span></div>
+          <div style="display:flex;align-items:center;gap:16px;height:32px;padding:0 12px;font-size:13px;font-variant-numeric:tabular-nums;color:#5f636c"><span onClick="{{ loadMore }}" style="cursor:pointer;color:#8b8f98;padding:3px 8px;border-radius:6px" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">more</span></div>
         </div>
         </sc-if>
 
         <sc-if value="{{ isSet }}" hint-placeholder-val="{{ false }}">
-        <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="display:flex;flex-direction:column;gap:4px">
           <sc-for list="{{ setSections }}" as="s" hint-placeholder-count="4">
-            <div onClick="{{ s.pick }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ s.bg }};color:{{ s.color }}" style-hover="background:#202329">{{ s.label }}<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c">{{ s.meta }}</span></div>
+            <div onClick="{{ s.pick }}" style="display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:6px;cursor:pointer;background:{{ s.bg }};box-shadow:inset 0 0 0 1px rgba(230,231,234,.08);color:{{ s.color }}" style-hover="background:#252830">{{ s.label }}</div>
           </sc-for>
         </div>
         </sc-if>
@@ -200,13 +198,13 @@
       <div style="min-width:0;min-height:0;overflow:auto;padding:8px 16px 40px">
         <sc-if value="{{ showHomeNumbers }}" hint-placeholder-val="{{ true }}">
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:40px 32px;max-width:640px">
-          <div onClick="{{ goEmail }}" style="display:flex;flex-direction:column;gap:4px;cursor:pointer"><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:28px;line-height:1.1;font-weight:500">1,284</span><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b8f98"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="#cf7b7b" stroke-width="1.6"><rect x="3" y="5" width="14" height="10" rx="2"></rect><path d="M3 7l7 5 7-5"></path></svg>unread</span></div>
-          <div onClick="{{ goEdu }}" style="display:flex;flex-direction:column;gap:4px;cursor:pointer"><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:28px;line-height:1.1;font-weight:500">3</span><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b8f98"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="#7a9fd6" stroke-width="1.6"><path d="M2 8l8-4 8 4-8 4-8-4Z"></path><path d="M6 10v4c0 1.2 2 2 4 2s4-.8 4-2v-4"></path><path d="M18 8v5"></path></svg>due</span></div>
-          <div onClick="{{ goMem }}" style="display:flex;flex-direction:column;gap:4px;cursor:pointer"><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:28px;line-height:1.1;font-weight:500">48,212</span><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b8f98"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="#d1a36a" stroke-width="1.6"><path d="M10 4C8.6 2.6 5.4 3.2 5.6 5.8C2.8 6.4 2.6 10.2 4.6 11.2C3.4 13.6 6.2 15.8 8.2 14.6C8.8 15.6 9.4 16.2 10 16.2C10.6 16.2 11.2 15.6 11.8 14.6C13.8 15.8 16.6 13.6 15.4 11.2C17.4 10.2 17.2 6.4 14.4 5.8C14.6 3.2 11.4 2.6 10 4Z"></path><path d="M10 4v12.2"></path><path d="M6.4 8.4c1.2-.2 2 .6 2.2 1.8M13.6 8.4c-1.2-.2-2 .6-2.2 1.8"></path></svg>items</span></div>
-          <div onClick="{{ goSci }}" style="display:flex;flex-direction:column;gap:4px;cursor:pointer"><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:28px;line-height:1.1;font-weight:500">2</span><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b8f98"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="#6fb3b8" stroke-width="1.6"><path d="M8 3v6l-4.5 7.5A1 1 0 0 0 4.4 18h11.2a1 1 0 0 0 .9-1.5L12 9V3"></path><path d="M6.5 3h7"></path></svg>kernels</span></div>
-          <div onClick="{{ goBiz }}" style="display:flex;flex-direction:column;gap:4px;cursor:pointer"><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:28px;line-height:1.1;font-weight:500">128</span><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b8f98"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="#7fb894" stroke-width="1.6"><rect x="2" y="5" width="16" height="10" rx="1.5"></rect><circle cx="10" cy="10" r="2.5"></circle><path d="M5 8.5v3M15 8.5v3"></path></svg>records</span></div>
-          <div onClick="{{ goGraph }}" style="display:flex;flex-direction:column;gap:4px;cursor:pointer"><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:28px;line-height:1.1;font-weight:500">1,902</span><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b8f98"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="#b3b06a" stroke-width="1.6"><circle cx="5" cy="6" r="2"></circle><circle cx="15" cy="5" r="2"></circle><circle cx="10" cy="15" r="2"></circle><circle cx="16" cy="13" r="1.5"></circle><path d="M7 6.5l6-1M6 7.5l3 6M11.5 14l3-1"></path></svg>nodes</span></div>
-          <div onClick="{{ goDb }}" style="display:flex;flex-direction:column;gap:4px;cursor:pointer"><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:28px;line-height:1.1;font-weight:500">2.4 GB</span><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b8f98"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="#a68bd0" stroke-width="1.6"><rect x="3" y="4" width="14" height="12" rx="2"></rect><path d="M3 10h14"></path></svg>database</span></div>
+          <div onClick="{{ goEmail }}" style="display:flex;flex-direction:column;gap:4px;cursor:pointer"><span style="font-size:28px;font-variant-numeric:tabular-nums;line-height:1.1;font-weight:500">1,284</span><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b8f98"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="#cf7b7b" stroke-width="1.6"><rect x="3" y="5" width="14" height="10" rx="2"></rect><path d="M3 7l7 5 7-5"></path></svg>unread</span></div>
+          <div onClick="{{ goEdu }}" style="display:flex;flex-direction:column;gap:4px;cursor:pointer"><span style="font-size:28px;font-variant-numeric:tabular-nums;line-height:1.1;font-weight:500">3</span><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b8f98"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="#7a9fd6" stroke-width="1.6"><path d="M2 8l8-4 8 4-8 4-8-4Z"></path><path d="M6 10v4c0 1.2 2 2 4 2s4-.8 4-2v-4"></path><path d="M18 8v5"></path></svg>due</span></div>
+          <div onClick="{{ goMem }}" style="display:flex;flex-direction:column;gap:4px;cursor:pointer"><span style="font-size:28px;font-variant-numeric:tabular-nums;line-height:1.1;font-weight:500">48,212</span><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b8f98"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="#d1a36a" stroke-width="1.6"><path d="M10 4C8.6 2.6 5.4 3.2 5.6 5.8C2.8 6.4 2.6 10.2 4.6 11.2C3.4 13.6 6.2 15.8 8.2 14.6C8.8 15.6 9.4 16.2 10 16.2C10.6 16.2 11.2 15.6 11.8 14.6C13.8 15.8 16.6 13.6 15.4 11.2C17.4 10.2 17.2 6.4 14.4 5.8C14.6 3.2 11.4 2.6 10 4Z"></path><path d="M10 4v12.2"></path><path d="M6.4 8.4c1.2-.2 2 .6 2.2 1.8M13.6 8.4c-1.2-.2-2 .6-2.2 1.8"></path></svg>items</span></div>
+          <div onClick="{{ goSci }}" style="display:flex;flex-direction:column;gap:4px;cursor:pointer"><span style="font-size:28px;font-variant-numeric:tabular-nums;line-height:1.1;font-weight:500">2</span><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b8f98"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="#6fb3b8" stroke-width="1.6"><path d="M8 3v6l-4.5 7.5A1 1 0 0 0 4.4 18h11.2a1 1 0 0 0 .9-1.5L12 9V3"></path><path d="M6.5 3h7"></path></svg>kernels</span></div>
+          <div onClick="{{ goBiz }}" style="display:flex;flex-direction:column;gap:4px;cursor:pointer"><span style="font-size:28px;font-variant-numeric:tabular-nums;line-height:1.1;font-weight:500">128</span><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b8f98"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="#7fb894" stroke-width="1.6"><rect x="2" y="5" width="16" height="10" rx="1.5"></rect><circle cx="10" cy="10" r="2.5"></circle><path d="M5 8.5v3M15 8.5v3"></path></svg>records</span></div>
+          <div onClick="{{ goGraph }}" style="display:flex;flex-direction:column;gap:4px;cursor:pointer"><span style="font-size:28px;font-variant-numeric:tabular-nums;line-height:1.1;font-weight:500">1,902</span><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b8f98"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="#b3b06a" stroke-width="1.6"><circle cx="5" cy="6" r="2"></circle><circle cx="15" cy="5" r="2"></circle><circle cx="10" cy="15" r="2"></circle><circle cx="16" cy="13" r="1.5"></circle><path d="M7 6.5l6-1M6 7.5l3 6M11.5 14l3-1"></path></svg>nodes</span></div>
+          <div onClick="{{ goDb }}" style="display:flex;flex-direction:column;gap:4px;cursor:pointer"><span style="font-size:28px;font-variant-numeric:tabular-nums;line-height:1.1;font-weight:500">2.4 GB</span><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#8b8f98"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="#a68bd0" stroke-width="1.6"><rect x="3" y="4" width="14" height="12" rx="2"></rect><path d="M3 10h14"></path></svg>database</span></div>
         </div>
         </sc-if>
 
@@ -224,7 +222,7 @@
 
         <sc-if value="{{ showNotebook }}" hint-placeholder-val="{{ false }}">
         <div style="display:flex;flex-direction:column;gap:24px;max-width:960px">
-          <div style="display:flex;align-items:center;gap:12px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px"><span style="display:grid;place-items:center;width:16px;height:16px;color:#6fb3b8"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3v6l-4.5 7.5A1 1 0 0 0 4.4 18h11.2a1 1 0 0 0 .9-1.5L12 9V3"></path><path d="M6.5 3h7"></path></svg></span><span style="color:#e6e7ea">{{ nbName }}</span><span style="color:#5f636c">{{ nbKernel }}</span><span onClick="{{ clearSel }}" style="margin-left:auto;cursor:pointer;color:#5f636c;padding:0 4px;line-height:1" style-hover="color:#e6e7ea">×</span></div>
+          <div style="display:flex;align-items:center;gap:12px;font-size:13px;font-variant-numeric:tabular-nums"><span style="display:grid;place-items:center;width:16px;height:16px;color:#6fb3b8"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3v6l-4.5 7.5A1 1 0 0 0 4.4 18h11.2a1 1 0 0 0 .9-1.5L12 9V3"></path><path d="M6.5 3h7"></path></svg></span><span style="color:#e6e7ea">{{ nbName }}</span><span style="color:#5f636c">{{ nbKernel }}</span><span onClick="{{ clearSel }}" style="margin-left:auto;cursor:pointer;color:#5f636c;padding:0 4px;line-height:1" style-hover="color:#e6e7ea">×</span></div>
           <sc-for list="{{ cells }}" as="c" hint-placeholder-count="4">
             <div style="display:grid;grid-template-columns:48px minmax(0,1fr);gap:0 12px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;line-height:1.6">
               <span style="color:#5f636c;padding-top:10px">{{ c.n }}</span>
@@ -253,12 +251,12 @@
 
         <sc-if value="{{ isGraph }}" hint-placeholder-val="{{ false }}">
         <div style="height:100%;min-height:420px;display:flex;flex-direction:column;gap:12px">
-          <div style="display:flex;align-items:center;gap:12px;height:24px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c"><span>{{ graphMeta }}</span><span onClick="{{ clearSel }}" style="margin-left:auto;cursor:pointer;padding:0 4px;line-height:1;color:{{ graphClearColor }}" style-hover="color:#e6e7ea">×</span></div>
+          <div style="display:flex;align-items:center;gap:12px;height:24px;font-size:13px;font-variant-numeric:tabular-nums;color:#5f636c"><span>{{ graphMeta }}</span><span onClick="{{ clearSel }}" style="margin-left:auto;cursor:pointer;padding:0 4px;line-height:1;color:{{ graphClearColor }}" style-hover="color:#e6e7ea">×</span></div>
           <div style="flex:1;min-height:0;position:relative"><svg viewBox="0 0 800 560" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
             <sc-for list="{{ graphEdges }}" as="e" hint-placeholder-count="20"><line x1="{{ e.x1 }}" y1="{{ e.y1 }}" x2="{{ e.x2 }}" y2="{{ e.y2 }}" stroke="{{ e.stroke }}" stroke-width="1"></line></sc-for>
             <sc-for list="{{ graphNodes }}" as="n" hint-placeholder-count="12"></sc-for>
           </svg>
-          <sc-for list="{{ graphNodes }}" as="n" hint-placeholder-count="12"><div onClick="{{ n.select }}" style="position:absolute;transform:translateY(-50%);display:flex;align-items:center;gap:8px;cursor:pointer;flex-direction:{{ n.dir }};left:{{ n.left }};right:{{ n.right }};top:{{ n.py }}%"><span style="flex:none;border-radius:50%;box-sizing:border-box;border:1.5px solid {{ n.stroke }};background:{{ n.fill }};width:{{ n.d }}px;height:{{ n.d }}px"></span><span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;white-space:nowrap;color:{{ n.textColor }}">{{ n.label }}</span></div></sc-for>
+          <sc-for list="{{ graphNodes }}" as="n" hint-placeholder-count="12"><div onClick="{{ n.select }}" style="position:absolute;transform:translateY(-50%);display:flex;align-items:center;gap:8px;cursor:pointer;flex-direction:{{ n.dir }};left:{{ n.left }};right:{{ n.right }};top:{{ n.py }}%"><span style="flex:none;border-radius:50%;box-sizing:border-box;border:1.5px solid {{ n.stroke }};background:{{ n.fill }};width:{{ n.d }}px;height:{{ n.d }}px"></span><span style="font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;color:{{ n.textColor }}">{{ n.label }}</span></div></sc-for>
           </div>
         </div>
         </sc-if>
@@ -266,9 +264,9 @@
         <sc-if value="{{ isDb }}" hint-placeholder-val="{{ false }}">
         <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
           <textarea value="{{ sql }}" onChange="{{ setSql }}" spellcheck="false" placeholder="select …" style="width:100%;min-height:112px;resize:vertical;padding:12px 14px;border:0;border-radius:6px;background:#1a1c21;color:#e6e7ea;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;line-height:1.6" style-focus="box-shadow:0 0 0 1px #a68bd0"></textarea>
-          <div style="display:flex;align-items:center;gap:8px"><span onClick="{{ runSql }}" style="padding:5px 12px;border-radius:6px;background:#a68bd0;color:#101114;font-size:13px;font-weight:500;cursor:pointer">Run</span><span style="padding:5px 10px;border-radius:6px;color:#8b8f98;font-size:13px;cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">Explain</span><span style="padding:5px 10px;border-radius:6px;color:#8b8f98;font-size:13px;cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">Export</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c">{{ dbResult }}</span></div>
+          <div style="display:flex;align-items:center;gap:8px"><span onClick="{{ runSql }}" style="padding:5px 12px;border-radius:6px;background:#a68bd0;color:#101114;font-size:13px;font-weight:500;cursor:pointer">Run</span><span style="padding:5px 10px;border-radius:6px;color:#8b8f98;font-size:13px;cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">Explain</span><span style="padding:5px 10px;border-radius:6px;color:#8b8f98;font-size:13px;cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">Export</span><span style="margin-left:auto;font-size:13px;font-variant-numeric:tabular-nums;color:#5f636c">{{ dbResult }}</span></div>
           <sc-if value="{{ dbRan }}" hint-placeholder-val="{{ false }}">
-          <div style="display:flex;flex-direction:column;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px">
+          <div style="display:flex;flex-direction:column;font-size:13px;font-variant-numeric:tabular-nums">
             <div style="display:grid;grid-template-columns:64px 72px 168px minmax(0,1fr) 64px;gap:16px;height:28px;align-items:center;padding:0 12px;color:#8b8f98">id<span>kind</span><span>ts</span><span>text</span><span style="text-align:right">score</span></div>
             <sc-for list="{{ dbRows }}" as="r" hint-placeholder-count="12">
               <div style="display:grid;grid-template-columns:64px 72px 168px minmax(0,1fr) 64px;gap:16px;height:32px;align-items:center;padding:0 12px;border-top:1px solid rgba(230,231,234,.08);color:#e6e7ea" style-hover="background:#16181c"><span style="color:#5f636c">{{ r.id }}</span><span style="color:#a68bd0">{{ r.kind }}</span><span style="color:#8b8f98">{{ r.ts }}</span><span style="display:inline-block;height:8px;border-radius:2px;background:rgba(230,231,234,.2);width:{{ r.w2 }}px;max-width:100%"></span><span style="text-align:right">{{ r.score }}</span></div>
@@ -283,9 +281,9 @@
         <div style="display:flex;flex-direction:column;gap:2px;max-width:560px">
           <sc-if value="{{ setGeneral }}" hint-placeholder-val="{{ true }}">
             <div style="display:flex;align-items:center;height:36px;padding:0 12px">Start page<span style="margin-left:auto;font-size:13px;color:#8b8f98">Home</span></div>
-            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Refresh<span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">30 s</span></div>
+            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Refresh<span style="margin-left:auto;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">30 s</span></div>
             <div style="display:flex;align-items:center;height:36px;padding:0 12px">Time format<span style="margin-left:auto;display:flex;gap:4px"><span style="padding:2px 8px;border-radius:6px;font-size:13px;background:#e6e7ea;color:#101114">24 h</span><span style="padding:2px 8px;border-radius:6px;font-size:13px;color:#8b8f98">12 h</span></span></div>
-            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Rows per page<span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">{{ pageSizeLabel }}</span></div>
+            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Rows per page<span style="margin-left:auto;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">{{ pageSizeLabel }}</span></div>
           </sc-if>
           <sc-if value="{{ setModules }}" hint-placeholder-val="{{ false }}">
             <sc-for list="{{ modToggles }}" as="m" hint-placeholder-count="6">
@@ -293,15 +291,15 @@
             </sc-for>
           </sc-if>
           <sc-if value="{{ setClaude }}" hint-placeholder-val="{{ false }}">
-            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Binary<span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">/usr/local/bin/claude</span></div>
-            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Model<span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">default</span></div>
-            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Agents dir<span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">~/.dash/agents</span></div>
-            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Sessions kept<span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">30 d</span></div>
-            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Background jobs<span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">triage · tagging · summary</span></div>
+            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Binary<span style="margin-left:auto;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">/usr/local/bin/claude</span></div>
+            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Model<span style="margin-left:auto;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">default</span></div>
+            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Agents dir<span style="margin-left:auto;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">~/.dash/agents</span></div>
+            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Sessions kept<span style="margin-left:auto;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">30 d</span></div>
+            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Background jobs<span style="margin-left:auto;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">triage · tagging · summary</span></div>
           </sc-if>
           <sc-if value="{{ setData }}" hint-placeholder-val="{{ false }}">
-            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Database<span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">~/.dash/store.sqlite</span></div>
-            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Last backup<span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98">05 Sep 03:00</span></div>
+            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Database<span style="margin-left:auto;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">~/.dash/store.sqlite</span></div>
+            <div style="display:flex;align-items:center;height:36px;padding:0 12px">Last backup<span style="margin-left:auto;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98">05-09-2026 03:00</span></div>
             <div style="display:flex;align-items:center;gap:8px;height:36px;padding:0 12px;margin-top:8px"><span style="padding:5px 10px;border-radius:6px;background:#e6e7ea;color:#101114;font-size:13px;font-weight:500;cursor:pointer">Back up now</span><span style="padding:5px 10px;border-radius:6px;color:#8b8f98;font-size:13px;cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">Export</span><span style="padding:5px 10px;border-radius:6px;color:#8b8f98;font-size:13px;cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">Vacuum</span></div>
           </sc-if>
         </div>
@@ -309,11 +307,8 @@
       </div>
 
       <!-- RIGHT (panel): claude session — shell is identical on every module; agent, skills and rules differ -->
-      <div style="min-width:0;min-height:0;display:flex;flex-direction:column;gap:14px;background:#1a1c21;border-radius:6px;padding:16px 12px 12px">
-        <div style="display:flex;align-items:center;gap:10px;height:24px;padding:0 4px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98"><span style="width:6px;height:6px;border-radius:3px;background:{{ agentHue }}"></span>{{ agentCmd }}</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;padding:0 4px">
-          <sc-for list="{{ skills }}" as="s" hint-placeholder-count="4"><span style="padding:2px 8px;border-radius:6px;font-size:13px;color:#8b8f98;box-shadow:inset 0 0 0 1px rgba(230,231,234,.1)">{{ s.label }}</span></sc-for>
-        </div>
+      <div style="min-width:0;min-height:0;display:flex;flex-direction:column;gap:14px;background:#1a1c21;border-radius:6px;padding:12px">
+        <div style="display:flex;align-items:center;gap:4px;padding:0 4px;min-height:28px"><span style="display:grid;place-items:center;width:28px;height:28px;border-radius:6px;font-size:18px;line-height:1;color:#e6e7ea;background:#23262c;cursor:pointer">+</span></div>
         <div style="flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:16px;padding:8px 4px">
           <sc-for list="{{ transcript }}" as="m" hint-placeholder-count="4">
             <sc-if value="{{ m.isUser }}" hint-placeholder-val="{{ false }}">
@@ -323,13 +318,13 @@
             <div style="display:flex;flex-direction:column;gap:9px;line-height:1.6;padding:0 2px"><sc-for list="{{ m.lines }}" as="l" hint-placeholder-count="2"><span style="display:inline-block;height:8px;border-radius:2px;background:rgba(230,231,234,.16);width:{{ l.w }}%"></span></sc-for></div>
             </sc-if>
             <sc-if value="{{ m.isTool }}" hint-placeholder-val="{{ false }}">
-            <div style="display:flex;align-items:center;gap:10px;height:28px;padding:0 4px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#8b8f98"><span style="color:{{ agentHue }}">▸</span>{{ m.tool }}<span style="margin-left:auto;color:#5f636c">{{ m.status }}</span></div>
+            <div style="display:flex;align-items:center;gap:10px;height:28px;padding:0 4px;font-size:13px;font-variant-numeric:tabular-nums;color:#8b8f98"><span style="color:{{ agentHue }}">▸</span>{{ m.tool }}<span style="margin-left:auto;color:#5f636c">{{ m.status }}</span></div>
             </sc-if>
           </sc-for>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px">
-          <textarea value="{{ draft }}" onChange="{{ setDraft }}" placeholder="{{ agentPlaceholder }}" rows="3" style="width:100%;resize:none;padding:10px 12px;border:0;border-radius:6px;background:#23262c;color:#e6e7ea;font:inherit;font-size:15px;line-height:1.4" style-focus="box-shadow:0 0 0 1px {{ agentHue }}"></textarea>
-          <div style="display:flex;align-items:center;gap:8px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:#5f636c;padding:0 4px"><span>{{ contextLabel }}</span><span style="margin-left:auto;padding:3px 8px;border-radius:6px;color:#8b8f98;cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">new</span><span onClick="{{ send }}" style="padding:3px 10px;border-radius:6px;cursor:pointer;color:#e6e7ea;box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">↵</span></div>
+          <textarea value="{{ draft }}" onChange="{{ setDraft }}" rows="3" style="width:100%;resize:none;padding:10px 12px;border:0;border-radius:6px;background:#23262c;color:#e6e7ea;font:inherit;font-size:15px;line-height:1.4" style-focus="box-shadow:0 0 0 1px {{ agentHue }}"></textarea>
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-variant-numeric:tabular-nums;color:#5f636c;padding:0 4px"><span style="display:grid;place-items:center;width:28px;height:28px;border-radius:6px;color:#8b8f98;cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">/</span><span onClick="{{ send }}" style="margin-left:auto;padding:3px 10px;border-radius:6px;cursor:pointer;color:#e6e7ea;box-shadow:inset 0 0 0 1px rgba(230,231,234,.14)">↵</span></div>
         </div>
       </div>
 
@@ -343,6 +338,7 @@
 class Component extends DCLogic {
   state = { page: 'home', sel: null, selMeta: null, loading: false, op: 1, more: 0, chip: 'All', memChip: 'All', bizChip: 'All', actChip: 'All', table: 'second_brain_items', sql: '', ran: false, mods: { email: true, edu: true, mem: true, sci: true, biz: true, graph: true, db: true }, setSection: 'General', draft: '', sent: {}, query: '' };
   SEL = '#23262c';
+  ROW_HUE = { he: 'email', em: 'email', hd: 'edu', ed: 'edu', hm: 'mem', mm: 'mem', sc: 'sci', bz: 'biz', ac: 'act' };   // the hue bar a selected row shows
   HUES = { home: '#e6e7ea', email: '#cf7b7b', edu: '#7a9fd6', mem: '#d1a36a', sci: '#6fb3b8', biz: '#7fb894', graph: '#b3b06a', db: '#a68bd0', act: '#e6e7ea', set: '#e6e7ea' };
   // per-module claude session config: the shell is shared, only these differ
   AGENTS = {
@@ -369,14 +365,14 @@ class Component extends DCLogic {
     const s = key.length * 31 + i * 7, id = key + i, r = this.rnd.bind(this), time = o.time(i, r(s + 2));
     return {
       id, w1: 44 + Math.round(r(s) * 40), w3: 60 + Math.round(r(s + 1) * 90), w4: 50 + Math.round(r(s + 1) * 50),
-      time, selected: this.state.sel === id, bg: this.state.sel === id ? this.SEL : 'transparent',
-      dot: r(s + 3) > 0.45 ? this.HUES.email : 'transparent',
-      pct: Math.round(r(s + 4) * 90), kind: ['note', 'link', 'quote', 'fact', 'task'][Math.floor(r(s + 5) * 5)], ext: ['pdf', 'docx', 'md', 'xlsx'][Math.floor(r(s + 5) * 4)],
+      time, selected: this.state.sel === id, bg: this.state.sel === id ? this.SEL : '#1e2126',
+      ring: this.state.sel === id ? `inset 2px 0 0 ${this.HUES[this.ROW_HUE[key.slice(0, 2)] || 'act']}` : 'inset 0 0 0 1px rgba(230,231,234,.08)',
+      pct: Math.round(r(s + 4) * 90), task: r(s + 5) > 0.7 ? 'inline-block' : 'none', ext: ['pdf', 'docx', 'md', 'xlsx'][Math.floor(r(s + 5) * 4)],
       select: () => this.setState(st => ({ sel: st.sel === id ? null : id, selMeta: st.sel === id ? null : { key, time, w: 160 + Math.round(r(s + 1) * 160), i } }))
     };
   }
   hhmm(i, f, start) { let m = start - i * (7 + Math.round(f * 40)); if (m < 0) m = 24 * 60 + m; return `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; }
-  dates() { return ['05 Sep', '04 Sep', '03 Sep', '02 Sep', '01 Sep', '31 Aug', '30 Aug', '29 Aug']; }
+  dates() { return ['05-09-2026', '04-09-2026', '03-09-2026', '02-09-2026', '01-09-2026', '31-08-2026', '30-08-2026', '29-08-2026']; }
   groups(key, per, counts) {
     const n = (this.props.pageSize ?? 40) + this.state.more * 40, out = []; let left = n, k = 0;
     while (left > 0 && k < 8) {
@@ -421,9 +417,9 @@ class Component extends DCLogic {
     const modHue = { Email: this.HUES.email, Education: this.HUES.edu, 'Second Brain': this.HUES.mem, Science: this.HUES.sci, Money: this.HUES.biz, Graph: this.HUES.graph, Database: this.HUES.db };
     ag.out.forEach((g, gi) => g.rows.forEach((r, i) => { const m = mods[Math.floor(this.rnd(gi * 97 + i * 13) * 7)]; r.mod = m; r.hue = modHue[m]; r.verb = verbs[Math.floor(this.rnd(gi * 5 + i * 3) * verbs.length)]; }));
     if (st.actChip !== 'All') ag.out.forEach(g => { g.rows = g.rows.filter(r => r.mod === st.actChip); });
-    const eduGroups = [['05 Sep', 3, 3], ['06–12 Sep', 7, 11], ['13 Sep →', 6, 48]].map(([label, c, n], k) => ({ label, count: String(n), rows: Array.from({ length: c }, (_, i) => this.row('ed' + k, i, { time: (j, f) => k === 0 ? this.hhmm(-j, f, 780) : k === 1 ? `${String(6 + j).padStart(2, '0')} Sep` : `${String(13 + j * 2).padStart(2, '0')} Sep` })) }));
-    const files = [['05 Sep', [['analysis.ipynb', 1], ['etl.py', 0], ['features.ipynb', 1]]], ['04 Sep', [['eval.ipynb', 0], ['plots.py', 0], ['utils.py', 0]]], ['02 Sep', [['baseline.ipynb', 0], ['sweep.py', 0]]], ['28 Aug', [['scratch.ipynb', 0], ['ingest.py', 0], ['schema.py', 0]]]];
-    const sciGroups = files.map(([label, fs], k) => ({ label, count: String(fs.length), rows: fs.map(([name, live], i) => { const r = this.row('sc' + k, i, { time: (j, f) => this.hhmm(j, f, k === 0 ? 581 : 1380) }); r.name = name; r.dot = live ? this.HUES.sci : 'transparent'; return r; }) }));
+    const eduGroups = [['05-09-2026', 3, 3], ['06-09-2026', 7, 11], ['13-09-2026', 6, 48]].map(([label, c, n], k) => ({ label, count: String(n), rows: Array.from({ length: c }, (_, i) => this.row('ed' + k, i, { time: (j, f) => k === 0 ? this.hhmm(-j, f, 780) : k === 1 ? `${String(6 + j).padStart(2, '0')} Sep` : `${String(13 + j * 2).padStart(2, '0')} Sep` })) }));
+    const files = [['05-09-2026', [['analysis.ipynb', 1], ['etl.py', 0], ['features.ipynb', 1]]], ['04-09-2026', [['eval.ipynb', 0], ['plots.py', 0], ['utils.py', 0]]], ['02-09-2026', [['baseline.ipynb', 0], ['sweep.py', 0]]], ['28-08-2026', [['scratch.ipynb', 0], ['ingest.py', 0], ['schema.py', 0]]]];
+    const sciGroups = files.map(([label, fs], k) => ({ label, count: String(fs.length), rows: fs.map(([name, live], i) => { const r = this.row('sc' + k, i, { time: (j, f) => this.hhmm(j, f, k === 0 ? 581 : 1380) }); r.name = name; r.nameColor = live ? this.HUES.sci : '#e6e7ea'; return r; }) }));
     const tables = [['second_brain_items', '48,212'], ['emails', '31,904'], ['threads', '6,118'], ['courses', '14'], ['lessons', '412'], ['events', '9,140'], ['links', '12,774'], ['embeddings', '48,212'], ['documents', '128']].map(([name, rows]) => ({ name, rows, bg: st.table === name && st.sql ? this.SEL : 'transparent', color: st.table === name && st.sql ? '#e6e7ea' : '#8b8f98', pick: () => this.setState({ table: name, sql: `select *\nfrom ${name}\norder by rowid desc\nlimit 40;`, ran: false }) }));
     const savedQueries = [['recent-items', '09:39'], ['unread-by-sender', '08:41'], ['lesson-progress', '04 Sep'], ['orphan-links', '02 Sep']].map(([name, time]) => ({ name, time, pick: () => this.setState({ sql: `-- ${name}\nselect id, kind, ts, text, score\nfrom second_brain_items\nwhere ts > date('now', '-7 day')\norder by ts desc;`, ran: false }) }));
     const dbRows = Array.from({ length: 40 }, (_, i) => ({ id: String(48212 - i * 3), kind: ['note', 'link', 'quote', 'fact', 'task'][Math.floor(this.rnd(i * 11) * 5)], ts: `2026-09-0${5 - Math.floor(i / 14)} ${this.hhmm(i, this.rnd(i * 17), 581)}:${String(Math.floor(this.rnd(i * 23) * 60)).padStart(2, '0')}`, w2: 60 + Math.round(this.rnd(i * 29) * 160), score: (0.4 + this.rnd(i * 31) * 0.6).toFixed(3) }));
@@ -455,13 +451,12 @@ class Component extends DCLogic {
     const graphNodes = G.filter(n => !q || n.label.includes(q)).map(n => { const id = 'gr' + n.i, on = gsel === n.i, nb = near.has(n.i), dim = gsel >= 0 && !on && !nb; return {
       label: n.label, count: String(n.count), time: this.dates()[Math.floor(this.rnd(n.i * 5) * 8)], x: n.x, y: n.y, r: 5 + Math.round(n.count / 40), d: 2 * (5 + Math.round(n.count / 40)), px: +(n.x / 8).toFixed(2), py: +(n.y / 5.6).toFixed(2), dir: n.x > 400 ? 'row-reverse' : 'row', left: n.x > 400 ? 'auto' : `calc(${(n.x / 8).toFixed(2)}% - ${5 + Math.round(n.count / 40)}px)`, right: n.x > 400 ? `calc(${(100 - n.x / 8).toFixed(2)}% - ${5 + Math.round(n.count / 40)}px)` : 'auto',
       fill: on ? this.HUES.graph : '#1a1c21', stroke: on || nb ? this.HUES.graph : 'rgba(230,231,234,.3)', textColor: dim ? 'rgba(230,231,234,.25)' : on ? '#e6e7ea' : '#8b8f98',
-      bg: on ? this.SEL : 'transparent', dotColor: on || nb ? this.HUES.graph : 'rgba(230,231,234,.2)',
+      bg: on ? this.SEL : '#1e2126', ring: on ? `inset 2px 0 0 ${this.HUES.graph}` : 'inset 0 0 0 1px rgba(230,231,234,.08)', listColor: nb ? this.HUES.graph : '#e6e7ea',
       select: () => this.setState(s => ({ sel: s.sel === id ? null : id, selMeta: s.sel === id ? null : { key: 'gr', time: '', w: 0, i: n.i } })) }; });
     const graphEdges = E.map(e => { const hot = gsel >= 0 && (e.a === gsel || e.b === gsel); return { x1: G[e.a].x, y1: G[e.a].y, x2: G[e.b].x, y2: G[e.b].y, stroke: hot ? this.HUES.graph : gsel >= 0 ? 'rgba(230,231,234,.06)' : 'rgba(230,231,234,.14)' }; });
-    const ag_ = this.AGENTS[p];
     const send = () => { if (!st.draft.trim()) return; this.setState(s => ({ draft: '', sent: { ...s.sent, [p]: [...(s.sent[p] || []), { px: Math.min(220, 40 + s.draft.length * 5) }] } })); };
     return {
-      moduleName: meta[0], moduleMeta: meta[1], op: st.op,
+      moduleName: meta[0], op: st.op,
       isHome: p === 'home', isEmail: p === 'email', isEdu: p === 'edu', isMem: p === 'mem', isSci: p === 'sci', isBiz: p === 'biz', isGraph: p === 'graph', isDb: p === 'db', isAct: p === 'act', isSet: p === 'set',
       bgHome: bg('home'), bgEmail: bg('email'), bgEdu: bg('edu'), bgMem: bg('mem'), bgSci: bg('sci'), bgBiz: bg('biz'), bgGraph: bg('graph'), bgDb: bg('db'), bgAct: bg('act'), bgSet: bg('set'),
       goHome: () => this.go('home'), goEmail: () => this.go('email'), goEdu: () => this.go('edu'), goMem: () => this.go('mem'), goSci: () => this.go('sci'), goBiz: () => this.go('biz'), goGraph: () => this.go('graph'), goDb: () => this.go('db'), goAct: () => this.go('act'), goSet: () => this.go('set'),
@@ -471,7 +466,7 @@ class Component extends DCLogic {
       homeMem: Array.from({ length: 5 }, (_, i) => this.row('hm', i, { time: (j, f) => this.hhmm(j, f, 579) })),
       emailChips: this.chips(['All', 'Unread', 'Flagged'], st.chip, 'chip', this.HUES.email), emailGroups: eg.out, emailShowing: `${eg.n} / 31,904`,
       eduGroups, sciGroups,
-      memChips: this.chips(['All', 'Notes', 'Links', 'Quotes'], st.memChip, 'memChip', this.HUES.mem), memGroups: mg.out, memShowing: `${mg.n} / 48,212`,
+      memChips: this.chips(['All', 'Tasks'], st.memChip, 'memChip', this.HUES.mem), memGroups: mg.out, memShowing: `${mg.n} / 48,212`,
       bizChips: this.chips(['All', 'Accounts', 'Plans', 'Documents'], st.bizChip, 'bizChip', this.HUES.biz), bizGroups: bgp.out,
       tables, savedQueries, sql: st.sql, setSql: e => this.setState({ sql: e.target.value, ran: false }), runSql: () => this.setState({ ran: !!st.sql.trim() }), dbRows, dbRan: st.ran, dbResult: st.ran ? '412 rows · 3 ms' : '',
       actChips: this.chips(['All', ...mods], st.actChip, 'actChip', '#e6e7ea'), actGroups: ag.out, actShowing: `${ag.n} / 9,140`,
@@ -486,8 +481,8 @@ class Component extends DCLogic {
       query: st.query, setQuery: e => this.setState({ query: e.target.value }),
       askAbout: () => this.setState({ draft: 'About the selected item: ' }),
       // RIGHT
-      agentHue: this.HUES[p], agentCmd: ag_.cmd, skills: ag_.skills.map(l => ({ label: l })), transcript: this.transcript(p),
-      draft: st.draft, setDraft: e => this.setState({ draft: e.target.value }), agentPlaceholder: ag_.ph, contextLabel: st.sel ? ag_.ctx + ' · 1 selected' : ag_.ctx, send
+      agentHue: this.HUES[p], transcript: this.transcript(p),
+      draft: st.draft, setDraft: e => this.setState({ draft: e.target.value }), send
     };
   }
 }

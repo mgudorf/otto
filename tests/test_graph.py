@@ -116,7 +116,7 @@ def test_graph_routes(config):
             assert await job.done == "2 nodes, 1 edges"
             left = (await c.get("/api/graph/left")).json()
             assert [r["id"] for r in left["groups"][0]["rows"]] == ["python", "sqlite"] and left["groups"][0]["rows"][0]["count"] == 2
-            assert left["showing"] == "2 / 2" and left["more"] is False
+            assert left["more"] is False and "leading" not in left["groups"][0]["rows"][0]
             g = (await c.get("/api/graph/graph?query=sql")).json()
             assert [n["tag"] for n in g["nodes"]] == ["sqlite"] and g["edges"] == [] and g["totals"] == {"nodes": 2, "edges": 1}
             assert g["built_at"] == app.state.store.cursor("graph.rebuild")

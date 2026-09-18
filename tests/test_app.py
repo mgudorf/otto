@@ -62,9 +62,10 @@ def test_second_brain_end_to_end(config):
             mid = r.json()["id"]
             await c.post("/api/second_brain/action/capture", json={"kind": "link", "text": "https://example.com the site"})
             left = (await c.get("/api/second_brain/left?query=sqlite")).json()
-            assert left["groups"][0]["rows"][0]["id"] == mid and left["showing"] == "1 / 1"
-            left = (await c.get("/api/second_brain/left?chip=Links")).json()
-            assert left["groups"][0]["rows"][0]["leading"]["kind"] == "link"
+            assert left["groups"][0]["rows"][0]["id"] == mid and left["more"] is False
+            left = (await c.get("/api/second_brain/left")).json()
+            assert left["chips"] == ["All", "Tasks"] and "leading" not in left["groups"][0]["rows"][0]   # a kind is never written on a row
+            assert (await c.get("/api/second_brain/left?chip=Tasks")).json()["groups"] == []
             item = (await c.get(f"/api/second_brain/item/{mid}")).json()
             assert item["tags"] == ["reading"] and item["actions"][-1]["verb"] == "forget"
             assert (await c.post("/api/second_brain/action/tag", json={"id": mid, "tags": ["books"]})).json()["tags"] == ["books", "reading"]

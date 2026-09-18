@@ -85,7 +85,7 @@ def test_done_and_suggestion_actions(config):
             item = (await c.get(f"/api/second_brain/item/{mid}")).json()
             assert item["done_at"] and item["actions"][0]["verb"] == "forget"
             left = (await c.get("/api/second_brain/left?chip=Tasks")).json()
-            assert left["groups"][0]["rows"][0]["done"] is True
+            assert left["groups"][0]["rows"][0]["done"] is True and left["groups"][0]["rows"][0]["leading"] == {"task": True}
 
             # A suggestion carries its own row id, "s<n>", so it never collides with an item of the same number.
             sid = store.execute(
@@ -108,6 +108,8 @@ def test_done_and_suggestion_actions(config):
             assert verbs[:2] == ["accepted", "completed"]
             missing = await c.post("/api/second_brain/action/done", json={"id": mid + 999})
             assert missing.status_code == 404, missing.text
+            for bad in ({}, {"id": "abc"}):   # a malformed id is a 400, not a 500
+                assert (await c.post("/api/second_brain/action/done", json=bad)).status_code == 400
         await app.state.runner.drain(1)
         store.close()
 

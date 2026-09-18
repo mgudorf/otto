@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
-from app.modules.email import MANIFEST
 from app.modules.email.gmail import consent_expires, read_client, write_client
 from app.store import Store, iso, now, parse
 
@@ -61,7 +60,6 @@ def _row(r: dict) -> dict:
         "module": "email",
         "text": f"{r['from_name'] or r['from_addr']}: {r['subject']}",
         "stamp": r["internal_date"],
-        "leading": {"dot": MANIFEST.hue if unread else "transparent"},
         "unread": unread,
         "starred": "STARRED" in labels,
     }
@@ -70,7 +68,7 @@ def _row(r: dict) -> dict:
 def _group_by_day(rows: list[dict]) -> list[dict]:
     groups: list[dict] = []
     for r in rows:
-        label = parse(r["internal_date"]).astimezone().strftime("%d %b")
+        label = parse(r["internal_date"]).astimezone().strftime("%d-%m-%Y")
         if not groups or groups[-1]["label"] != label:
             groups.append({"label": label, "count": 0, "rows": []})
         groups[-1]["rows"].append(_row(r))
@@ -102,7 +100,6 @@ def left(request: Request, query: str = "", chip: str = "All", page: int = 0) ->
         "groups": _group_by_day(rows),
         "chips": list(CHIPS),
         "chip": chip,
-        "showing": f"{min(limit, total):,} / {total:,}",
         "more": total > limit,
         "total": total,
         "read_on_open": bool(CONFIG.email.read_on_open) if CONFIG else False,
@@ -257,8 +254,6 @@ def queue(store: Store) -> list[dict]:
         "text": "Gmail consent has expired; run: python -m app.modules.email.gmail consent" if gone
                 else "Gmail consent expires soon; run: python -m app.modules.email.gmail consent",
         "stamp": iso(due),
-        "leading": {"dot": MANIFEST.hue},
-        "mono": True,
     }]
 
 

@@ -7,29 +7,26 @@ from datetime import datetime
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
+from app.modules import int_id
 from app.store import Store, now_iso, parse
 
 router = APIRouter(prefix="/api/second_brain")
 
 KINDS = ("note", "link", "quote", "fact", "task")
-CHIPS = {"All": None, "Notes": "note", "Links": "link", "Quotes": "quote", "Facts": "fact", "Tasks": "task"}
+CHIPS = {"All": None, "Tasks": "task"}   # the kinds stay in the table for the agent; the page names only tasks
 SUGGESTION = "s"                                   # a suggestion's row id, "s12"; an item carries the bare integer
 RESOURCE = "second_brain"
 
 
 def _row(r: dict) -> dict:
-    return {
-        "id": r["id"],
-        "module": "second_brain",
-        "text": r["text"],
-        "stamp": r["created_at"],
-        "leading": {"kind": r["kind"]},
-        "done": bool(r.get("done_at")),
-    }
+    row = {"id": r["id"], "module": "second_brain", "text": r["text"], "stamp": r["created_at"], "done": bool(r.get("done_at"))}
+    if r["kind"] == "task":
+        row["leading"] = {"task": True}
+    return row
 
 
 def _day_label(ts: str) -> str:
-    return parse(ts).astimezone().strftime("%d %b")
+    return parse(ts).astimezone().strftime("%d-%m-%Y")
 
 
 def _group_by_day(rows: list[dict]) -> list[dict]:
@@ -67,7 +64,7 @@ def _suggestion_id(value) -> int:
 
 
 def _suggestion_row(r: dict) -> dict:
-    return {"id": f"{SUGGESTION}{r['id']}", "module": "second_brain", "text": r["text"], "stamp": r["created_at"], "leading": {"kind": "idea"}}
+    return {"id": f"{SUGGESTION}{r['id']}", "module": "second_brain", "text": r["text"], "stamp": r["created_at"]}
 
 
 @router.get("/left")
@@ -90,16 +87,13 @@ def left(request: Request, query: str = "", chip: str = "All", page: int = 0) ->
         "groups": _group_by_day(rows),
         "chips": list(CHIPS),
         "chip": chip if chip in CHIPS else "All",
-        "showing": f"{min(limit, total)} / {total}",
         "more": total > limit,
     }
 
 
 @router.get("/blank")
 def blank(request: Request) -> dict:
-    store: Store = request.app.state.store
-    counts = {r["kind"]: r["n"] for r in store.query("SELECT kind, COUNT(*) AS n FROM second_brain_items GROUP BY kind")}
-    return {"kinds": list(KINDS), "counts": counts, "suggestions": queue(store)}
+    return {"suggestions": queue(request.app.state.store)}
 
 
 @router.get("/item/{item_id}")
@@ -169,7 +163,7 @@ def _capture(store: Store, body: dict):
 
 
 def _forget(store: Store, body: dict):
-    r = _get(store, int(body["id"]))
+    r = _get(store, int_id(body))
 
     def write(ctx) -> dict:
         with ctx.commit() as conn:
@@ -181,7 +175,7 @@ def _forget(store: Store, body: dict):
 
 
 def _tag(store: Store, body: dict):
-    r = _get(store, int(body["id"]))
+    r = _get(store, int_id(body))
     tags = [t.strip() for t in body.get("tags", []) if t.strip()]
 
     def write(ctx) -> dict:
@@ -196,7 +190,7 @@ def _tag(store: Store, body: dict):
 
 
 def _untag(store: Store, body: dict):
-    r = _get(store, int(body["id"]))
+    r = _get(store, int_id(body))
 
     def write(ctx) -> dict:
         with ctx.commit() as conn:
@@ -207,7 +201,7 @@ def _untag(store: Store, body: dict):
 
 
 def _done(store: Store, body: dict):
-    r = _get(store, int(body["id"]))
+    r = _get(store, int_id(body))
 
     def write(ctx) -> dict:
         with ctx.commit() as conn:

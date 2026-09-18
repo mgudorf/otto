@@ -1,7 +1,7 @@
-// Email: LEFT = search, chips, the action bar, rows by day · MIDDLE = the reader, or the mailbox status when nothing is selected.
+// Email: LEFT = search, chips, the action bar, rows by day · MIDDLE = the reader, or the inbox count when nothing is selected.
 // The bar acts on the rows picked with ctrl and shift, else the open message, else every message matching the filter.
 // It is built from the row data LEFT already carries, so it never waits on item/{id} and never changes height.
-import { html, T, mono13, Row, GroupHeader, Chips, Search, Button, Empty, Icon, fmtInt, stamp, dayLabel, clock } from '../rows.js';
+import { html, T, meta13, nums, Row, GroupHeader, Chips, Search, Button, Empty, More, Icon, fmtInt, stamp, dayLabel, clock } from '../rows.js';
 import { get, post } from '../api.js';
 
 let styled = false;
@@ -13,6 +13,7 @@ const ICONS = {
   unread: '<rect x="3" y="5" width="14" height="10" rx="2"></rect><path d="M3 7l7 5 7-5"></path>',
   star: '<path d="M10 3l2.2 4.5 5 .7-3.6 3.5.9 4.9L10 14.3 5.5 16.6l.9-4.9L2.8 8.2l5-.7z"></path>',
   sync: '<path d="M16 6a7 7 0 10.9 7M16 3v3.5h-3.5"></path>',
+  clip: '<path d="M13.5 6.5l-6 6a2 2 0 002.8 2.8l6.5-6.5a3.5 3.5 0 00-5-5L5.3 10.3a5 5 0 007 7l5-5"></path>',
 };
 
 // Rules for the sanitized body, added to the document once. The server sends bare tags: no attribute, link, image, style or script.
@@ -47,14 +48,9 @@ export async function load(app) {
   return { left, blank };
 }
 
-export function meta(app) {
-  const b = app.state.data && app.state.data.blank;
-  return b ? `${fmtInt(b.unread)} unread` : '';
-}
-
 const flatten = (left) => left.groups.flatMap((g) => g.rows);
 
-export function Left({ app, data, mod, fmt }) {
+export function Left({ app, data, mod }) {
   const { sel, picked } = app.state;
   const rows = flatten(data.left);
   const rerun = (patch) => app.setState(patch, () => app.refresh());
@@ -90,20 +86,18 @@ export function Left({ app, data, mod, fmt }) {
     <${Chips} chips=${data.left.chips} active=${data.left.chip} hue=${mod.hue} onPick=${(c) => rerun({ chip: c, more: 0 })} />
     <${Actions} app=${app} data=${data} mod=${mod} rows=${rows} />
     ${data.left.groups.length === 0 && html`<${Empty} text=${app.state.query ? 'no matches' : 'nothing in the inbox yet'} />`}
-    ${data.left.groups.map((g) => html`<div key=${g.label} style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <${GroupHeader} label=${g.label} count=${g.count} />
-      ${g.rows.map((r) => html`<${Row} key=${r.id} row=${r} hue=${mod.hue} fmt=${fmt}
+    ${data.left.groups.map((g) => html`<div key=${g.label} style=${{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <${GroupHeader} label=${g.label} />
+      ${g.rows.map((r) => html`<${Row} key=${r.id} row=${r} hue=${mod.hue}
         selected=${set.has(r.id) || (!!sel && !picked.length && String(sel.id) === String(r.id))}
         onSelect=${(e) => onSelect(r, e)} />`)}
     </div>`)}
-    <div style=${{ display: 'flex', alignItems: 'center', gap: 16, height: 32, padding: '0 12px', ...mono13, color: T.dim }}>${data.left.showing}
-      ${data.left.more && html`<span class="ring" onClick=${() => rerun({ more: app.state.more + 1 })} style=${{ cursor: 'pointer', color: T.muted, padding: '3px 8px', borderRadius: 6 }}>more</span>`}
-    </div>
+    ${data.left.more && html`<${More} onClick=${() => rerun({ more: app.state.more + 1 })} />`}
   </div>`;
 }
 
 // One fixed row of controls, always the same five, dimmed when they do not apply. Nothing here changes height,
-// so the list below never moves; the old bar drew nothing while item/{id} was in flight and five buttons after it.
+// so the list below never moves. The only words are `N picked` while a set is picked, and the error a refused action returns.
 function Actions({ app, data, mod, rows }) {
   const { sel, picked, query, busy, err } = app.state;
   const l = data.left;
@@ -111,7 +105,6 @@ function Actions({ app, data, mod, rows }) {
   const chosen = picked.length ? rows.filter((r) => set.has(r.id)) : sel ? rows.filter((r) => String(r.id) === String(sel.id)) : [];
   const target = picked.length ? { ids: picked } : sel ? { id: sel.id } : { filter: { query, chip: l.chip } };
   const n = picked.length || (sel ? 1 : l.total);
-  const scope = picked.length ? `${fmtInt(picked.length)} picked` : sel ? '1 open' : `${fmtInt(l.total)} matching${query ? ` “${query}”` : ''} · ${l.chip}`;
   const anyStarred = chosen.some((r) => r.starred);
   const bulk = !picked.length && !sel;
 
@@ -128,14 +121,13 @@ function Actions({ app, data, mod, rows }) {
     }
   };
 
-  const Ctl = ({ name, verb, title, confirm, on, hue }) => html`<span class="bar-btn" data-on=${on ? '1' : '0'}
+  const Ctl = ({ name, verb, title, confirm, on, hue }) => html`<span class="bar-btn" data-on=${on && !busy ? '1' : '0'}
     title=${title} onClick=${() => on && run(verb, confirm)} style=${{ color: hue || T.muted, background: hue ? 'rgba(207,123,123,.12)' : 'transparent' }}>
     <${Icon} svg=${ICONS[name]} size=${17} color="currentColor" /></span>`;
 
-  const label = { flex: '1 1 auto', minWidth: 0, ...mono13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
   return html`<div style=${{ position: 'sticky', top: 0, zIndex: 1, display: 'flex', flexDirection: 'column', gap: 2, padding: '6px 12px', background: T.panel }}>
     <div style=${{ display: 'flex', alignItems: 'center', gap: 4, height: 28 }}>
-      <span style=${{ ...label, color: picked.length ? T.text : T.dim }}>${busy ? `${busy}…` : scope}</span>
+      <span style=${{ flex: '1 1 auto', minWidth: 0, ...meta13, ...nums, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${picked.length ? `${fmtInt(picked.length)} picked` : ''}</span>
       <${Ctl} name="archive" verb="archive" title=${`Archive ${n}`} on=${n > 0}
         confirm=${bulk ? `Archive ${fmtInt(n)} messages?` : null} />
       <${Ctl} name="unread" verb="unread" title=${`Mark ${n} unread`} on=${n > 0} />
@@ -145,27 +137,27 @@ function Actions({ app, data, mod, rows }) {
       <span style=${{ width: 1, height: 16, background: T.hair, margin: '0 4px', flex: 'none' }} />
       <${Ctl} name="sync" verb="sync" title="Sync now" on=${!busy} />
     </div>
-    <div style=${{ ...mono13, color: mod.hue, height: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${err || ''}</div>
+    <div style=${{ ...meta13, color: mod.hue, height: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${err || ''}</div>
   </div>`;
 }
 
 export function Middle({ app, data, mod, fmt }) {
   if (app.state.sel) return html`<${Reader} app=${app} item=${app.state.item} mod=${mod} fmt=${fmt} />`;
   const b = data.blank;
-  return html`<div style=${{ ...mono13, color: T.dim }}>${fmtInt(b.inbox)} in inbox · ${fmtInt(b.unread)} unread · ${fmtInt(b.flagged)} flagged · ${fmtInt(b.priority)} priority · synced ${b.last_sync ? stamp(b.last_sync, fmt) : 'never'}</div>`;
+  return html`<div style=${{ ...meta13, ...nums, color: T.dim }}>${fmtInt(b.inbox)} in inbox · synced ${b.last_sync ? stamp(b.last_sync, fmt) : 'never'}</div>`;
 }
 
 // The message itself: headers, then its sanitized html when it has one, else its text. No mailbox action lives here.
 function Reader({ app, item, mod, fmt }) {
-  if (!item) return html`<div style=${{ ...mono13, color: T.dim }}>loading…</div>`;
-  if (item.error) return html`<div style=${{ ...mono13, color: '#cf7b7b' }}>${item.error}</div>`;
+  if (!item) return html`<div style=${{ ...meta13, color: T.dim }}>loading…</div>`;
+  if (item.error) return html`<div style=${{ ...meta13, color: '#cf7b7b' }}>${item.error}</div>`;
   ensureStyles();
   const body = { borderTop: `1px solid ${T.hair}`, paddingTop: 12 };
   const open = (item.actions || []).find((a) => a.verb === 'open');
   return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 12 }}>
     <div style=${{ display: 'flex', alignItems: 'center', gap: 12 }}>
       <span style=${{ display: 'grid', placeItems: 'center', width: 16, height: 16, color: mod.hue }}><${Icon} svg=${mod.icon} /></span>
-      <span style=${{ ...mono13, color: T.muted }}>${item.kind} · ${dayLabel(item.created_at)} ${clock(item.created_at, fmt)}</span>
+      <span style=${{ ...meta13, ...nums, color: T.dim }}>${dayLabel(item.created_at)} ${clock(item.created_at, fmt)}</span>
       <span style=${{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
         ${open && html`<${Button} label="Open in Gmail" onClick=${() => window.open(open.href, '_blank')} />`}
         <${Button} label="Send to session" onClick=${() => app.sendToSession(`About the selected item (email ${item.id}): ${String(item.text).slice(0, 300)}\n\n`)} />
@@ -173,9 +165,9 @@ function Reader({ app, item, mod, fmt }) {
       <span class="bright-hover" onClick=${() => app.select(null)} style=${{ cursor: 'pointer', color: T.dim, padding: '0 4px', lineHeight: 1 }}>×</span>
     </div>
     <div style=${{ fontSize: 17, fontWeight: 600, lineHeight: 1.3 }}>${item.subject}</div>
-    <div style=${{ ...mono13, color: T.muted, wordBreak: 'break-word' }}>${`${item.from_name} <${item.from_addr}> → ${item.to_addr}`}
+    <div style=${{ ...meta13, color: T.muted, wordBreak: 'break-word' }}>${`${item.from_name} <${item.from_addr}> → ${item.to_addr}`}
       ${item.priority && html`<div style=${{ color: item.priority === 'high' ? mod.hue : T.dim, marginTop: 4 }}>${item.priority} · ${item.reason}</div>`}
-      ${item.attachments.length > 0 && html`<div style=${{ color: T.dim, marginTop: 4 }}>attachments, not shown: ${item.attachments.join(', ')}</div>`}
+      ${item.attachments.length > 0 && html`<div style=${{ display: 'flex', alignItems: 'center', gap: 6, color: T.dim, marginTop: 4 }}><${Icon} svg=${ICONS.clip} size=${13} />${item.attachments.join(', ')}</div>`}
     </div>
     ${item.html
       ? html`<div class="mail" style=${body} dangerouslySetInnerHTML=${{ __html: item.html }} />`

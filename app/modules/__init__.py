@@ -13,7 +13,7 @@ A module that fails to import or set up is recorded and skipped; the rest of the
 A row the owner dismisses or deletes leaves every list that presents it (the module's LEFT, today, queue and the agent's
 context) while staying in its table, so no task suggests it again. The action that removes a row says so with removes: True;
 that is how the page and Home know to close the inspector standing on it.
-Its page, app/static/pages/<name>.js, exports load, meta, Left, Middle and optionally Right, which replaces the session pane.
+Its page, app/static/pages/<name>.js, exports load, Left, Middle and optionally Right, which replaces the session pane.
 """
 
 from __future__ import annotations
@@ -26,7 +26,17 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Awaitable, Callable
 
+from fastapi import HTTPException
+
 UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def int_id(body: dict, key: str = "id") -> int:
+    """The integer id an action body names; a missing or non-integer value is a 400 naming the field, never a 500."""
+    value = body.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, str)) or (isinstance(value, str) and not value.strip().isdigit()):
+        raise HTTPException(400, f"{key} required")
+    return int(value)
 
 
 @dataclass(frozen=True)

@@ -1,7 +1,7 @@
 // Database: LEFT = modules, each opening to its tables, then saved queries · MIDDLE = editor, Run / Explain / Save,
 // the picked table's schema until a statement runs, then the result grid.
 // Run sends whatever is typed straight to SQLite: selects, writes and DDL all land, with no undo.
-import { html, T, mono13, GroupHeader, Button, Empty, bytes, stamp, TextArea } from '../rows.js';
+import { html, T, meta13, nums, code13, rowStyle, GroupHeader, Button, Empty, TextArea } from '../rows.js';
 import { get, post } from '../api.js';
 
 class Editor {
@@ -12,11 +12,6 @@ const ed = new Editor();
 export async function load() {
   const [left, blank] = await Promise.all([get('/api/database/left'), get('/api/database/blank')]);
   return { left, blank };
-}
-
-export function meta(app) {
-  const b = app.state.data && app.state.data.blank;
-  return b ? `${b.db} · ${bytes(b.size_bytes)} · ${b.tables} tables` : '';
 }
 
 function setSql(app, sql, patch) {
@@ -33,28 +28,28 @@ async function pickTable(app, name, size) {
   if (ed.table === name) { ed.schema = schema; app.forceUpdate(); }
 }
 
-export function Left({ app, data, fmt }) {
+export function Left({ app, data, mod }) {
   const size = app.state.shell.settings['ui.page_size'] || 40;
   const { modules, saved } = data.left;
   const line = (key, active, onClick, text, right, opt = {}) => html`<div key=${key} class="row" onClick=${onClick} title=${opt.title || ''}
-      style=${{ display: 'flex', alignItems: 'center', gap: 12, height: 32, padding: `0 12px 0 ${12 + (opt.indent || 0)}px`, borderRadius: 6, cursor: 'pointer', ...mono13, background: active ? T.raised : 'transparent', color: opt.color || (active ? T.text : T.muted) }}>
+      style=${{ ...rowStyle({ selected: active, hue: mod.hue, height: 32 }), padding: `0 12px 0 ${12 + (opt.indent || 0)}px`, color: opt.color || (active ? T.text : T.muted) }}>
     <span style=${{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${text}</span>
-    <span style=${{ color: T.dim }}>${right}</span></div>`;
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-    <${GroupHeader} label="modules" count=${modules.length} />
+    <span style=${{ ...meta13, ...nums, color: T.dim }}>${right}</span></div>`;
+  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <${GroupHeader} label="modules" />
     ${modules.map((m) => {
       const open = ed.open.has(m.name);
-      return html`<div key=${m.name}>
+      return html`<div key=${m.name} style=${{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         ${line(m.name, false, () => { if (open) ed.open.delete(m.name); else ed.open.add(m.name); app.forceUpdate(); },
           `${open ? '▾' : '▸'} ${m.name}`, m.rows.toLocaleString(), { color: app.module(m.name).hue })}
         ${open && m.tables.map((t) => line(t.name, ed.table === t.name, () => pickTable(app, t.name, size), short(m.name, t.name), t.rows.toLocaleString(), { indent: 20, title: t.name }))}
       </div>`;
     })}
     <div style=${{ height: 18 }} />
-    <${GroupHeader} label="saved" count=${saved.length} />
+    <${GroupHeader} label="saved" />
     ${saved.length === 0 && html`<${Empty} text="nothing saved yet" />`}
     ${saved.map((q) => line(`query:${q.id}`, !!ed.saved && ed.saved.id === q.id,
-      () => setSql(app, q.sql, { table: null, schema: null, saved: { id: q.id, name: q.name }, mode: 'result' }), q.name, stamp(q.updated_at, fmt)))}
+      () => setSql(app, q.sql, { table: null, schema: null, saved: { id: q.id, name: q.name }, mode: 'result' }), q.name, ''))}
   </div>`;
 }
 
@@ -64,12 +59,12 @@ function Schema({ s }) {
   const cell = { padding: '0 8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
   const constraints = (c) => [c.pk && 'primary key', c.notnull && 'not null', c.default !== null && c.default !== undefined && `default ${c.default}`].filter(Boolean).join(' · ');
   const list = (label, rows) => rows.length > 0 && html`<div>
-    <${GroupHeader} label=${label} count=${rows.length} />
+    <${GroupHeader} label=${label} />
     ${rows.map((x) => html`<div key=${x.name} title=${x.sql} style=${{ display: 'flex', alignItems: 'center', gap: 12, height: 32, padding: '0 12px', borderTop: hair, whiteSpace: 'nowrap', overflow: 'hidden' }}>
       <span style=${{ flex: 'none', color: T.text }}>${x.name}</span>
       <span style=${{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', color: T.dim }}>${x.sql.replace(/\s+/g, ' ')}</span></div>`)}
   </div>`;
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16, ...mono13 }}>
+  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16, ...meta13 }}>
     <div style=${{ display: 'grid', gridTemplateColumns: 'minmax(160px, max-content) minmax(96px, max-content) minmax(96px, 1fr)', gridTemplateRows: '28px', gridAutoRows: '32px', padding: '0 4px' }}>
       ${['column', 'type', 'constraints'].map((h) => html`<span key=${h} style=${{ ...cell, lineHeight: '28px', color: T.muted }}>${h}</span>`)}
       ${s.columns.map((c) => html`<div key=${c.name} class="crow" style=${{ display: 'contents' }}>
@@ -82,7 +77,7 @@ function Schema({ s }) {
     ${list('triggers', s.triggers)}
     <div>
       <${GroupHeader} label="create" />
-      <pre style=${{ margin: 0, padding: '12px 14px', borderRadius: 6, background: T.panel, color: T.muted, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6, ...mono13 }}>${s.sql}</pre>
+      <pre style=${{ margin: 0, padding: '12px 14px', borderRadius: 6, background: T.panel, color: T.muted, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6, ...code13 }}>${s.sql}</pre>
     </div>
   </div>`;
 }
@@ -126,7 +121,7 @@ export function Middle({ app, data, mod }) {
   if (s) {
     body = html`<${Schema} s=${s} />`;
   } else if (r && !r.error && ed.mode === 'explain') {
-    body = html`<div style=${{ display: 'flex', flexDirection: 'column', ...mono13 }}>
+    body = html`<div style=${{ display: 'flex', flexDirection: 'column', ...meta13 }}>
       ${r.lines.map((l, i) => html`<div key=${i} style=${{ height: 32, display: 'flex', alignItems: 'center', padding: '0 12px', borderTop: i ? `1px solid ${T.hair}` : 'none' }}>${l}</div>`)}
     </div>`;
   } else if (r && !r.error && r.columns.length > 0) {
@@ -135,7 +130,7 @@ export function Middle({ app, data, mod }) {
     // Header and rows are cells of one grid, so every row shares the same column tracks.
     const cols = `repeat(${r.columns.length}, minmax(96px, max-content))`;
     const cell = { padding: '0 8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 360 };
-    body = html`<div style=${{ display: 'flex', flexDirection: 'column', ...mono13 }}>
+    body = html`<div style=${{ display: 'flex', flexDirection: 'column', ...meta13, ...nums }}>
       <div style=${{ overflowX: 'auto' }}>
         <div style=${{ display: 'grid', gridTemplateColumns: cols, gridTemplateRows: '28px', gridAutoRows: '32px', padding: '0 4px' }}>
           ${r.columns.map((c, j) => html`<span key=${`h${j}`} style=${{ ...cell, lineHeight: '28px', color: T.muted }}>${c}</span>`)}
@@ -152,15 +147,15 @@ export function Middle({ app, data, mod }) {
   }
 
   return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
-    <${TextArea} value=${ed.sql} placeholder="select …"
+    <${TextArea} value=${ed.sql}
       onInput=${(e) => { ed.sql = e.target.value; }}
-      onKeyDown=${(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); exec('run', 'result'); } }} hue=${hue} style=${{ background: T.panel, ...mono13 }} />
+      onKeyDown=${(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); exec('run', 'result'); } }} hue=${hue} style=${{ background: T.panel, ...code13 }} />
     <div style=${{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <${Button} label="Run" primary=${true} hue=${hue} onClick=${() => exec('run', 'result')} />
       <${Button} label="Explain" onClick=${() => exec('explain', 'explain')} />
       <${Button} label="Save" onClick=${save} />
       ${ed.saved && html`<${Button} label="Delete" onClick=${del} />`}
-      <span style=${{ marginLeft: 'auto', ...mono13, color: r && r.error ? '#cf7b7b' : T.dim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title=${line}>${line || (ed.table && !s ? 'loading…' : 'ctrl+enter runs')}</span>
+      <span style=${{ marginLeft: 'auto', ...meta13, ...nums, color: r && r.error ? '#cf7b7b' : T.dim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title=${line}>${line}</span>
     </div>
     ${body}
   </div>`;

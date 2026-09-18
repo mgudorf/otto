@@ -31,6 +31,9 @@ SHOWN = ("http://", "https://", "mailto:", "tel:")  # the only link targets writ
 BOILERPLATE = re.compile(r"^(enable images|click here|image|photo|logo|icon|spacer|banner|header|footer|divider)\b|"
                          r"to view this (e-?mail|content)|images? (are )?(off|blocked|disabled)", re.I)
 HIDDEN = re.compile(r"(display\s*:\s*none|visibility\s*:\s*hidden)", re.I)  # inline-hidden: preheaders, the mobile copy of a layout
+STRUCTURE = {"table", "thead", "tbody", "tfoot", "tr"}   # gone once a table turns out to be layout
+CELLS = {"td", "th", "caption"}                           # blocks once a table turns out to be layout
+BLANK = re.compile(r"<[^>]+>|\x00[^\x00]*\x00|&nbsp;|\s")  # what a cell holds once tags and marks are gone: its words
 
 
 def _bare(url: str) -> str:
@@ -45,6 +48,8 @@ class _Sanitizer(HTMLParser):
         self.dropped: list[str] = []    # tags open inside a dropped subtree (SKIP or hidden); nothing is emitted while non-empty
         self.link: str | None = None    # href of the open anchor, written as text at </a>
         self.link_text: list[str] = []
+        self.tables: list[tuple[int, int]] = []   # (id, index in out where it opened) of every table open now
+        self.table_ids = 0
 
     def handle_starttag(self, tag, attrs):
         a = {k: v or "" for k, v in attrs}
@@ -64,7 +69,7 @@ class _Sanitizer(HTMLParser):
                 self.out.append(f"<{tag}>")
         elif tag in KEEP:
             kept = "".join(f' {k}="{a[k]}"' for k in ATTRS.get(tag, ()) if a.get(k, "").isdigit())
-            self.out.append(f"<{tag}{kept}>")
+            self._open_tag(tag, kept)
             self.open.append(tag)
 
     def handle_endtag(self, tag):
@@ -77,8 +82,8 @@ class _Sanitizer(HTMLParser):
             self._close_link()
         elif tag in self.open:
             while (t := self.open.pop()) != tag:
-                self.out.append(f"</{t}>")
-            self.out.append(f"</{tag}>")
+                self._close_tag(t)
+            self._close_tag(tag)
 
     def handle_startendtag(self, tag, attrs):
         self.handle_starttag(tag, attrs)
@@ -106,15 +111,51 @@ class _Sanitizer(HTMLParser):
         if text and url.lower().startswith(SHOWN) and _bare(url) != _bare(text):
             self.out.append(f'<span class="url" title="{html.escape(url, quote=True)}"></span>')
 
+    # A table's own tags are written as marks until it closes; `_resolve_table` then decides whether they are tags at all.
+    def _open_tag(self, tag: str, kept: str) -> None:
+        if tag == "table":
+            self.table_ids += 1
+            self.tables.append((self.table_ids, len(self.out)))
+        if tag in STRUCTURE | CELLS and self.tables:
+            self.out.append(f"\x00{self.tables[-1][0]}:{tag}{kept}\x00")
+        else:
+            self.out.append(f"<{tag}{kept}>")
+
+    def _close_tag(self, tag: str) -> None:
+        if tag in STRUCTURE | CELLS and self.tables:
+            n, start = self.tables[-1]
+            self.out.append(f"\x00{n}:/{tag}\x00")
+            if tag == "table":
+                self.tables.pop()
+                self.out[start:] = [_resolve_table(n, "".join(self.out[start:]))]
+        else:
+            self.out.append(f"</{tag}>")
+
     def close(self) -> None:
         super().close()
         self._close_link()
         while self.open:
-            self.out.append(f"</{self.open.pop()}>")
+            self._close_tag(self.open.pop())
+
+
+def _resolve_table(n: int, chunk: str) -> str:
+    """A table whose rows each hold at most one cell that says anything is layout: its cells become blocks and the table goes."""
+    rows = re.findall(rf"\x00{n}:tr\x00(.*?)\x00{n}:/tr\x00", chunk, re.S)
+    said = [sum(1 for c in re.findall(rf"\x00{n}:t[dh][^\x00]*\x00(.*?)\x00{n}:/t[dh]\x00", row, re.S) if BLANK.sub("", c)) for row in rows]
+    layout = all(k <= 1 for k in said)
+
+    def tag(m: re.Match) -> str:
+        close, name, attrs = m.groups()
+        if not layout:
+            return f"<{close}{name}{attrs}>"
+        return f"<{close}div>" if name in CELLS else ""
+
+    return re.sub(rf"\x00{n}:(/?)([a-z]+)([^\x00]*)\x00", tag, chunk)
 
 
 EMPTY_CELL = re.compile(r"<(td|th)>(\s|&nbsp;|<br>|<wbr>)*</\1>")
 EMPTY_ROW = re.compile(r"<tr>(\s|<br>)*</tr>")
+EMPTY_BLOCK = re.compile(r"<div>(\s|&nbsp;|<br>|<wbr>)*</div>")
 RUN_OF_BREAKS = re.compile(r"(<br>\s*){3,}")
 
 
@@ -122,7 +163,7 @@ def _tidy(markup: str) -> str:
     """A template mail is mostly spacer cells and spacer rows; they carry nothing and read as blank space."""
     for _ in range(3):  # a dropped cell can empty its row, which can empty the row above it
         before = markup
-        markup = EMPTY_ROW.sub("", EMPTY_CELL.sub("", markup))
+        markup = EMPTY_ROW.sub("", EMPTY_CELL.sub("", EMPTY_BLOCK.sub("", markup)))
         if markup == before:
             break
     return RUN_OF_BREAKS.sub("<br><br>", markup)

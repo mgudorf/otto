@@ -246,10 +246,10 @@ def test_email_actions(email_config, fake):
         async with client_for(app) as c:
             await app.state.runner.submit("email.sync", "email", "gmail", "scheduled", sync).done
             left = (await c.get("/api/email/left?chip=Flagged")).json()
-            assert [r["id"] for r in left["groups"][0]["rows"]] == ["m3"] and left["showing"] == "1 / 1"
+            assert [r["id"] for r in left["groups"][0]["rows"]] == ["m3"] and left["more"] is False
             row = left["groups"][0]["rows"][0]
             # the bar builds its verbs from these, so it never waits on item/{id} and never changes height
-            assert row["leading"]["dot"] == MANIFEST.hue and row["unread"] is True and row["starred"] is True
+            assert "leading" not in row and row["unread"] is True and row["starred"] is True   # the page dims read rows; no dot
             assert left["chips"] == ["All", "Flagged", "Priority"] and left["read_on_open"] is True
 
             r = await c.post("/api/email/action/archive", json={"ids": ["m1"]})
@@ -362,7 +362,7 @@ def test_email_body(store, email_config, fake):
     assert '<span class="img">[image: Autumn sale]</span>' in out
     assert "share.example/icon" not in out  # an icon link with nothing to show shows no URL either
     assert '<span class="img">[image: Twitter]</span><span class="url" title="https://share.example/tw"></span>' in out
-    assert '<td colspan="2">left</td>' in out
+    assert "<div>left</div>" in out and "<table>" not in out   # one cell per row is layout: a block, no table
     assert "<li>one" in out and "<li>two" in out and "<pre>  code\n  block</pre>" in out
     assert "<div>unclosed <em>emphasis</em></div>" in out
 
@@ -482,3 +482,14 @@ def test_email_body_drops_what_carries_nothing():
     assert "Enable images" not in out and "spacer" not in out       # alt text for a client that blocks images says nothing here
     assert '<span class="img">[image: Autumn sale]</span>' in out   # alt text that names the picture survives
     assert "<br><br><br>" not in out
+
+
+def test_email_body_unwraps_layout_tables():
+    """A table whose rows hold one cell each is layout: its cells become blocks, and a real table inside it keeps its row."""
+    from app.modules.email.body import sanitize
+
+    out = sanitize(
+        "<table><tbody><tr><td><table><tr><td>Refer a Friend</td><td>+ 2000 Points</td></tr></table></td></tr>"
+        "<tr><td>&nbsp;</td><td><img alt='spacer' src='x'></td></tr><tr><td colspan='2'>Footer</td></tr></tbody></table>"
+    )
+    assert out == "<div><table><tr><td>Refer a Friend</td><td>+ 2000 Points</td></tr></table></div><div>Footer</div>"

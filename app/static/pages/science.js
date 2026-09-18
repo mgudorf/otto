@@ -1,6 +1,6 @@
-// Science: LEFT = the root's directory tree, a live dot on a running file, py · ipynb · folder creation into the open folder · MIDDLE = a notebook as a Lab-style editor (command and edit modes, the JupyterLab keys, every change written straight to the file) or a script highlighted whole with its last run's output, and the owner's schedule for either.
+// Science: LEFT = the root's directory tree, a running file in the hue, `+` creating a script, notebook or folder into the open folder · MIDDLE = a notebook as a Lab-style editor (command and edit modes, the JupyterLab keys, every change written straight to the file) or a script highlighted whole with its last run's output, and the owner's schedule for either.
 import { Component } from '../vendor/preact.mjs';
-import { html, T, mono13, Row, Icon, Button, Empty, interval, stamp } from '../rows.js';
+import { html, T, meta13, nums, code13, Row, Icon, Button, Empty, Plus, input, interval, stamp } from '../rows.js';
 import { get, post } from '../api.js';
 import hljs from '../vendor/highlight/core.min.js';
 import python from '../vendor/highlight/python.min.js';
@@ -16,58 +16,59 @@ const trimNl = (s) => s.replace(/^\n+/, '').replace(/\n+$/, '');   // Lab trims 
 const CODE_CSS = '.hl{color:#cccccc}.hl .hljs-keyword,.hl .hljs-literal{color:#569cd6}.hl .hljs-built_in,.hl .hljs-title.function_,.hl .hljs-meta{color:#dcdcaa}.hl .hljs-title.class_,.hl .hljs-type{color:#4ec9b0}.hl .hljs-string{color:#ce9178}.hl .hljs-number{color:#b5cea8}.hl .hljs-comment{color:#6a9955}.hl .hljs-params,.hl .hljs-variable,.hl .hljs-property{color:#9cdcfe}.hl .hljs-operator{color:#d4d4d4}';
 
 const open = new Set();   // expanded folders, page-local
-let folder = '';          // the folder the creation chips write into; '' is the root
+let folder = '';          // the folder `+` creates into; '' is the root
+const creator = { open: false, name: '' };   // the `+` box, page-local
 
-export async function load(app) {
-  const [left, blank] = await Promise.all([get('/api/science/left'), get('/api/science/blank')]);
-  return { left, blank };
+export async function load() {
+  return { left: await get('/api/science/left') };
 }
 
-export function meta(app) {
-  const b = app.state.data && app.state.data.blank;
-  return b ? `${b.kernels} kernels · ${b.files} files` : '';
+// `name.py` is a script, `name.ipynb` a notebook, anything else a folder, all under the open folder.
+async function create(app) {
+  const name = creator.name.trim().replace(/\/+$/, '');
+  if (!name) return;
+  const kind = name.endsWith('.py') ? 'py' : name.endsWith('.ipynb') ? 'ipynb' : 'folder';
+  try {
+    const r = await post('/api/science/action/new', { path: folder ? `${folder}/${name}` : name, kind });
+    creator.name = ''; creator.open = false;
+    app.setState({ error: null });
+    if (kind === 'folder') { open.add(r.id); folder = r.id; }
+    await app.refresh();
+    if (kind !== 'folder') app.select({ module: 'science', id: r.id });
+  } catch (e) { app.setState({ error: e.message }); }
 }
 
-export function Left({ app, data, mod, fmt }) {
+export function Left({ app, data, mod }) {
   const sel = app.state.sel;
   const toggle = (id) => { if (open.has(id)) open.delete(id); else open.add(id); folder = id; app.setState({}); };
-  const create = async (kind) => {
-    const name = window.prompt(`New ${kind} in /${folder}`);
-    if (!name) return;
-    try {
-      const r = await post('/api/science/action/new', { path: folder ? `${folder}/${name}` : name, kind });
-      app.setState({ error: null });
-      if (kind === 'folder') { open.add(r.id); folder = r.id; }
-      await app.refresh();
-      if (kind !== 'folder') app.select({ module: 'science', id: r.id });
-    } catch (e) { app.setState({ error: e.message }); }
-  };
-  const chip = (kind) => html`<span class="ring" onClick=${() => create(kind)} style=${{ cursor: 'pointer', color: T.muted, padding: '3px 8px', borderRadius: 6 }}>${kind}</span>`;
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-    ${data.left.tree.length === 0 && html`<${Empty} text="nothing in root" />`}
-    ${data.left.tree.map((n) => html`<${Node} key=${n.id} node=${n} depth=${0} sel=${sel} hue=${mod.hue} fmt=${fmt} onToggle=${toggle} onSelect=${(id) => app.select({ module: 'science', id })} />`)}
-    <div style=${{ display: 'flex', alignItems: 'center', gap: 8, height: 32, marginTop: 18, padding: '0 12px', ...mono13, color: T.dim }}>${data.left.showing}
-      <span style=${{ marginLeft: 'auto' }} />${chip('py')}${chip('ipynb')}${chip('folder')}
+  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <div style=${{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 4px 8px' }}>
+      ${creator.open && html`<input autofocus placeholder="name.py · name.ipynb · folder" value=${creator.name} onInput=${(e) => { creator.name = e.target.value; }}
+        onKeyDown=${(e) => { if (e.key === 'Enter') create(app); if (e.key === 'Escape') { creator.open = false; app.forceUpdate(); } }}
+        style=${input(mod.hue, { flex: 1, minWidth: 0, height: 36, fontSize: 15, background: T.raised })} />`}
+      <span style=${{ marginLeft: 'auto' }}><${Plus} title="new file or folder" active=${creator.open} onClick=${() => { creator.open = !creator.open; app.forceUpdate(); }} /></span>
     </div>
+    ${data.left.tree.length === 0 && html`<${Empty} text="nothing in root" />`}
+    ${data.left.tree.map((n) => html`<${Node} key=${n.id} node=${n} depth=${0} sel=${sel} hue=${mod.hue} onToggle=${toggle} onSelect=${(id) => app.select({ module: 'science', id })} />`)}
   </div>`;
 }
 
-// A folder row opens on click and becomes the target of the creation chips; a file row is the shared Row, indented under it.
-function Node({ node, depth, sel, hue, fmt, onToggle, onSelect }) {
+// A folder row opens on click and becomes the target of `+`; a file row is the shared Row, in the hue while it runs, indented under it.
+function Node({ node, depth, sel, hue, onToggle, onSelect }) {
   const pad = { paddingLeft: depth * 16 };
   if (node.kind !== 'dir') {
-    const row = { id: node.id, text: node.name, stamp: node.mtime, leading: { dot: node.live ? hue : null }, mono: true };
-    return html`<div style=${pad}><${Row} row=${row} hue=${hue} fmt=${fmt} selected=${!!sel && String(sel.id) === node.id} onSelect=${() => onSelect(node.id)} /></div>`;
+    const row = { id: node.id, text: node.name, live: node.live };
+    return html`<div style=${pad}><${Row} row=${row} hue=${hue} selected=${!!sel && String(sel.id) === node.id} onSelect=${() => onSelect(node.id)} /></div>`;
   }
   const isOpen = open.has(node.id), current = folder === node.id;
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 4 }}>
     <div style=${pad}>
-      <div class="row" onClick=${() => onToggle(node.id)} style=${{ display: 'flex', alignItems: 'center', gap: 12, height: 36, padding: '0 12px', borderRadius: 6, cursor: 'pointer', ...mono13, color: current ? T.text : T.muted }}>
+      <div class="row" onClick=${() => onToggle(node.id)} style=${{ display: 'flex', alignItems: 'center', gap: 12, height: 36, padding: '0 12px', borderRadius: 6, cursor: 'pointer', color: current ? T.text : T.muted }}>
         <span style=${{ width: 6, flex: 'none', color: T.dim }}>${isOpen ? '▾' : '▸'}</span>
         <span style=${{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${node.name}/</span>
       </div>
     </div>
-    ${isOpen && node.children.map((c) => html`<${Node} key=${c.id} node=${c} depth=${depth + 1} sel=${sel} hue=${hue} fmt=${fmt} onToggle=${onToggle} onSelect=${onSelect} />`)}
+    ${isOpen && node.children.map((c) => html`<${Node} key=${c.id} node=${c} depth=${depth + 1} sel=${sel} hue=${hue} onToggle=${onToggle} onSelect=${onSelect} />`)}
   </div>`;
 }
 
@@ -450,8 +451,8 @@ class Notebook extends Component {
   render({ app, mod, fmt }, { live }) {
     const item = app.state.item;
     const hue = mod.hue;
-    if (!item) return html`<div style=${{ ...mono13, color: T.dim }}>loading…</div>`;
-    if (item.error) return html`<div style=${{ ...mono13, color: RED }}>${item.error}</div>`;
+    if (!item) return html`<div style=${{ ...meta13, color: T.dim }}>loading…</div>`;
+    if (item.error) return html`<div style=${{ ...meta13, color: RED }}>${item.error}</div>`;
     const py = item.kind === 'py';
     const k = item.kernel;
     const running = py && (item.running || live[SCRIPT] !== undefined);
@@ -462,7 +463,7 @@ class Notebook extends Component {
     const chip = (text, onClick) => html`<span class="ring" onClick=${onClick} style=${{ cursor: 'pointer', color: T.muted, padding: '2px 8px', borderRadius: 6 }}>${text}</span>`;
     return html`<div ref=${(el) => { this.box = el; }} tabIndex="0" onKeyDown=${(e) => this.key(e)} style=${{ display: 'flex', flexDirection: 'column', gap: 24, outline: 'none' }}>
       <style>${'.nb-html table{border-collapse:collapse;font-family:inherit}.nb-html th,.nb-html td{height:28px;padding:0 16px 0 0;text-align:left;border-top:1px solid rgba(230,231,234,.08);font-weight:400}.nb-html th{color:#5f636c}' + CODE_CSS}</style>
-      <div style=${{ display: 'flex', alignItems: 'center', gap: 12, ...mono13 }}>
+      <div style=${{ display: 'flex', alignItems: 'center', gap: 12, ...meta13 }}>
         <span style=${{ display: 'grid', placeItems: 'center', width: 16, height: 16, color: hue }}><${Icon} svg=${mod.icon} /></span>
         <span style=${{ color: T.text }}>${item.text}</span>
         <span style=${{ color: T.dim }}>${label}</span>
@@ -477,10 +478,10 @@ class Notebook extends Component {
             ${k && html`<${Button} label="Interrupt" onClick=${() => this.kernel('interrupt')} />`}
             ${k && html`<${Button} label="Restart" onClick=${() => this.kernel('restart')} />`}
             ${k && html`<${Button} label="Shut down" onClick=${() => this.kernel('shutdown')} />`}
-            <${Button} label="+ cell" onClick=${() => this.insert(n)} />`}
+            <${Plus} title="add cell" onClick=${() => this.insert(n)} />`}
         <${Button} label="Send to session" right=${true} onClick=${() => app.sendToSession(py ? `About the selected script (science ${item.id}):\n\n` : `About the selected notebook (science ${item.id}, cell ${head} of ${n}):\n\n`)} />
       </div>
-      <div style=${{ display: 'flex', alignItems: 'center', gap: 12, ...mono13, color: T.dim }}>
+      <div style=${{ display: 'flex', alignItems: 'center', gap: 12, ...meta13, ...nums, color: T.dim }}>
         ${s
           ? html`<span>every ${interval(s.every_seconds)}${s.at ? ` at ${s.at}` : ''} · next ${stamp(s.next_run, fmt)} · last ${s.last_status ? `${s.last_status} ${stamp(s.last_run, fmt)}` : 'never'}</span>${chip('unschedule', () => this.unschedule())}`
           : chip('schedule', () => this.schedule())}
@@ -505,7 +506,7 @@ function Cell({ cell, i, hue, live, source, active, selected, area, onFocus, onB
   const n = running ? '[*]' : cell.execution_count != null ? `[${cell.execution_count}]` : '[ ]';
   const bar = active ? hue : selected ? T.dim : 'transparent';
   return html`<div data-cell onMouseDown=${(e) => { if (e.target.tagName !== 'TEXTAREA') onPick(); }}
-      style=${{ display: 'grid', gridTemplateColumns: '40px minmax(0,1fr)', gap: '0 12px', paddingLeft: 8, boxShadow: `inset 2px 0 0 ${bar}`, ...mono13, lineHeight: 1.6 }}>
+      style=${{ display: 'grid', gridTemplateColumns: '40px minmax(0,1fr)', gap: '0 12px', paddingLeft: 8, boxShadow: `inset 2px 0 0 ${bar}`, ...code13, lineHeight: 1.6 }}>
     <span style=${{ color: running ? hue : T.dim, paddingTop: 10, userSelect: 'none', cursor: 'default' }}>${code ? n : ''}</span>
     <div style=${{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
       <textarea ref=${area} data-index=${i} value=${source} rows=${source.split('\n').length} spellcheck=${false}
@@ -523,11 +524,11 @@ function Script({ source, last, live, fmt }) {
   const code = hljs.highlight(source, { language: 'python' }).value;
   const text = live !== undefined ? live.map((o) => o.text).join('') : last ? last.output : null;
   return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-    <div style=${{ display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr)', background: T.panel, borderRadius: 6, ...mono13, lineHeight: 1.6, overflowX: 'auto' }}>
+    <div style=${{ display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr)', background: T.panel, borderRadius: 6, ...code13, lineHeight: 1.6, overflowX: 'auto' }}>
       <pre style=${{ margin: 0, padding: '10px 0 10px 14px', color: T.dim, textAlign: 'right', userSelect: 'none', fontFamily: 'inherit' }}>${lines.map((_, i) => i + 1).join('\n')}</pre>
       <pre class="hl" style=${{ margin: 0, padding: '10px 14px', fontFamily: 'inherit' }} dangerouslySetInnerHTML=${{ __html: code }} />
     </div>
-    ${last && live === undefined && html`<div style=${{ ...mono13, color: last.status === 'failed' ? RED : T.dim, padding: '0 14px' }}>${last.status} · ${stamp(last.started_at, fmt)}${last.exit_code != null ? ` · exit ${last.exit_code}` : ''}</div>`}
+    ${last && live === undefined && html`<div style=${{ ...meta13, ...nums, color: last.status === 'failed' ? RED : T.dim, padding: '0 14px' }}>${last.status} · ${stamp(last.started_at, fmt)}${last.exit_code != null ? ` · exit ${last.exit_code}` : ''}</div>`}
     ${text ? html`<${Output} o=${{ kind: 'stream', text }} />` : null}
   </div>`;
 }

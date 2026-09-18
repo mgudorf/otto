@@ -10,7 +10,6 @@ from datetime import datetime
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
-from app.modules.newsfeed import MANIFEST
 from app.store import Store, iso, now_iso, parse
 
 router = APIRouter(prefix="/api/newsfeed")
@@ -22,11 +21,11 @@ RESOURCE = "newsfeed"
 
 
 def _day(ts: str) -> str:
-    return parse(ts).astimezone().strftime("%d %b")
+    return parse(ts).astimezone().strftime("%d-%m-%Y")
 
 
 def _happens(starts_at: str) -> str:
-    return datetime.fromisoformat(starts_at).strftime("%a %d %b")
+    return datetime.fromisoformat(starts_at).strftime("%a %d-%m-%Y")
 
 
 def _row(r: dict) -> dict:
@@ -35,7 +34,7 @@ def _row(r: dict) -> dict:
         "module": "newsfeed",
         "text": r["text"],
         "stamp": r["found_at"],
-        "leading": {"dot": MANIFEST.hue if r["status"] == "open" else None},
+        "unread": r["status"] == "open",   # bright until decided, like unread mail
     }
     if r["starts_at"]:
         row["stampText"] = _happens(r["starts_at"])
@@ -117,7 +116,6 @@ def left(request: Request, query: str = "", chip: str = "All", page: int = 0) ->
         "groups": _group_by_day(rows),
         "chips": list(CHIPS),
         "chip": chip,
-        "showing": f"{min(limit, total)} / {total}",
         "more": total > limit,
     }
 
