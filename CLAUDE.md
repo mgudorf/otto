@@ -9,6 +9,7 @@ Otto, a personification of the word "auto" is a PERSONALIZED dashboard applicati
    2. Have interest in or utilize frequently
    3. Slowly creates a catalog of data which defines who "I" am which will be leveraged for either recall, context, or creating "paragon" agents which enforce items that uniquely benefit me. 
 
+
 ## Development
 
 1. **Module work goes through `/feature-flow <what to change>`.** One worktree per change (`git worktree add ../wt-<slug> -b feat/<slug>` from `main`), the module doc updated in the same commit as the code, the suite green, my approval before the merge. Nothing is implemented on `main`.
