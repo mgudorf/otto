@@ -229,15 +229,4 @@ Activity: LEFT is the `events` log by day with a chip per module, each row boxed
 
 ## Patches
 
-### Daemon does not start at logon on this machine
-
-- Kind: gap
-- Where: Daemon requirement "It starts at logon"; `app/__main__.py` `setup`
-- Found: 2026-09-07, sync-architecture
-- Status: open, owner action
-
-What happens: `python -m app setup` registers the Task Scheduler entry `Otto`, but it has not been run; the daemon starts only when `python -m app` is run. The 2026-09-13 patch session could not run it: registering a scheduled task is outside what an agent session may do on this machine.
-
-Expected: the daemon is running after every logon.
-
-Fix: run `python -m app setup` once from the repo root, then confirm with `Get-ScheduledTask -TaskName Otto`.
+None open.

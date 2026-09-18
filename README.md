@@ -21,7 +21,7 @@ Every command you run by hand. Run them in PowerShell from the repo root, `C:\Us
 | Command | What it does |
 |---|---|
 | `py -3.14 -m venv .venv` then `.venv/Scripts/python.exe -m pip install -r requirements.txt` | Creates the Python environment and installs the pinned packages. |
-| `.venv/Scripts/python.exe -m app setup` | Registers the Windows scheduled task `Otto`, which starts the daemon at every logon. Not yet run on this machine; until it is, the daemon runs only after `python -m app`. Check it with `Get-ScheduledTask -TaskName Otto`. |
+| `.venv/Scripts/python.exe -m app setup` | Registers the Windows scheduled task `Otto`, which starts the daemon at every logon. Check it with `Get-ScheduledTask -TaskName Otto`. |
 | `.venv/Scripts/python.exe -m app.modules.email.gmail consent` | The first Gmail authorization. Needs the Google OAuth client file at `data/secrets/google_client.json` first. |
 
 Otto also needs Google Chrome installed and the Claude Code command-line tool logged in to your claude.ai account. Otto has no API key.
@@ -38,6 +38,16 @@ Otto also needs Google Chrome installed and the Claude Code command-line tool lo
 
 Module names for `feedback`: any folder under `app/modules/` that has an `__init__.py`, plus `app`, `activity` and `settings`.
 
+## Open items
+
+What Otto does not do yet. The full entry is under `## Patches` in the named doc.
+
+| Doc | Item |
+|---|---|
+| `docs/database/CLAUDE.md` | The Database page runs any statement you type straight into the live database: no confirm, no backup first, no CSV export of a table. Decide whether a confirm and an automatic backup go back in front of every write, or whether running unguarded stays. |
+| `docs/education/CLAUDE.md` | Nothing picks a new technology for you to learn and checks whether you understood it; Education covers only its fourteen fixed topics. Decide where the technology comes from and whether this belongs to Education or to Newsfeed. |
+| `docs/email/CLAUDE.md` | The Email page shows only the inbox. Spam, Trash, Gmail's categories and your own labels cannot be reached, applied or created. The design is decided: a row of eleven label chips first, then your labels. |
+| `docs/second_brain/CLAUDE.md` | Accepting a suggestion does the same as dismissing it: the suggestion leaves the list and nothing is created. You chose to leave it for now; the recommended fix makes Accept create a task from the suggestion. |
 
 ## Where things are
 
