@@ -36,11 +36,6 @@ Otto also needs Google Chrome installed and the Claude Code command-line tool lo
 
 Module names for `feedback`: any folder under `app/modules/` that has an `__init__.py`, plus `app`, `activity` and `settings`.
 
-## Already run
-
-| Command | What it did |
-|---|---|
-| `.venv/Scripts/python.exe -m app.modules.newsfeed migrate` | Moved the retired Business, Social and Search modules' rows into Newsfeed on 2026-09-16, with a backup first. Running it again adds nothing. |
 
 ## Where things are
 
