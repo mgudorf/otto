@@ -37,7 +37,7 @@
   --surface: color-mix(in oklab, var(--m) 22%, #171A20); --surface-2: color-mix(in oklab, var(--m) 26%, #1F232B); --surface-3: color-mix(in oklab, var(--m) 30%, #282D36);
   --line: color-mix(in oklab, var(--m) 34%, #2A2F39); --line-strong: color-mix(in oklab, var(--m) 40%, #3B414C);
   --ink: #ECEEF2; --ink-2: #A6ACB8; --ink-3: #6F7684;
-  --accent: #ECEEF2; --on-accent: #111318;
+  --accent: color-mix(in oklab, var(--m) 78%, #ECEEF2); --on-accent: #111318;   /* a primary action wears the open module's hue, in both themes; never white */
   --focus: #84A9F5; --danger: #E38A8A; --ok: #8CC79E;
   --shadow: 0 16px 40px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .06);
   --lift: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 20px -8px rgba(0, 0, 0, .6); --lift-strong: 0 2px 4px rgba(0, 0, 0, .55), 0 14px 32px -10px rgba(0, 0, 0, .7);
@@ -51,7 +51,7 @@
   --bg: #0B0D11; --bg-deep: #07090C; --surface: #171A20; --surface-2: #1F232B; --surface-3: #282D36;
   --line: #2A2F39; --line-strong: #3B414C;
   --ink: #ECEEF2; --ink-2: #A6ACB8; --ink-3: #6F7684;
-  --accent: #ECEEF2; --on-accent: #111318;
+  --accent: color-mix(in oklab, var(--m) 78%, #ECEEF2); --on-accent: #111318;   /* a primary action wears the open module's hue, in both themes; never white */
   --focus: #84A9F5; --danger: #E38A8A; --ok: #8CC79E;
   --shadow: 0 16px 40px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .06);
   color-scheme: dark; --tint: 0%; --tint-hover: 6%; --lift: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 20px -8px rgba(0, 0, 0, .6); --lift-strong: 0 2px 4px rgba(0, 0, 0, .55), 0 14px 32px -10px rgba(0, 0, 0, .7); --hover: color-mix(in oklab, var(--ink) 8%, var(--surface)); --selected: color-mix(in oklab, var(--ink) 13%, var(--surface));
@@ -465,8 +465,6 @@ body.pointing, body.pointing * { cursor: crosshair !important; }
 .card.mod .row:hover { background: color-mix(in oklab, var(--c) 14%, var(--surface)); }
 .card.mod .row.sel { background: color-mix(in oklab, var(--c) 22%, var(--surface)); }
 .card.mod:hover { background: color-mix(in oklab, var(--c) var(--tint-hover), var(--surface)); border-color: color-mix(in oklab, var(--c) 30%, var(--line)); border-left-color: var(--c); }
-.list:has(.card.mod:hover) .card.mod:not(:hover), .related:has(.card.mod:hover) .card.mod:not(:hover) { border-left-color: var(--line-strong); background: var(--surface); }
-.list:has(.card.mod:hover) .card.mod:not(:hover) .group .ic, .related:has(.card.mod:hover) .card.mod:not(:hover) .group .ic { color: var(--ink-3); }
 
 /* Depth: a deep rail and drawer, a canvas, and content plates that lift off it */
 .nav { background: var(--bg-deep); }   /* the drawer floats on the same canvas as the main column */
@@ -669,11 +667,11 @@ kbd { font: 400 13.5px/1 'PT Serif', Georgia, serif; display: inline-flex; align
 .chat .tab.on .x, .chat .tab:hover .x { opacity: 1; }
 
 /* Home's counts sit in the header: icon and number, the label in the tooltip */
-.page-tools .stat-strip { display: flex; flex-wrap: nowrap; gap: 12px; padding: 0; border: 0; background: transparent; }
+.page-tools .stat-strip { display: flex; flex-wrap: nowrap; gap: 10px; padding: 0; border: 0; background: transparent; }
 .page-tools .stat { gap: 5px; margin: 0; padding: 2px 6px; }
-.page-tools .stat .ic { width: 15px; height: 15px; }
-.page-tools .stat .v { font-size: 19px; }
-.page-tools .stat .l { display: none; }
+.page-tools .stat .ic { width: 14px; height: 14px; }
+.page-tools .stat .v { font-size: 18px; }
+.page-tools .stat .l { display: inline; font-family: 'PP Formula Narrow'; font-size: 14.5px; color: var(--ink-3); }
 
 /* Settings: tiles in the module pattern, a plate with the hue on its left edge that lifts on hover; the pane's picks open a list */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; padding: 12px 16px 16px; }
@@ -731,7 +729,96 @@ kbd { font: 400 13.5px/1 'PT Serif', Georgia, serif; display: inline-flex; align
 /* Home's header carries the toggle and the counts, so the sync sentence yields its room there */
 .top:has(.page-tools .stat-strip) .pulse span:last-child { display: none; }
 
-@media (max-width: 1440px) { .page-tools .stat-strip { display: none; } }   /* below this the header has no room for Home's counts */
+@media (max-width: 1560px) { .page-tools .stat-strip { display: none; } }   /* below this the header has no room for Home's counts */
+
+/* The question fills its pane and its type grows with the pane's width, so a wide pane reads larger rather than emptier */
+.detail { container-type: inline-size; }
+.qbody { max-width: none; font-size: clamp(18px, 2.3cqw, 24px); }
+
+.dbody .prose.qbody, .dbody .qbody, .related .qbody { max-width: none; }
+
+/* Home's counts keep their labels: the number in the module's hue, the label beside it; the search bar yields a little room */
+.top:has(.page-tools .stat-strip) .omni { min-width: 160px; flex-basis: 220px; }
+/* The keyboard's place in the rail */
+.nav-item.kb { outline: 2px solid var(--focus); outline-offset: -2px; }
+#detail:focus { outline: none; }
+
+/* Home's header at 1600: the sync dot steps aside, gaps close a little, the search bar gives a little more */
+.top:has(.page-tools .stat-strip) .pulse { display: none; }
+.top:has(.page-tools .stat-strip) .omni { min-width: 120px; flex-basis: 160px; }
+.top:has(.page-tools .stat-strip) .page-tools .seg button { padding: 0 8px; }
+.top:has(.page-tools .stat-strip) .mid { gap: 10px; }
+.page-tools .stat-strip { gap: 7px; }
+.page-tools .stat { padding: 2px 3px; gap: 3px; }
+.page-tools .stat .l { font-size: 13px; }
+
+/* The drawer's top is a shaded strip of folder tabs; the open tab is cut from the same cloth as the turns below it.
+   Tabs share the strip's full width, so a wider drawer shows more of each title. The plate keeps its margin. */
+.chat .tabs { display: flex; align-self: stretch; align-items: flex-end; gap: 3px; padding: 8px 10px 0; margin: 0; border: 0; border-radius: 10px 10px 0 0; background: color-mix(in oklab, var(--bg) 55%, var(--surface)); max-width: none; overflow: hidden; }
+.chat .tab { position: relative; z-index: 0; flex: 1 1 auto; min-width: 0; max-width: none; height: 32px; margin: 0; padding: 0 16px; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--ink-3); }
+.chat .tab::before { content: ''; position: absolute; inset: 0; z-index: -1; background: var(--surface-2); clip-path: polygon(0 100%, 10px 0, calc(100% - 10px) 0, 100% 100%); }
+.chat .tab:hover { background: transparent; color: var(--ink-2); }
+.chat .tab:hover::before { background: var(--surface-3); }
+.chat .tab.on, .chat .tab.on:hover { background: transparent; color: var(--ink); box-shadow: none; }
+.chat .tab.on::before, .chat .tab.on:hover::before { background: var(--surface); }
+.chat .tab.plus { flex: 0 0 auto; padding: 0 14px; }
+.chat .tab .t { flex: 1 1 auto; min-width: 0; text-align: center; }
+
+/* Only the Settings tiles asked for a deeper tint; every other page keeps its shades */
+.tile { --tint: 23%; --tint-hover: 34%; }
+
+/* A chat tab is as wide as its title and no wider; tabs sit left, and only shrink when the strip runs out of room */
+.chat .tab { flex: 0 1 auto; }
+.chat .tab .t { flex: 0 1 auto; text-align: left; }
+/* The question's body and its parts share one size, so a part is never larger than the premise above it */
+.dbody .prose.qbody, .dbody .qbody, .related .qbody { font-size: clamp(18px, 2.3cqw, 24px); }
+
+/* Keyboard position is shown by a lift off the page, not a ring: the composer, an answer box and the rail's current row rise a little */
+.chat .composer textarea:focus-visible, .dbody textarea.answer:focus-visible { outline: none; }
+.chat .composer:focus-within { border-color: var(--line-strong); background: var(--bg); box-shadow: var(--lift-strong); transform: translateY(-1px); }
+.dbody textarea.answer:focus { border-color: var(--line-strong); box-shadow: var(--lift-strong); transform: translateY(-1px); }
+.nav-item.kb { outline: none; background: var(--surface); box-shadow: var(--lift); transform: translateX(2px); }
+
+/* Folder tabs, properly: rounded tops and curved shoulders, each tab tucked under the next; the open one stands tallest and in front,
+   cut from the plate's own cloth so it runs into the conversation below */
+.chat .tabs { padding: 8px 14px 0; gap: 0; align-items: flex-end; overflow: hidden; }
+.chat .tab { position: relative; z-index: 1; flex: 0 1 auto; margin: 0 -4px; height: 29px; padding: 0 20px; border-radius: 9px 9px 0 0; background: var(--surface-2); color: var(--ink-3); }
+.chat .tab::before, .chat .tab::after { content: ''; position: absolute; inset: auto; bottom: 0; width: 10px; height: 10px; background: transparent; clip-path: none; z-index: -1; }
+.chat .tab::before { left: -10px; border-bottom-right-radius: 10px; box-shadow: 5px 5px 0 5px var(--surface-2); }
+.chat .tab::after { right: -10px; border-bottom-left-radius: 10px; box-shadow: -5px 5px 0 5px var(--surface-2); }
+.chat .tab:hover { background: var(--surface-3); color: var(--ink-2); }
+.chat .tab:hover::before { background: transparent; box-shadow: 5px 5px 0 5px var(--surface-3); }
+.chat .tab:hover::after { background: transparent; box-shadow: -5px 5px 0 5px var(--surface-3); }
+.chat .tab.on, .chat .tab.on:hover { z-index: 3; height: 32px; background: var(--surface); color: var(--ink); }
+.chat .tab.on::before, .chat .tab.on:hover::before { background: transparent; box-shadow: 5px 5px 0 5px var(--surface); }
+.chat .tab.on::after, .chat .tab.on:hover::after { background: transparent; box-shadow: -5px 5px 0 5px var(--surface); }
+.chat .tab.plus { padding: 0 14px; }
+
+/* Chat tabs, plainly: rounded rectangles that grow with their title up to a small cap and are cut off without an ellipsis; the keyboard's tab lifts */
+.chat .tabs { display: flex; align-items: center; gap: 4px; padding: 8px 10px 6px; margin: 0; border-radius: 10px 10px 0 0; background: color-mix(in oklab, var(--bg) 55%, var(--surface)); overflow: hidden; }
+.chat .tab { position: static; z-index: auto; flex: 0 1 auto; min-width: 0; max-width: 180px; height: 28px; margin: 0; padding: 0 10px; border-radius: 8px; background: var(--surface-2); color: var(--ink-3); box-shadow: none; transform: none; }
+.chat .tab::before, .chat .tab::after { display: none; }
+.chat .tab:hover { background: var(--surface-3); color: var(--ink-2); }
+.chat .tab.on, .chat .tab.on:hover { height: 28px; background: var(--surface-3); color: var(--ink); }
+.chat .tab .t { overflow: hidden; text-overflow: clip; white-space: nowrap; }
+.chat .tab.kb { box-shadow: var(--lift); transform: translateY(-1px); background: var(--surface-3); color: var(--ink); }
+.chat .tab .rename { width: 100%; min-width: 60px; background: transparent; border: 0; outline: none; font: inherit; color: var(--ink); }
+.chat .tab.plus { padding: 0 10px; }
+
+/* The drawer is always a column of the grid, never a sheet over the page: at narrower windows the page's plates ask for less,
+   and if the page is still squeezed it scrolls sideways rather than hide under the drawer */
+.main { overflow-x: auto; }
+@media (max-width: 1280px) {
+  .app[data-chat="open"] { --chatw: inherit; }
+  .app[data-chat="open"] .chat { position: static; width: auto; box-shadow: none; }
+  .content.split { grid-template-columns: var(--listw, minmax(240px, 2fr)) minmax(360px, 3fr); }
+}
+@media (max-width: 900px) and (min-width: 601px) {
+  .app[data-chat="open"] { --chatw: inherit; }
+  .app[data-chat="open"] .chat { position: static; width: auto; box-shadow: none; }
+}
+
+@media (max-width: 900px) and (min-width: 601px) { .app[data-chat="open"] { grid-template-columns: 56px minmax(0, 1fr) var(--chatw); } }
 
 </style>
 </head>
@@ -17274,8 +17361,8 @@ const REVIEW_EXTRA = [
 ];
 
 const NUMBERS = [
-  { module: 'email', value: 5, label: 'unread' }, { module: 'education', value: 3, label: 'due' }, { module: 'second_brain', value: 4, label: 'open tasks' },
-  { module: 'science', value: 1, label: 'kernel live' }, { module: 'finance', value: 8, label: 'records' }, { module: 'newsfeed', value: 4, label: 'to review' },
+  { module: 'email', value: 5, label: 'unread' }, { module: 'education', value: 3, label: 'due' }, { module: 'second_brain', value: 4, label: 'tasks' },
+  { module: 'science', value: 1, label: 'kernel' }, { module: 'finance', value: 8, label: 'records' }, { module: 'newsfeed', value: 4, label: 'to review' },
   { module: 'graph', value: 15, label: 'tags' }, { module: 'database', value: '18 MB', label: 'store' },
 ];
 
@@ -17348,7 +17435,7 @@ const KNOBS = { email: [['Backfill', '90 d'], ['Triage batch', '40'], ['Read on 
 const CFG = { model: { 'email:triage': 'haiku', 'education:agent': 'fable', 'education:generate': 'opus', 'science:agent': 'fable', 'newsfeed:search': 'sonnet', 'home:brief': 'sonnet' }, effort: { 'education:generate': 'high', 'science:agent': 'xhigh' } };
 
 // Shell: state, DOM helpers, nav, omnibox, chat drawer, palette, keyboard. Pages live in app-pages.js.
-const S = { page: 'home', sel: null, picked: new Set(), tokens: [], q: '', chip: {}, seg: {}, capture: false, chatTab: {}, theme: null, nav: 'open', chat: 'open', cursor: -1, point: false, pointRef: null, gpreview: null, quick: [{ title: 'Unread mail', page: 'email', tokens: [{ kind: 'filter', value: 'is:unread' }] }, { title: 'Thesis tasks', page: 'second_brain', tokens: [{ kind: 'filter', value: 'is:open' }, { kind: 'tag', value: 'thesis' }] }, { title: 'Tax season', page: 'tag:tax', tokens: [{ kind: 'tag', value: 'tax' }] }, ...['thesis', 'causal', 'rl', 'time-series', 'home'].map((t) => ({ title: t, page: `tag:${t}`, tokens: [{ kind: 'tag', value: t }] }))], closed: [], tagsOpen: new Set() };
+const S = { page: 'home', sel: null, picked: new Set(), tokens: [], q: '', chip: {}, seg: {}, capture: false, chatTab: {}, theme: null, nav: 'open', chat: 'open', cursor: -1, point: false, pointRef: null, gpreview: null, zone: 'list', navCursor: null, tabCursor: 0, quick: [{ title: 'Unread mail', page: 'email', tokens: [{ kind: 'filter', value: 'is:unread' }] }, { title: 'Thesis tasks', page: 'second_brain', tokens: [{ kind: 'filter', value: 'is:open' }, { kind: 'tag', value: 'thesis' }] }, { title: 'Tax season', page: 'tag:tax', tokens: [{ kind: 'tag', value: 'tax' }] }, ...['thesis', 'causal', 'rl', 'time-series', 'home'].map((t) => ({ title: t, page: `tag:${t}`, tokens: [{ kind: 'tag', value: t }] }))], closed: [], tagsOpen: new Set() };
 const $ = (s, el = document) => el.querySelector(s);
 function put(el, ...kids) { el.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false)); }
 
@@ -17600,6 +17687,7 @@ function renderNav() {
       h('button', { class: 'unpin', title: 'Remove', onclick: (e) => { e.stopPropagation(); S.quick = S.quick.filter((x) => x !== q); saveQuick(); renderNav(); } }, '×')))),
     h('div', { class: 'foot' }, ...FOOT.map((m) => item(m))),
   );
+  paintNav();
 }
 // A quick access entry that is one tag's page and nothing else is shown as that tag.
 const tagEntry = (q) => q.page.startsWith('tag:') && q.tokens.length === 1 && q.tokens[0].kind === 'tag' && q.tokens[0].value === q.page.slice(4);
@@ -17623,14 +17711,15 @@ function renderChat() {
   const c = hue(m);
   box.style.setProperty('--c', c);
   put(box, h('div', { class: 'grip', onmousedown: startChatDrag }), h('div', { class: 'plate' },
-    h('div', { class: 'tabs' }, ...sessions.map((s, i) => h('button', { class: `tab${i === tab ? ' on' : ''}`, onclick: () => { S.chatTab[m.id] = i; renderChat(); } }, h('span', { class: 't' }, s.title || 'New'), h('span', { class: 'x', title: 'Close', onclick: (e) => { e.stopPropagation(); closeChat(i); } }, '×'))), h('button', { class: 'tab plus', title: 'New chat', onclick: newChat }, '+')),
+    h('div', { class: 'tabs' }, ...sessions.map((s, i) => h('button', { class: `tab${i === tab ? ' on' : ''}`, onclick: () => { S.chatTab[m.id] = i; renderChat(); }, ondblclick: () => renameTab(i) }, h('span', { class: 't' }, s.title || 'New'), h('span', { class: 'x', title: 'Close', onclick: (e) => { e.stopPropagation(); closeChat(i); } }, '×'))), h('button', { class: 'tab plus', title: 'New chat', onclick: newChat }, '+')),
     sess ? h('div', { class: 'turns' }, ...sess.turns.map(([role, text]) => role === 'tool' ? h('div', { class: 'turn tool' }, text, h('span', { class: 'ok' }, 'done')) : role === 'user' ? h('div', { class: 'turn user' }, text) : h('div', { class: 'turn model', html: md(text) }))) : h('div', { class: 'empty-chat' }),
     h('div', { class: 'composer' },
       S.pointRef || sel ? h('div', { class: 'refs' }, h('span', { class: 'token ref', style: `--c:${(S.pointRef || sel).module ? hue((S.pointRef || sel).module) : 'var(--ink-3)'}` }, S.pointRef && !S.pointRef.item ? icon(I.target) : icon(modOf((S.pointRef || sel).module).icon), h('span', { class: 't' }, `${S.pointRef ? S.pointRef.label : sel.title}`, S.pointRef && S.pointRef.quote ? h('span', { class: 'q' }, ` “${S.pointRef.quote}”`) : null), h('button', { title: 'Drop reference', onclick: () => { if (S.pointRef) { S.pointRef = null; renderChat(); } else { S.sel = null; renderMain(); renderChat(); } } }, '×'))) : null,
-      h('textarea', { id: 'composer', onkeydown: (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!e.target.value.trim()) { e.target.blur(); return; } sendChat(); } if (e.key === 'Escape') e.target.blur(); if (e.key === '/' && !e.target.value) { e.preventDefault(); openPalette(); $('#palInput').value = '/'; renderPalette(); } } }),
+      h('textarea', { id: 'composer', onkeydown: (e) => { if (e.key === 'ArrowLeft' && e.target.selectionStart === 0 && e.target.selectionEnd === 0) { e.preventDefault(); e.target.blur(); enterZone('tabs'); return; } if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!e.target.value.trim()) { e.target.blur(); return; } sendChat(); } if (e.key === 'Escape') e.target.blur(); if (e.key === '/' && !e.target.value) { e.preventDefault(); openPalette(); $('#palInput').value = '/'; renderPalette(); } } }),
       h('button', { class: 'send', title: 'Send', onclick: sendChat }, icon(I.up))),
   ));
   const turns = $('.turns', box); if (turns) turns.scrollTop = turns.scrollHeight;
+  paintTabs();
   if (keep !== null) { const c = $('#composer'); if (c) { c.value = keep; c.focus(); } }
 }
 function sendChat() {
@@ -17663,8 +17752,50 @@ function grip(onMove) {
   };
 }
 function setWidth(name, px) { document.documentElement.style.setProperty(name, `${px}px`); try { localStorage.setItem(`otto-next${name}`, String(px)); } catch {} }
-const startChatDrag = grip((x) => setWidth('--chatw', Math.round(Math.max(280, Math.min(innerWidth * 0.6, innerWidth - x)))));
+// The drawer never grows past the page: the main column keeps room for its plates (list and pane, or one list).
+function chatMax() { const nav = $('#nav').getBoundingClientRect().width, need = $('#main .content.split') ? (innerWidth <= 1280 ? 660 : 840) : 520; return Math.max(280, innerWidth - nav - need); }
+function clampChat() { const w = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--chatw')) || 400, m = chatMax(); if (w > m) document.documentElement.style.setProperty('--chatw', `${m}px`); }
+window.addEventListener('resize', clampChat);
+const startChatDrag = grip((x) => setWidth('--chatw', Math.round(Math.max(280, Math.min(chatMax(), innerWidth - x)))));
 const startSplitDrag = grip((x) => { const c = $('#main .content.split'); if (!c) return; const r = c.getBoundingClientRect(); setWidth('--listw', Math.round(Math.max(240, Math.min(r.width - 476, x - r.left)))); });
+// Four zones, left to right: the rail, the list, the open page, the agent. ← and → step between them; ↑ ↓ and Enter act inside one.
+const ZONES = ['nav', 'list', 'detail', 'tabs', 'chat'];
+const navItems = () => [...document.querySelectorAll('.nav .nav-item')];
+function paintNav() { navItems().forEach((it, i) => it.classList.toggle('kb', S.zone === 'nav' && i === S.navCursor)); paintTabs(); }
+// The chat tabs are a zone of their own: ← → walk them (and step out at either end), Enter picks, F2 renames, Delete closes.
+const tabEls = () => [...document.querySelectorAll('.chat .tabs .tab')];
+function paintTabs() { tabEls().forEach((t, i) => t.classList.toggle('kb', S.zone === 'tabs' && i === S.tabCursor)); }
+function tabStep(d) {
+  const next = (S.tabCursor ?? 0) + d;
+  if (next < 0) { enterZone(S.sel ? 'detail' : 'list'); return; }
+  if (next >= tabEls().length) { enterZone('chat'); return; }
+  S.tabCursor = next; paintTabs();
+}
+function renameTab(i) {
+  const m = currentAgent(), sess = (SESSIONS[m.id] || [])[i], el = tabEls()[i], t = el && el.querySelector('.t');
+  if (!sess || !t) return;
+  let done = false;
+  const inp = h('input', { class: 'rename', value: sess.title || '' });
+  const finish = (keep) => { if (done) return; done = true; if (keep && inp.value.trim()) sess.title = inp.value.trim(); renderChat(); };
+  inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') finish(true); else if (e.key === 'Escape') finish(false); });
+  inp.addEventListener('blur', () => finish(true));
+  t.replaceWith(inp); inp.focus(); inp.select();
+}
+function enterZone(z) {
+  S.zone = z;
+  const active = document.activeElement; if (active && active !== document.body && z !== 'chat') active.blur();
+  if (z === 'nav') { if (S.navCursor == null) S.navCursor = 0; }
+  else if (z === 'list') { const rows = listRows(); if (rows.length && S.cursor < 0) move(rows, 1); }
+  else if (z === 'detail') { const d = $('#detail'); const f = d && d.querySelector('.dbody textarea, .dbody input, .dbody button'); if (f) f.focus(); else if (d) { d.tabIndex = -1; d.focus(); } }
+  else if (z === 'tabs') { if (S.chat !== 'open') { S.chat = 'open'; renderTop(); renderChat(); } S.tabCursor = S.chatTab[currentAgent().id] ?? 0; }
+  else if (z === 'chat') { if (S.chat !== 'open') { S.chat = 'open'; renderTop(); renderChat(); } const c = $('#composer'); if (c) c.focus(); }
+  paintNav();
+}
+function zoneStep(d) {
+  const target = ZONES[Math.max(0, Math.min(ZONES.length - 1, ZONES.indexOf(S.zone || 'list') + d))];
+  if (target === 'detail' && !S.sel) { const rows = listRows(); if (!rows.length) return; S.cursor = Math.max(0, S.cursor); S.sel = rows[S.cursor].dataset.id; renderMain(); renderChat(); remember(); }
+  enterZone(target);
+}
 function toggleChat() { S.chat = S.chat === 'open' ? 'closed' : 'open'; renderTop(); }
 function toggleNav() { S.nav = S.nav === 'open' ? 'closed' : 'open'; renderTop(); }
 function setTheme(t) { if (t === 'dark') document.documentElement.dataset.theme = 'dark'; else delete document.documentElement.dataset.theme; try { localStorage.setItem('otto-next-theme', t); } catch {} renderAll(); }
@@ -17710,7 +17841,7 @@ function renderPalette() {
 }
 function closePalette() { $('#paletteScrim').hidden = true; }
 // Shortcuts: the frame's everywhere, a module's only on its page.
-const KEYS_GLOBAL = [['Command palette', '/'], ['Search', 'Ctrl+Space'], ['Pick a suggestion', '↑ ↓ ↵'], ['Clear the search', 'Ctrl+Shift+Space'], ['Point at anything', 'o'], ['Next, previous row', 'j k'], ['Open, close', '↵ esc'], ['Select a row', 'x'], ['Tag the row', 't'], ['Ask about it', 'a'], ['New chat, reopen last', 'c C'], ['Close the chat', 'Del'], ['Back, forward', 'Alt+← Alt+→'], ['Navigation rail', '['], ['Agent drawer', ']'], ['This list', '?']];
+const KEYS_GLOBAL = [['Rail, list, page, chats, agent', '← →'], ['A chat: pick, rename, close', '↵ F2 Del'], ['Command palette', '/'], ['Search', 'Ctrl+Space'], ['Pick a suggestion', '↑ ↓ ↵'], ['Clear the search', 'Ctrl+Shift+Space'], ['Point at anything', 'o'], ['Next, previous row', 'j k'], ['Open, close', '↵ esc'], ['Select a row', 'x'], ['Tag the row', 't'], ['Ask about it', 'a'], ['New chat, reopen last', 'c C'], ['Close the chat', 'Del'], ['Back, forward', 'Alt+← Alt+→'], ['Navigation rail', '['], ['Agent drawer', ']'], ['This list', '?']];
 const KEYS_PAGE = { email: [['Archive mail', 'e']], second_brain: [['Capture a note', 'n']], graph: [['Pick a tag', 'click'], ['Add one to the search', 'Ctrl+click'], ['Take one out', 'Ctrl+Shift+click']] };
 function openHelp() {
   const grid = (rows) => h('div', { class: 'grid' }, ...rows.map(([l, k]) => h('div', null, l, h('span', null, ...k.split(' ').map((x) => h('kbd', null, x))))));
@@ -17734,7 +17865,7 @@ function openTagPop(anchor, items) {
     list.replaceChildren(...tags.map((t) => { const on = items.every((i) => tagsOf(i).includes(t)); const locked = items.some((i) => (i.fixed || []).includes(t)); return h('div', { class: 'pi', onclick: () => { if (locked) { toast('An identity tag stays with its item; delete the item to drop it.'); return; } for (const i of items) { i.tags = i.tags || []; if (on) i.tags = i.tags.filter((x) => x !== t); else if (!i.tags.includes(t)) i.tags.push(t); } toast(`${on ? 'Removed' : 'Added'} #${t} on ${items.length} item${items.length > 1 ? 's' : ''}`); draw(); renderNav(); renderMain(); } }, h('span', { class: `chk${on ? ' on' : ''}` }), h('span', { class: 'tdot', style: `width:7px;height:7px;border-radius:50%;background:${tagHue(t)}` }), t); }));
   };
   inp.addEventListener('input', draw);
-  inp.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePops(); if (e.key === 'Enter') { const first = $('.pi', list); first && first.click(); inp.value = ''; draw(); } });
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePops(); if (e.key === 'Enter') { if (!inp.value.trim()) { closePops(); return; } const first = $('.pi', list); first && first.click(); inp.value = ''; draw(); } });
   pop.append(inp, list); document.body.append(pop); draw(); inp.focus();
 }
 function closePops() { const p = $('#tagPop'); if (p) p.remove(); }
@@ -17759,6 +17890,19 @@ function bindKeys() {
       if (S.picked.size) { S.picked.clear(); renderMain(); return; }
       return;
     }
+    if (!inField && !e.ctrlKey && !e.metaKey && !e.altKey && S.zone === 'tabs') {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); tabStep(e.key === 'ArrowRight' ? 1 : -1); return; }
+      if (e.key === 'Enter') { e.preventDefault(); const m = currentAgent(); if (S.tabCursor >= (SESSIONS[m.id] || []).length) { newChat(); S.zone = 'chat'; } else { S.chatTab[m.id] = S.tabCursor; renderChat(); } return; }
+      if (e.key === 'F2') { e.preventDefault(); renameTab(S.tabCursor); return; }
+      if (e.key === 'Delete') { e.preventDefault(); closeChat(S.tabCursor); S.tabCursor = Math.max(0, Math.min(S.tabCursor, tabEls().length - 1)); paintTabs(); return; }
+    }
+    if (!inField && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); zoneStep(e.key === 'ArrowRight' ? 1 : -1); return; }
+    if (!inField && !e.ctrlKey && !e.metaKey && !e.altKey && S.zone === 'nav') {
+      const items = navItems();
+      if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); S.navCursor = Math.min(items.length - 1, (S.navCursor ?? -1) + 1); paintNav(); return; }
+      if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); S.navCursor = Math.max(0, (S.navCursor ?? 1) - 1); paintNav(); return; }
+      if (e.key === 'Enter') { e.preventDefault(); const it = items[S.navCursor ?? 0]; if (it) { it.click(); enterZone('list'); } return; }
+    }
     if (inField || e.ctrlKey || e.metaKey || e.altKey) return;
     const rows = listRows();
     const k = e.key;
@@ -17772,7 +17916,7 @@ function bindKeys() {
     else if (k === ']') { e.preventDefault(); toggleChat(); renderChat(); }
     else if (k === 'j' || k === 'ArrowDown') { e.preventDefault(); move(rows, 1); }
     else if (k === 'k' || k === 'ArrowUp') { e.preventDefault(); move(rows, -1); }
-    else if (k === 'Enter') { const r = rows[S.cursor]; if (r) { S.sel = r.dataset.id; renderMain(); renderChat(); remember(); } }
+    else if (k === 'Enter') { const r = rows[S.cursor]; if (r) { if (S.sel === r.dataset.id) zoneStep(1); else { S.sel = r.dataset.id; renderMain(); renderChat(); remember(); } } }
     else if (k === 'x') { e.preventDefault(); const r = rows[S.cursor]; if (r) { const id = r.dataset.id; S.picked.has(id) ? S.picked.delete(id) : S.picked.add(id); renderMain(); } }
     else if (k === 't') { e.preventDefault(); const r = rows[S.cursor] || (S.sel && $(`.row[data-id="${S.sel}"]`)); if (r) { const ids = S.picked.size ? [...S.picked] : [r.dataset.id]; openTagPop(r, ITEMS.filter((i) => ids.includes(i.id))); } }
     else if (k === 'a') { S.chat = 'open'; renderTop(); renderChat(); $('#composer').focus(); e.preventDefault(); }
@@ -17793,10 +17937,12 @@ function move(rows, d) {
 function renderAll() { renderTop(); renderNav(); renderMain(); renderChat(); }
 function init() {
   try { for (const n of ['--chatw', '--listw']) { const v = localStorage.getItem(`otto-next${n}`); if (v) document.documentElement.style.setProperty(n, `${v}px`); } } catch {}
+  clampChat();
   try { const q = JSON.parse(localStorage.getItem('otto-next-quick') || 'null'); if (Array.isArray(q) && q.every((x) => x && x.page && Array.isArray(x.tokens))) S.quick = q; } catch {}
   try { const t = localStorage.getItem('otto-next-theme'); if (t === 'dark') document.documentElement.dataset.theme = 'dark'; const p = JSON.parse(localStorage.getItem('otto-next-pins') || 'null'); if (Array.isArray(p)) { for (const t of p) if (!S.quick.some((q) => tagEntry(q) && q.tokens[0].value === t)) S.quick.push({ title: t, page: `tag:${t}`, tokens: [{ kind: 'tag', value: t }] }); localStorage.removeItem('otto-next-pins'); saveQuick(); } } catch {}
   $('#themeBtn').addEventListener('click', toggleTheme);
   $('#chatBtn').addEventListener('click', () => { toggleChat(); renderChat(); });
+  document.addEventListener('mousedown', (e) => { const t = e.target.closest('.chat .tab'); const z = e.target.closest('#nav') ? 'nav' : t ? 'tabs' : e.target.closest('#chat') ? 'chat' : e.target.closest('#detail') ? 'detail' : e.target.closest('#list') ? 'list' : null; if (t) S.tabCursor = tabEls().indexOf(t); if (z) { S.zone = z; paintNav(); } });
   $('#pinBtn').replaceChildren(icon(I.pin)); $('#pinBtn').addEventListener('click', openPinPop);
   $('#chat').addEventListener('click', (e) => { if (!e.target.closest('button, a, input, textarea, .grip')) { const c = $('#composer'); if (c) c.focus(); } });
   $('#helpBtn').addEventListener('click', openHelp);
@@ -18014,10 +18160,10 @@ function topicsView() {
 const titled = (t, html) => (html.startsWith('<p>') ? `<p><strong>${esc(t)}:</strong> ${html.slice(3)}` : `<p><strong>${esc(t)}:</strong></p>${html}`);
 function questionView(i) {
   const Q = QUESTION;
-  return [h('h2', null, i.title), h('div', { class: 'stamp' }, i.status === 'completed' ? `completed, score ${i.score}` : `${i.pct}% graded`), tagLine(i),
+  return [h('h2', null, i.title), h('div', { class: 'stamp' }, i.status === 'completed' ? `completed, ${i.score}/100` : `${i.pct}% graded`), tagLine(i),
     h('div', { class: 'prose qbody', html: tex(Q.definitions) + tex(Q.premise) }),
-    ...Q.parts.map(([l, t, q, score]) => h('div', { class: 'related' }, score !== null ? h('span', { class: 'num', style: `float:right;color:${score >= 80 ? 'var(--ok)' : '#E0B54A'}` }, score) : null, h('div', { class: 'qbody', html: titled(t, tex(q)) }),
-      h('textarea', { class: 'answer' }, score !== null ? 'With a weak instrument the fitted values still carry most of the endogenous variation, so the second stage inherits the same confounding as OLS.' : ''),
+    ...Q.parts.map(([l, t, q, score]) => h('div', { class: 'related' }, score !== null ? h('span', { class: 'num', style: `float:right;color:${score >= 80 ? 'var(--ok)' : '#E0B54A'}` }, `${score}/100`) : null, h('div', { class: 'qbody', html: titled(t, tex(q)) }),
+      h('textarea', { class: 'answer', onkeydown: (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); const b = e.target.parentElement.querySelector('.actions .btn.primary'); if (b) b.click(); } } }, score !== null ? 'With a weak instrument the fitted values still carry most of the endogenous variation, so the second stage inherits the same confounding as OLS.' : ''),
       h('div', { class: 'actions', style: 'margin-top:8px' }, h('button', { class: 'btn primary', onclick: () => toast('Answer sent to the tutor; the grade lands in the drawer') }, score !== null ? 'Resubmit' : 'Submit')))),
     h('div', { class: 'actions' }, h('button', { class: 'btn' }, 'Complete quiz'), h('button', { class: 'btn danger quiet' }, 'Delete'))];
 }
@@ -18046,6 +18192,7 @@ function renderMain() {
   }
   const c = $('#main .content.split');
   if (c) c.append(h('div', { class: 'grip', onmousedown: startSplitDrag }));
+  clampChat();
 }
 function renderMainPage() {
   const main = $('#main');
