@@ -1,240 +1,213 @@
-// Chat: LEFT = every conversation by day, `+` for a new one · MIDDLE = the conversation, composer pinned below · RIGHT = its folder.
-import { Component } from '../vendor/preact.mjs';
-import { html, T, meta13, nums, Row, rowStyle, GroupHeader, Search, Icon, IconButton, Plus, Enter, Busy, More, Empty, bytes, clock, TextArea, submitOnEnter } from '../rows.js';
-import { get, post } from '../api.js';
-import { Markdown } from '../md.js';
+// Chat: every conversation by the day it last moved; the pane opens one, streams its turns and sends the next into it.
+import {
+  S, h, put, $, icon, I, hue, chk, titleCell, stampCell, acts, tagAct, byDay, newest,
+  dayLabel, dateLine, tagLine, confirmPop, toast, refresh, select, renderMain,
+} from '../core.js';
+import { get, post, sse } from '../api.js';
+import { md } from '../md.js';
 
-const RED = '#cf7b7b';
-const CLIP = '<path d="M13.5 6.5l-6 6a2 2 0 002.8 2.8l6.5-6.5a3.5 3.5 0 00-5-5L5.3 10.3a5 5 0 007 7l5-5"></path>';
-const TRASH = '<path d="M4 6h12M8 6V4h4v2M6 6l1 10h6l1-10"></path>';
-const drafts = {};   // conversation id (or 'blank') -> {draft, pending}: survives the remount a selection change causes
+// The open conversation: its turns as they stand and the reply arriving a piece at a time.
+const live = { sid: null, stop: null, turns: [], tools: {}, partial: '', busy: false, sending: false, seen: null };
+const drafts = {};   // what is half-typed, per conversation, so opening another one and coming back keeps it
+let box = null;      // the transcript element, so a streamed piece lands without rebuilding the page
+let ta = null;       // the box on screen, so a rebuild can hand the caret to the one that replaces it
+let caret = null;    // where the caret stood when that box went, until the new one has it
+let focusOn = null;  // the conversation whose box takes the caret as soon as it is drawn
+let beat = null;     // the clock that asks the daemon again while a conversation is open
 
-export async function load(app) {
-  const q = new URLSearchParams({ query: app.state.query, page: String(app.state.more) });
-  return { left: await get(`/api/chat/left?${q}`) };
-}
+const setting = (k, fallback) => (S.shell && S.shell.settings && S.shell.settings[k] !== undefined ? S.shell.settings[k] : fallback);
 
-export function Left({ app, data, mod }) {
-  const sel = app.state.sel;
-  const rerun = (patch) => app.setState(patch, () => app.refresh());
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-    <div style=${{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-      <div style=${{ flex: 1, minWidth: 0 }}><${Search} value=${app.state.query} hue=${mod.hue} onInput=${(v) => rerun({ query: v, more: 0 })} /></div>
-      <span style=${{ marginTop: 4 }}><${Plus} title="new conversation" active=${!sel} onClick=${() => app.select(null)} /></span>
-    </div>
-    ${data.left.groups.length === 0 && html`<${Empty} text=${app.state.query ? 'no matches' : 'no conversations yet'} />`}
-    ${data.left.groups.map((g) => html`<div key=${g.label} style=${{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <${GroupHeader} label=${g.label} />
-      ${g.rows.map((r) => html`<${Row} key=${r.id} row=${r} hue=${mod.hue} selected=${!!sel && String(sel.id) === String(r.id)} onSelect=${() => app.select({ module: 'chat', id: r.id })} />`)}
-    </div>`)}
-    ${data.left.more && html`<${More} onClick=${() => rerun({ more: app.state.more + 1 })} />`}
-  </div>`;
-}
-
-export function Middle(props) {
-  const sel = props.app.state.sel;
-  const id = sel ? String(sel.id) : null;
-  return html`<${Conversation} key=${id || 'blank'} ...${props} id=${id} />`;
-}
-
-export function Right({ app, data, mod }) {
-  const sel = app.state.sel;
-  return html`<div style=${{ minWidth: 0, minHeight: 0, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 14, background: T.panel, borderRadius: 6, padding: 12 }}>
-    ${sel && html`<${Files} key=${sel.id} id=${String(sel.id)} data=${data} hue=${mod.hue} />`}
-  </div>`;
-}
-
-async function upload(id, file) {
-  const fd = new FormData();
-  fd.append('file', file, file.name);
-  const r = await fetch(`/api/chat/upload/${id}`, { method: 'POST', body: fd });
-  const data = await r.json().catch(() => null);
-  if (!r.ok) throw new Error((data && data.detail) || r.statusText);
-  return data;
-}
-
-// The conversation: its stored turns, then whatever the event stream adds. `id` null is the blank composer.
-class Conversation extends Component {
-  constructor(props) {
-    super(props);
-    const d = drafts[props.id || 'blank'] || { draft: '', pending: [] };
-    this.state = { turns: [], title: '', tags: [], busy: false, partial: '', draft: d.draft, pending: d.pending, error: null, loading: !!props.id };
-    this.es = null;
-    this.toolIds = {};
-  }
-
-  componentDidMount() {
-    if (this.props.id) this.open();
-    else if (this.ta) this.ta.focus();
-  }
-
-  componentWillUnmount() {
-    if (this.es) { this.es.close(); this.es = null; }
-    drafts[this.props.id || 'blank'] = { draft: this.state.draft, pending: this.state.pending };
-  }
-
-  componentDidUpdate(prev, prevState) {
-    if (this.end && (prevState.turns.length !== this.state.turns.length || prevState.partial !== this.state.partial)) this.end.scrollIntoView({ block: 'end' });
-  }
-
-  async open() {
-    const { id } = this.props;
-    this.es = new EventSource(`/api/chat/events/${id}`);
-    this.es.onmessage = (e) => this.onEvent(JSON.parse(e.data));
-    await this.reload();
-    if (this.ta) this.ta.focus();
-  }
-
-  async reload() {
-    try {
-      const item = await get(`/api/chat/item/${this.props.id}`);
-      this.toolIds = {};
-      this.setState({ turns: item.turns, title: item.title, tags: item.tags, busy: item.busy, loading: false, error: null });
-    } catch (e) {
-      this.setState({ error: e.message, loading: false });
-    }
-  }
-
-  onEvent(ev) {
-    const turns = this.state.turns.slice();
-    let { partial, busy } = this.state;
-    if (ev.role === 'user') { turns.push({ role: 'user', text: ev.text, ts: ev.ts }); busy = true; }
-    else if (ev.role === 'delta') partial += ev.text;
-    else if (ev.role === 'model') { turns.push({ role: 'model', text: ev.text, ts: ev.ts }); partial = ''; }
-    else if (ev.role === 'tool') { this.toolIds[ev.id] = turns.length; turns.push({ role: 'tool', tool: ev.tool, status: ev.status, ts: ev.ts }); partial = ''; }
-    else if (ev.role === 'tool_result') { const i = this.toolIds[ev.id]; if (i !== undefined && turns[i]) turns[i] = { ...turns[i], status: ev.status }; }
-    else if (ev.role === 'system') turns.push({ role: 'system', text: ev.text, ts: ev.ts });
-    else if (ev.role === 'error') turns.push({ role: 'system', text: `error: ${ev.text}`, ts: ev.ts });
-    else if (ev.role === 'idle') { this.setState({ busy: false, partial: '' }); this.reload(); this.props.app.refresh(); return; }
-    else if (ev.role === 'tagged') { this.setState({ title: ev.title, tags: ev.tags }); this.props.app.refresh(); return; }
-    else return;
-    this.setState({ turns, partial, busy });
-  }
-
-  async send() {
-    const text = this.state.draft.trim();
-    if (!text || this.state.busy) return;
-    const { app, id } = this.props;
-    const files = this.state.pending;
-    this.setState({ draft: '', pending: [], error: null, busy: true });
-    try {
-      const r = await post('/api/chat/send', { id, text, files });
-      if (!id) { drafts.blank = { draft: '', pending: [] }; app.select({ module: 'chat', id: r.id }); }
-    } catch (e) {
-      this.setState({ error: e.message, draft: text, pending: files, busy: false });
-    }
-  }
-
-  async attach(fileList) {
-    const files = Array.from(fileList || []);
-    if (!files.length) return;
-    const { app } = this.props;
-    let id = this.props.id;
-    try {
-      if (!id) id = (await post('/api/chat/new')).id;
-      const names = [];
-      for (const f of files) names.push((await upload(id, f)).name);
-      if (id !== this.props.id) {
-        drafts[id] = { draft: this.state.draft, pending: names };
-        drafts.blank = { draft: '', pending: [] };
-        app.select({ module: 'chat', id });
-        return;
-      }
-      this.setState({ pending: [...this.state.pending, ...names], error: null });
-      app.refresh();
-    } catch (e) {
-      this.setState({ error: e.message });
-    }
-  }
-
-  async remove() {
-    const { app, id } = this.props;
-    if (!window.confirm(`Delete "${this.state.title}" and its files?`)) return;
-    try {
-      await post('/api/chat/delete', { id });
-      delete drafts[id];
-      app.select(null);
-      app.refresh();
-    } catch (e) {
-      this.setState({ error: e.message });
-    }
-  }
-
-  // The box, the attach clip (a drop lands here too), the busy dot and `↵`; pending files as chips above.
-  composer(hue) {
-    const { busy, draft, pending } = this.state;
-    return html`<div onDragOver=${(e) => e.preventDefault()} onDrop=${(e) => { e.preventDefault(); this.attach(e.dataTransfer.files); }}
-        style=${{ position: 'sticky', bottom: 0, background: T.ground, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-      ${pending.length > 0 && html`<div style=${{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '0 4px' }}>
-        ${pending.map((n) => html`<span key=${n} style=${{ padding: '2px 8px', borderRadius: 6, fontSize: 13, color: T.muted, boxShadow: 'inset 0 0 0 1px rgba(230,231,234,.1)' }}>${n}
-          <span onClick=${() => this.setState({ pending: pending.filter((p) => p !== n) })} style=${{ marginLeft: 6, cursor: 'pointer', color: T.dim }}>×</span></span>`)}
-      </div>`}
-      <${TextArea} taRef=${(el) => (this.ta = el)} value=${draft} hue=${hue}
-        onInput=${(e) => this.setState({ draft: e.target.value })} onKeyDown=${submitOnEnter(() => this.send())} />
-      <div style=${{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 4px' }}>
-        <label class="ring" title="attach" style=${{ display: 'grid', placeItems: 'center', width: 28, height: 28, borderRadius: 6, cursor: 'pointer', color: T.muted }}>
-          <${Icon} svg=${CLIP} size=${17} /><input type="file" multiple hidden onChange=${(e) => { this.attach(e.target.files); e.target.value = ''; }} /></label>
-        ${busy && html`<${Busy} hue=${hue} />`}
-        <${Enter} busy=${busy} onClick=${() => this.send()} />
-      </div>
-    </div>`;
-  }
-
-  render({ app, mod, fmt, id }, { turns, title, tags, busy, partial, error, loading }) {
-    const hue = mod.hue;
-    if (!id) {
-      return html`<div style=${{ paddingTop: '18vh', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        ${error && html`<div style=${{ ...meta13, color: RED }}>${error}</div>`}
-        ${this.composer(hue)}
-      </div>`;
-    }
-    return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style=${{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 28 }}>
-        <span style=${{ display: 'grid', placeItems: 'center', width: 16, height: 16, color: hue, flex: 'none' }}><${Icon} svg=${mod.icon} /></span>
-        <span style=${{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${title}</span>
-        ${tags.map((t) => html`<span key=${t} style=${{ padding: '2px 8px', borderRadius: 6, fontSize: 13, color: T.muted, boxShadow: 'inset 0 0 0 1px rgba(230,231,234,.1)', flex: 'none' }}>${t}</span>`)}
-        <span style=${{ marginLeft: 'auto' }}><${IconButton} svg=${TRASH} title="delete" onClick=${() => this.remove()} /></span>
-        <span class="bright-hover" onClick=${() => app.select(null)} style=${{ cursor: 'pointer', color: T.dim, padding: '0 4px', lineHeight: 1 }}>×</span>
-      </div>
-      ${error && html`<div style=${{ ...meta13, color: RED }}>${error}</div>`}
-      ${loading && html`<div style=${{ ...meta13, color: T.dim }}>loading…</div>`}
-      <div style=${{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        ${turns.map((t, i) => {
-          if (t.role === 'user') return html`<div key=${i} style=${{ alignSelf: 'flex-end', maxWidth: '85%', background: T.raised, borderRadius: 6, padding: '10px 12px', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>${t.text}</div>`;
-          if (t.role === 'model') return html`<div key=${i} style=${{ padding: '0 2px' }}><${Markdown} text=${t.text} /></div>`;
-          if (t.role === 'tool') return html`<div key=${i} style=${{ display: 'flex', alignItems: 'center', gap: 10, height: 28, padding: '0 4px', ...meta13, color: T.muted }}><span style=${{ color: hue }}>▸</span>${t.tool}<span style=${{ marginLeft: 'auto', color: T.dim }}>${t.status || ''}</span></div>`;
-          return html`<div key=${i} style=${{ ...meta13, color: T.dim, padding: '0 2px' }}>${t.text}${t.ts ? html`<span style=${{ marginLeft: 8 }}>${clock(t.ts, fmt)}</span>` : null}</div>`;
-        })}
-        ${partial && html`<div style=${{ padding: '0 2px' }}><${Markdown} text=${partial} /></div>`}
-        <div ref=${(el) => (this.end = el)} />
-      </div>
-      ${this.composer(hue)}
-    </div>`;
+// The stream follows the selection: opened when one is picked, closed when it changes or goes.
+function tune(id) {
+  const sid = id === null || id === undefined ? null : String(id);
+  if (live.sid === sid) return;
+  if (live.stop) live.stop();
+  clearInterval(beat);
+  caret = null;                  // the caret belonged to the conversation being left
+  Object.assign(live, { sid, stop: null, turns: [], tools: {}, partial: '', busy: false, sending: false, seen: null });
+  if (sid) {
+    live.stop = sse(`/api/chat/events/${encodeURIComponent(sid)}`, (ev) => onEvent(sid, ev));
+    beat = setInterval(repair, Math.max(5, Number(setting('ui.refresh_seconds', 30))) * 1000);   // the shell's own clock
+    watch();
   }
 }
 
-// RIGHT: the conversation's folder, reloaded whenever the page refreshes.
-class Files extends Component {
-  constructor() {
-    super();
-    this.state = { files: null };
-  }
+// A stream that reconnects subscribes to a fresh queue, so the frames it missed are gone for good, and one of them
+// may be the `idle` that unlocks the box. The daemon's record is the truth, so it is asked for again on the clock
+// for as long as a conversation is open — from Chat's page, from Home, from a tag page — and settles the box there.
+async function repair() {
+  const sid = live.sid, had = live.turns.length, was = live.busy;
+  let open = null;
+  try { open = await get(`/api/chat/item/${encodeURIComponent(sid)}`); } catch { return; }   // the next pass asks again
+  if (live.sid !== sid) return;
+  sync(open);
+  if (live.turns.length !== had || live.busy !== was) draw();
+}
 
-  componentDidMount() { this.load(); }
-  componentDidUpdate(prev) { if (prev.data !== this.props.data) this.load(); }
+// Nothing tells a page it was left, so the pane's going is read off #main, whose children every render replaces:
+// a render where the open row is no longer this conversation ends the stream, on Chat's own page or on Home's.
+let watching = false;
+function watch() {
+  const main = $('#main');
+  if (watching || !main) return;
+  watching = true;
+  new MutationObserver(() => { if (live.sid !== null && String(S.sel) !== String(live.sid)) tune(null); }).observe(main, { childList: true });
+}
 
+// The daemon's record leads: its turns are the truth, whatever the stream added past them is kept, and its `busy`
+// is what unlocks the box.
+function sync(i) {
+  if (!i || String(i.id) !== String(live.sid) || !Array.isArray(i.turns)) return;
+  const turns = i.turns.slice();
+  if (live.turns.length > turns.length) turns.push(...live.turns.slice(turns.length));
+  live.turns = turns;
+  live.busy = live.sending || !!i.busy;
+  if (!live.busy) live.partial = '';   // nothing runs, so a piece of reply a dropped stream left behind is stale
+}
+
+function onEvent(sid, ev) {
+  if (live.sid !== sid) return;
+  const add = (t) => { live.turns = [...live.turns, t]; };
+  if (ev.role === 'delta') live.partial += ev.text || '';
+  else if (ev.role === 'user') { add({ role: 'user', text: ev.text }); live.busy = true; live.partial = ''; }
+  else if (ev.role === 'model') { add({ role: 'model', text: ev.text }); live.partial = ''; }
+  else if (ev.role === 'tool') { live.tools[ev.id] = live.turns.length; add({ role: 'tool', tool: ev.tool, status: ev.status }); }
+  else if (ev.role === 'tool_result') {
+    const at = live.tools[ev.id];
+    if (at !== undefined && live.turns[at]) { const copy = live.turns.slice(); copy[at] = { ...copy[at], status: ev.status }; live.turns = copy; }
+  } else if (ev.role === 'error') add({ role: 'system', text: `error: ${ev.text}` });
+  else if (ev.role === 'system') add({ role: 'system', text: ev.text });
+  else if (ev.role === 'tagged') { reload(); return; }                                      // the title and the tags just landed
+  else if (ev.role === 'idle') { live.busy = false; live.partial = ''; draw(); reload(); return; }
+  else return;                                                                              // init and result carry nothing to show
+  draw();
+}
+
+function turnEl(t) {
+  if (t.role === 'user') return h('div', { class: 'turn user', style: 'display:inline-block;margin-bottom:10px' }, t.text || '');
+  if (t.role === 'model') return h('div', { class: 'turn model', html: md(t.text) });
+  if (t.role === 'tool') return h('div', { class: 'turn tool' }, t.tool, t.status ? h('span', { class: 'ok' }, t.status) : null);
+  return h('div', { class: 'turn tool' }, t.text || '');
+}
+function lines() {
+  const out = live.turns.map(turnEl);
+  if (live.partial) out.push(h('div', { class: 'turn model', html: md(live.partial) }));
+  return out;
+}
+// A streamed piece repaints the transcript alone, so the draft and the caret below it stay where they were.
+function draw() {
+  if (box && box.isConnected) {
+    put(box, ...lines());
+    const pane = $('#detail');
+    if (pane && live.busy) pane.scrollTop = pane.scrollHeight;
+  } else if (S.page === 'chat') renderMain();
+}
+// A finished turn moves the title, the tags and the folder, so the open conversation is fetched again.
+function reload() { S.item = null; refresh(); }
+
+async function send(el) {
+  const text = (el.value || '').trim();
+  const sid = live.sid;
+  if (!text || live.busy || !sid) return;
+  el.value = '';
+  drafts[sid] = '';
+  live.busy = true;
+  live.sending = true;      // until the daemon has the turn, its own `busy` is behind what this page knows
+  try { await post('/api/chat/send', { id: sid, text }); }
+  catch (e) {
+    toast(e.message);
+    drafts[sid] = text;
+    if (live.sid === sid) { live.busy = false; el.value = text; }
+  } finally { if (live.sid === sid) live.sending = false; }
+  draw();
+}
+
+// A rebuild puts a new box on screen: the half-typed line and the caret in it move across to it. The new box is
+// not in the page yet, so it takes the caret on the next tick, and only if it is the one that landed there.
+function composer() {
+  const el = h('textarea', {
+    spellcheck: 'false',
+    oninput: (e) => { drafts[live.sid] = e.target.value; },
+    onkeydown: (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(el); } },
+  });
+  el.value = drafts[live.sid] || '';
+  if (ta && document.activeElement === ta) caret = [ta.selectionStart, ta.selectionEnd];
+  else if (focusOn !== null && String(focusOn) === String(live.sid)) { focusOn = null; caret = [el.value.length, el.value.length]; }
+  ta = el;
+  if (caret) queueMicrotask(() => {
+    if (!caret || !el.isConnected) return;
+    el.focus();
+    el.setSelectionRange(Math.min(caret[0], el.value.length), Math.min(caret[1], el.value.length));
+    caret = null;
+  });
+  // The list's capture box, without the inset and the rule that seat it above a list.
+  return h('div', { class: 'capture open', style: 'padding:0;border-bottom:0;background:none;margin-top:14px' }, el,
+    h('div', { class: 'crow' }, h('button', { class: 'btn primary', title: 'Send', onclick: () => send(el) }, icon(I.up))));
+}
+
+// One action the daemon offers: a link opens, anything that asks or removes goes through the confirm.
+function runAction(a, item, anchor) {
+  if (a.href) { window.open(a.href, '_blank', 'noopener'); return; }
+  const go = async () => {
+    try { await post(`/api/chat/action/${a.verb}`, { id: item.id }); }
+    catch (e) { toast(e.message); return; }
+    if (a.removes) { delete drafts[item.id]; if (String(S.sel) === String(item.id)) select(null); }
+    refresh();
+  };
+  if (a.confirm) confirmPop(anchor, a.confirm, go); else go();
+}
+const btnClass = (a) => `btn${a.primary ? ' primary' : a.confirm || a.removes ? ' danger' : ''}`;
+function actionRow(item) {
+  const list = item.actions || [];
+  if (!list.length) return null;
+  return h('div', { class: 'actions' }, ...list.map((a) => h('button', {
+    class: btnClass(a),
+    onclick: (e) => runAction(a, item, e.currentTarget),
+  }, a.label)));
+}
+// The row offers the same verbs the daemon put on the conversation; Tag is the shell's own.
+const rowActs = (i) => [tagAct(i), ...(i.actions || []).map((a) => [a.label, (e) => runAction(a, i, e.currentTarget), a.removes ? I.trash : null])];
+
+async function newChat() {
+  let made;
+  try { made = await post('/api/chat/new'); }
+  catch (e) { toast(e.message); return; }
+  focusOn = made.id;
+  await refresh();
+  select(made.id);
+}
+
+// Also the pane a tag page or Home opens on a conversation, so the stream is tuned here and not only from the list.
+function detail(i) {
+  tune(i.id);
+  if (i !== live.seen) { live.seen = i; sync(i); }   // each fetch of the conversation is a fresh object, and settles it
+  const files = i.files || [];
+  box = h('div', { class: 'prose', style: `white-space:normal;--c:${hue('chat')}` }, ...lines());
+  return [
+    h('h2', null, i.title),
+    i.when ? dateLine(dayLabel(i.when)) : null,
+    tagLine(i),
+    files.length ? h('dl', { class: 'kv' }, h('dt', null, 'Files'), h('dd', null, ...files.map((f, n) => [
+      n ? ', ' : null,
+      h('a', { href: `/api/chat/file/${encodeURIComponent(i.id)}/${encodeURIComponent(f.name)}`, target: '_blank', style: 'color:var(--ink-2)' }, f.name),
+    ]))) : null,
+    box,
+    composer(),
+    actionRow(i),
+  ];
+}
+
+export default {
+  cols: '18px minmax(0,1fr) 70px',
+  chips: ['All'],
   async load() {
-    try { this.setState({ files: await get(`/api/chat/files/${this.props.id}`) }); } catch { this.setState({ files: [] }); }
-  }
-
-  render({ id, hue }, { files }) {
-    const list = files || [];
-    return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <${GroupHeader} label="files" />
-      ${list.map((f) => html`<div key=${f.name} class="row" onClick=${() => window.open(`/api/chat/file/${id}/${encodeURIComponent(f.name)}`, '_blank')} style=${rowStyle({ hue, height: 32 })}>
-        <span style=${{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${f.name}</span>
-        <span style=${{ ...meta13, ...nums, color: T.dim, flex: 'none' }}>${bytes(f.bytes)}</span>
-      </div>`)}
-    </div>`;
-  }
-}
+    const d = await get('/api/chat/left');
+    const actions = d.actions || [];
+    return { items: (d.groups || []).flatMap((g) => g.rows || []).map((r) => ({ ...r, actions })) };
+  },
+  filter: (list) => list,
+  groups: (list) => byDay(list.slice().sort(newest)),
+  cells: (i) => [chk(i), titleCell(i), stampCell(i, true), acts(i, rowActs(i))],
+  tools: () => [h('button', { title: 'New conversation', class: 'ico btn primary', onclick: newChat }, icon(I.plus))],
+  detail,
+};

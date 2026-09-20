@@ -5,7 +5,7 @@ from app.modules import Agent, Manifest
 MANIFEST = Manifest(
     name="chat",
     title="Chat",
-    hue="#d9915b",
+    hue="#E0A06E",
     icon='<path d="M4 4h12v9H9l-4 3v-3H4Z"></path>',
     order=1,   # ties with Email; the registry loads packages alphabetically and sorts stably, so Chat sits first after Home
     agent=Agent(

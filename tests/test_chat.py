@@ -5,6 +5,7 @@ import json
 
 from app.config import Chat
 from app.daemon import build
+from app.modules.chat.routes import rows as rows_hook
 from app.modules.graph import build as graph_build
 from app.modules.newsfeed import tasks as feed_tasks
 from app.runner import JobFailed
@@ -88,13 +89,17 @@ def test_chat_conversation_lifecycle(config):
             resources = {j["resource"] for j in st.store.query("SELECT resource FROM app_jobs WHERE task = 'chat.turn'")}
             assert resources == {f"session:{sid}", f"session:{sid2}"}
             left = (await c.get("/api/chat/left")).json()
-            assert left["more"] is False and [r["text"] for r in left["groups"][0]["rows"]] == ["something else", "Notes about x"]
+            assert left["more"] is False and [r["title"] for r in left["groups"][0]["rows"]] == ["something else", "Notes about x"]
+            tagged = left["groups"][0]["rows"][1]
+            assert tagged == {"id": sid, "module": "chat", "title": "Notes about x", "when": tagged["when"], "tags": ["notes", "chat"], "fixed": []}
+            assert [r["id"] for r in rows_hook(st.store, 10)] == [sid2, sid]   # the ROWs /api/items and Home's Recent read
             assert [r["id"] for r in (await c.get("/api/chat/left?query=heading")).json()["groups"][0]["rows"]] == [sid]
             assert (await c.get("/api/chat/left?query=zzz")).json()["groups"] == []
             n = next(n for n in (await c.get("/api/home/numbers")).json() if n["module"] == "chat")
             assert n["value"] == 2 and n["label"] == "conversations"
             # delete is the only removal: row, turns and folder
-            assert (await c.post("/api/chat/delete", json={"id": sid2})).status_code == 200
+            assert (await c.post("/api/chat/action/nope", json={"id": sid2})).status_code == 404
+            assert (await c.post("/api/chat/action/delete", json={"id": sid2})).status_code == 200
             assert st.store.one("SELECT id FROM app_sessions WHERE id = ?", (sid2,)) is None
             assert st.store.scalar("SELECT COUNT(*) FROM app_session_turns WHERE session_id = ?", (sid2,)) == 0
             assert not (config.data.workspace / "chat" / sid2).exists() and len((await c.get("/api/chat/left")).json()["groups"][0]["rows"]) == 1

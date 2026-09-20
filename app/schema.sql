@@ -96,3 +96,14 @@ CREATE TABLE IF NOT EXISTS app_llm_runs (
   session_id TEXT,
   budgeted   INTEGER NOT NULL DEFAULT 1   -- 0 for user-triggered runs (session close tagging)
 );
+
+-- The owner's tags on any module's row. Second Brain keeps its own second_brain_tags (its tools write there);
+-- every other module's tags live here. item_id is TEXT because a module's id may be a Gmail message id.
+CREATE TABLE IF NOT EXISTS app_tags (
+  module  TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  tag     TEXT NOT NULL,            -- stripped and lowercased, so one spelling is one tag
+  ts      TEXT NOT NULL,
+  PRIMARY KEY (module, item_id, tag)
+);
+CREATE INDEX IF NOT EXISTS app_tags_tag ON app_tags(tag);

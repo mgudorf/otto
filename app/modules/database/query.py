@@ -1,9 +1,12 @@
 """Execution against Otto's own store. `read` uses the mode=ro connection, so SQLite itself refuses
-a write; `execute` uses the read-write one, where anything SQLite accepts runs. Nothing parses SQL.
-Shared by the routes and the MCP tools."""
+a write; `write` uses the read-write one and holds the whole script in one transaction, so a script
+either lands whole or not at all; `execute` is the bare read-write drive both of those sit on.
+Nothing parses SQL. Shared by the routes and the MCP tools."""
 
 from __future__ import annotations
 
+import csv
+import io
 import sqlite3
 import time
 from functools import lru_cache
@@ -116,12 +119,18 @@ def _drive(conn: sqlite3.Connection, stmts: list[str], max_rows: int, max_second
 
 
 def read(store: Store, sql: str, max_rows: int, max_seconds: float) -> dict:
-    """Read-only: a write fails inside SQLite, never here."""
+    """Read-only: a write fails inside SQLite, never here. A refused write leaves the read transaction
+    sqlite3 opened for it, and that would pin this connection to a stale snapshot, so it is rolled back."""
     stmts = statements(sql)
     if not stmts:
         return {"error": "empty statement"}
     with store.ro_lock:
-        return _drive(store.read_only(), stmts, max_rows, max_seconds)
+        conn = store.read_only()
+        try:
+            return _drive(conn, stmts, max_rows, max_seconds)
+        finally:
+            if conn.in_transaction:
+                conn.rollback()
 
 
 def execute(store: Store, sql: str, max_rows: int, max_seconds: float) -> dict:
@@ -133,6 +142,32 @@ def execute(store: Store, sql: str, max_rows: int, max_seconds: float) -> dict:
         return {"error": "empty statement"}
     with store.raw() as conn:
         return _drive(conn, stmts, max_rows, max_seconds)
+
+
+def write(store: Store, sql: str, max_seconds: float) -> dict:
+    """Every statement in one transaction: the script lands whole or not at all, whatever the owner's
+    own BEGIN said. Rows are never fetched, so {changes, ms} is all a write reports."""
+    stmts = statements(sql)
+    if not stmts:
+        return {"error": "empty statement"}
+    with store.raw() as conn:
+        conn.execute("BEGIN")
+        r = _drive(conn, stmts, 0, max_seconds)
+        if conn.in_transaction:
+            conn.execute("ROLLBACK" if "error" in r else "COMMIT")
+    out = {"changes": r.get("changed", 0), "ms": r.get("ms", 0.0)}
+    return {**out, "error": r["error"]} if "error" in r else out
+
+
+def csv_text(store: Store, name: str) -> str:
+    """One table as CSV, its column names first. The caller checks the name against `tables`."""
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    with store.ro_lock:
+        cur = store.read_only().execute(f'SELECT * FROM "{name}"')
+        writer.writerow([d[0] for d in cur.description])
+        writer.writerows([_cell(v) for v in row] for row in cur)
+    return out.getvalue()
 
 
 def explain(store: Store, sql: str, max_rows: int, max_seconds: float) -> dict:

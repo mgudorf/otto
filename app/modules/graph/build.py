@@ -8,20 +8,20 @@ from __future__ import annotations
 from collections import defaultdict
 from itertools import combinations
 
+from app.store import tag_key as key   # one spelling per tag, the platform's
+
 SOURCES = """
-SELECT 'second_brain' AS src, m.id AS item, t.tag AS tag, m.created_at AS ts
+SELECT 'second_brain' AS src, CAST(m.id AS TEXT) AS item, t.tag AS tag, m.created_at AS ts
   FROM second_brain_tags t JOIN second_brain_items m ON m.id = t.item_id
+UNION ALL
+SELECT a.module, a.item_id, a.tag, a.ts FROM app_tags a
 UNION ALL
 SELECT 'session', s.id, j.value, COALESCE(s.closed_at, s.opened_at)
   FROM app_sessions s, json_each(s.tags) j
  WHERE s.tags IS NOT NULL
 """
 # Every tagged session counts, open or closed: the module panes are tagged when they close, a Chat conversation after its first turn.
-
-
-def key(tag: str) -> str:
-    """Tags are case-insensitive: `GRADient descent` and `gradient DESCENT` are one node."""
-    return str(tag).strip().lower()
+# A tag the owner writes on an email or a transaction lands in app_tags and reaches the graph the same way.
 
 
 def raw_tags(conn) -> set[str]:
@@ -50,7 +50,7 @@ def rebuild(conn) -> tuple[int, int]:
         n = nodes.setdefault(tag, {"seen": set(), "items": 0, "sessions": 0, "last_seen": ""})
         if (src, item) not in n["seen"]:
             n["seen"].add((src, item))
-            n["items" if src == "second_brain" else "sessions"] += 1
+            n["sessions" if src == "session" else "items"] += 1
         n["last_seen"] = max(n["last_seen"], ts)
         per_item[(src, item)].add(tag)
     cooccur: dict[tuple[str, str], int] = defaultdict(int)

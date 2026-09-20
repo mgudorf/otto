@@ -1,6 +1,7 @@
-"""Database module: both executors, run/explain/save through the app, the tables by module with their schemas, and the tool split."""
+"""Database module: every executor, run/write/explain/save through the app, the tables by module with their schemas, the CSV export, and the tool split."""
 
 import dataclasses
+import re
 import sqlite3
 
 import httpx
@@ -58,6 +59,22 @@ def test_execute_writes(store):
     assert store.scalar("SELECT value FROM app_cursors WHERE key = 'b'") == "9"  # connection still usable
 
 
+def test_write_is_all_or_nothing(store):
+    query.execute(store, "insert into app_cursors(key, value) values ('a', '1')", 10, 5)
+    r = query.write(store, "update app_cursors set value = '9'; select nope from nothing", 5)
+    assert r["error"].startswith("statement 2:") and r["changes"] == 1
+    assert store.scalar("SELECT value FROM app_cursors WHERE key = 'a'") == "1"   # the update rolled back with it
+    r = query.write(store, "insert into app_cursors(key, value) values ('b', '2'); delete from app_cursors where key = 'a'", 5)
+    assert r["changes"] == 2 and "error" not in r and r["ms"] >= 0
+    assert [dict(x) for x in store.query("SELECT key, value FROM app_cursors")] == [{"key": "b", "value": "2"}]
+    assert query.write(store, "  ", 5)["error"] == "empty statement"
+
+
+def test_csv_carries_the_whole_table(store):
+    query.execute(store, "create table t(a, b); insert into t values ('one, two', null), ('x', 2)", 10, 5)
+    assert query.csv_text(store, "t").strip().split("\n") == ["a,b", '"one, two",', "x,2"]
+
+
 def test_owners_come_from_the_schemas():
     owners = query.owners()
     assert owners["app_events"] == "app" and owners["second_brain_items"] == "second_brain" and owners["newsfeed_items"] == "newsfeed"
@@ -75,9 +92,15 @@ def test_database_run_explain_save(config):
                 await c.post("/api/second_brain/action/capture", json={"kind": "note", "text": text})
             r = (await c.post("/api/database/action/run", json={"sql": "select id, text from second_brain_items order by id"})).json()
             assert r["columns"] == ["id", "text"] and r["total"] == 2 and r["truncated"] is True and r["rows"][0][1] == "a"
+            # a write is refused by SQLite on the read-only connection, which is what asks the owner
             r = (await c.post("/api/database/action/run", json={"sql": "delete from second_brain_items where text = 'c'"})).json()
-            assert r["changed"] == 1 and r["columns"] == []
+            assert r == {"needs_confirm": True}
+            assert app.state.store.scalar("SELECT COUNT(*) FROM second_brain_items") == 3
+            r = (await c.post("/api/database/action/write", json={"sql": "delete from second_brain_items where text = 'c'"})).json()
+            assert r["changes"] == 1 and r["ms"] >= 0 and r["backup"].endswith("-pre-write.db")
+            assert (config.data.db.parent / "backups" / r["backup"]).exists()
             assert app.state.store.scalar("SELECT COUNT(*) FROM second_brain_items") == 2
+            assert (await c.post("/api/database/action/write", json={"sql": "  "})).status_code == 400
             r = (await c.post("/api/database/action/explain", json={"sql": "select * from second_brain_items where id = 1;"})).json()
             assert r["lines"] and "second_brain_items" in r["lines"][0]
             # LEFT: the tables under their modules, app first then rail order; shadow tables and sqlite_* stay hidden
@@ -105,7 +128,16 @@ def test_database_run_explain_save(config):
             assert len(saved) == 1 and saved[0]["name"] == "recent" and saved[0]["id"] == qid and saved[0]["sql"].startswith("select")
             assert (await c.post("/api/database/action/save", json={"name": "recent", "sql": "select id from second_brain_items"})).json()["id"] == qid
             assert (await c.post("/api/database/action/save", json={"name": "", "sql": "x"})).status_code != 200
-            assert (await c.post("/api/database/action/delete", json={"id": qid})).status_code == 200
+            saved_item = (await c.get(f"/api/database/item/query:{qid}")).json()
+            assert saved_item["kind"] == "query" and saved_item["title"] == "recent" and saved_item["sql"].startswith("select id")
+            assert saved_item["actions"] == [{"verb": "delete", "label": "Delete", "confirm": 'Delete "recent"?', "removes": True}]
+            assert (await c.get("/api/database/item/query:9999")).status_code == 404
+            # the rows hook is the saved queries, each stamped; a table carries no moment, so Home's Recent cannot order it
+            kept = app.state.registry.get("database").rows(app.state.store, 200)
+            assert [r["id"] for r in kept] == [f"query:{qid}"] and kept[0]["title"] == "recent" and kept[0]["when"]
+            assert kept[0]["fixed"] == [] and kept[0]["tags"] == []
+            # the page sends back the id it was listed under, prefix and all
+            assert (await c.post("/api/database/action/delete", json={"id": f"query:{qid}"})).status_code == 200
             assert (await c.get("/api/database/left")).json()["saved"] == []
             blank = (await c.get("/api/database/blank")).json()
             assert blank["db"] == "otto.db" and blank["size_bytes"] > 0 and blank["tables"] == len(tables)
@@ -116,8 +148,23 @@ def test_database_run_explain_save(config):
             assert "1 rows: delete from second_brain_items" in next(e["text"] for e in ev["events"] if e["verb"] == "wrote")
             ctx = app.state.registry.get("database").context(app.state.store, app.state.registry)
             assert "\napp:\n" in ctx and "\nsecond_brain:\n  second_brain_fts (2): text\n  second_brain_items (2): id, kind, text" in ctx
+            # with the query deleted the hook has nothing left, and one table's pane carries its columns and its Export
+            assert app.state.registry.get("database").rows(app.state.store, 200) == []
+            row = (await c.get("/api/database/item/second_brain_items")).json()
+            assert row["module"] == "database" and row["owner"] == "second_brain" and row["count"] == 2 and row["fixed"] == []
+            assert [x["name"] for x in row["columns"]] == ["id", "kind", "text", "created_at", "updated_at", "done_at"]
+            assert row["actions"] == [{"verb": "export", "label": "Export", "primary": True, "href": "/api/database/export/second_brain_items"}]
+            assert (await c.get("/api/database/item/second_brain_fts_data")).status_code == 404
+            # the whole table as CSV, named after the table and the moment
+            csv = await c.get("/api/database/export/second_brain_items")
+            assert csv.status_code == 200 and csv.headers["content-type"].startswith("text/csv")
+            assert re.search(r'filename="second_brain_items-\d{8}-\d{6}\.csv"', csv.headers["content-disposition"])
+            lines = csv.text.strip().split("\n")
+            assert lines[0].startswith("id,kind,text") and len(lines) == 3 and ",a," in lines[1]
+            assert (await c.get("/api/database/export/nope")).status_code == 404
+            assert next(e["text"] for e in (await c.get("/api/events?module=database")).json()["events"] if e["verb"] == "exported").startswith("second_brain_items: 2 rows")
             # a table no schema owns shows under `other`, last
-            assert (await c.post("/api/database/action/run", json={"sql": "create table scratch(x)"})).json()["ddl"] is True
+            assert (await c.post("/api/database/action/write", json={"sql": "create table scratch(x)"})).json()["changes"] == 0
             left = (await c.get("/api/database/left")).json()
             assert left["modules"][-1] == {"name": "other", "rows": 0, "tables": [{"name": "scratch", "module": "other", "rows": 0}]}
             assert (await c.get("/api/database/table/scratch")).json()["module"] == "other"

@@ -46,7 +46,7 @@ def test_newsfeed_end_to_end(config):
         async with client_for(app) as c:
             shell = (await c.get("/api/shell")).json()
             feed = next(m for m in shell["modules"] if m["name"] == "newsfeed")
-            assert feed["hue"] == "#c98ba8" and feed["agent"]["skills"] == ["recall", "searches", "add", "tag"]
+            assert feed["hue"] == "#D79EBB" and feed["agent"]["skills"] == ["recall", "searches", "add", "tag"]
             assert {m["name"] for m in shell["modules"]}.isdisjoint({"business", "social", "web_search"})
             assert (await c.get("/api/newsfeed/blank")).json()["searches"] == []
 
@@ -59,8 +59,11 @@ def test_newsfeed_end_to_end(config):
             assert left["chip"] == "All" and left["chips"] == ["All", "Open", "Accepted"]
             assert [r["id"] for g in left["groups"] for r in g["rows"]] == [a, b]
             rows = {r["id"]: r for g in left["groups"] for r in g["rows"]}
-            assert rows[a]["unread"] is True and "stampText" not in rows[a]                      # open reads as unread; no dot
-            assert len(rows[b]["stampText"]) == 14 and rows[b]["stampText"][6] == "-"            # "Fri 10-09-2026"
+            assert rows[a]["title"] == "Acme is hiring" and rows[a]["status"] == "open" and "happens" not in rows[a]
+            assert rows[a]["search"] == "jobs" and len(rows[a]["when"]) == 16                    # the day found, in the owner's clock
+            assert rows[b]["happens"] == f"{_day(3)}T19:00" and rows[b]["fixed"] == ["game"] and rows[b]["tags"] == []
+            assert (await c.post("/api/tags/add", json={"module": "newsfeed", "id": a, "tags": ["Remote"]})).json()["tags"] == ["remote"]
+            assert [r["id"] for r in (await c.get("/api/items?tags=remote")).json()["items"]] == [a]   # the owner's tags, through the rows hook
             assert (await c.get("/api/newsfeed/left?query=game")).json()["groups"] != []      # a tag is searchable
             assert (await c.get("/api/newsfeed/left?query=acme")).json()["groups"] != []
             assert (await c.get("/api/newsfeed/left?chip=Accepted")).json()["groups"] == []

@@ -1,76 +1,134 @@
-// Second Brain: LEFT = search, All · Tasks, rows by day · MIDDLE blank = the capture box and open suggestions.
-// A capture is a note, a link when it starts with a URL, or a task when the chip is on; the kind is never written out.
-import { html, T, meta13, Row, GroupHeader, Chips, Search, Button, Empty, More, TextArea, submitOnEnter, Enter, input } from '../rows.js';
+// Second Brain: capture and recall. A task carries a box that completes it, anything else its kind's mark;
+// the suggestions the nightly run proposes sit on their own plate above the days.
+import { S, $, h, I, icon, hue, modOf, chk, titleCell, stampCell, acts, tagAct, byDay, newest,
+  dateLine, tagLine, segEl, confirmPop, dayLabel, select, refresh, renderMain, toast } from '../core.js';
 import { get, post } from '../api.js';
-import { Inspector } from '../shell.js';
 
-export async function load(app) {
-  const { query, chip, more } = app.state;
-  const q = new URLSearchParams({ query, chip, page: String(more) });
-  const [left, blank] = await Promise.all([get(`/api/second_brain/left?${q}`), get('/api/second_brain/blank')]);
-  return { left, blank };
+const MOD = 'second_brain';
+const MARK = { link: I.link, quote: I.quote, note: I.note, fact: I.note };
+let kind = 'Note';                                   // what the capture box writes; every opening starts on Note
+
+const act = (verb, body) => post(`/api/${MOD}/action/${verb}`, body);
+// Every write is the daemon's; the page reloads from it rather than changing a row in place.
+async function run(verb, body, after) {
+  try { await act(verb, body); } catch (e) { toast(e.message); return; }
+  if (after) after();
+  await refresh();
 }
-
-export function Left({ app, data, mod }) {
-  const sel = app.state.sel;
-  const rerun = (patch) => app.setState(patch, () => app.refresh());
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-    <${Search} value=${app.state.query} hue=${mod.hue} onInput=${(v) => rerun({ query: v, more: 0 })} />
-    <${Chips} chips=${data.left.chips} active=${data.left.chip} hue=${mod.hue} onPick=${(c) => rerun({ chip: c, more: 0 })} />
-    ${data.left.groups.length === 0 && html`<${Empty} text=${app.state.query ? 'no matches' : 'nothing captured yet'} />`}
-    ${data.left.groups.map((g) => html`<div key=${g.label} style=${{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <${GroupHeader} label=${g.label} />
-      ${g.rows.map((r) => html`<${Row} key=${r.id} row=${r} hue=${mod.hue} selected=${!!sel && String(sel.id) === String(r.id)} onSelect=${() => app.select({ module: 'second_brain', id: r.id })} />`)}
-    </div>`)}
-    ${data.left.more && html`<${More} onClick=${() => rerun({ more: app.state.more + 1 })} />`}
-  </div>`;
-}
-
-const capture = { task: false, text: '', tags: '' };
-let tagDraft = '';
-
-export function Middle({ app, data, mod, fmt }) {
-  const hue = mod.hue;
-  if (app.state.sel) {
-    const item = app.state.item;
-    const act = async (a) => {
-      if (a.href) { window.open(a.href, '_blank'); return; }
-      if (a.confirm && !window.confirm(a.confirm)) return;
-      await post(`/api/second_brain/action/${a.verb}`, { id: item.id });
-      if (a.removes) app.select(null); else app.loadItem(app.state.sel);
-      app.refresh();
-    };
-    const tags = item && !item.error ? html`<div style=${{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', ...meta13, color: T.muted }}>
-      ${(item.tags || []).map((t) => html`<span key=${t} class="ring" title="remove" onClick=${async () => { await post('/api/second_brain/action/untag', { id: item.id, tag: t }); app.loadItem(app.state.sel); }} style=${{ padding: '2px 8px', borderRadius: 6, cursor: 'pointer', boxShadow: 'inset 0 0 0 1px rgba(230,231,234,.1)' }}>${t}</span>`)}
-      <input placeholder="+ tag" value=${tagDraft} onInput=${(e) => { tagDraft = e.target.value; }}
-        onKeyDown=${async (e) => { if (e.key === 'Enter' && e.target.value.trim()) { const v = e.target.value.trim(); tagDraft = ''; e.target.value = ''; await post('/api/second_brain/action/tag', { id: item.id, tags: [v] }); app.loadItem(app.state.sel); app.refresh(); } }}
-        style=${input(hue, { width: 96, height: 26, background: T.raised })} />
-    </div>` : null;
-    return html`<${Inspector} app=${app} item=${item} mod=${mod} fmt=${fmt} onAction=${act}>${tags}<//>`;
+// A row that has left the list takes its tick and the pane with it: nothing stays selected that is no longer there.
+const drop = (i) => { S.picked.delete(String(i.id)); if (String(S.sel) === String(i.id)) select(null); };
+const flip = (i) => run(i.done ? 'reopen' : 'done', { id: i.id });
+// One write per task: a failure is said once and the rest still go, and only what completed is let go of.
+async function doneAll(on) {
+  let failed = null;
+  for (const t of on.filter((i) => i.kind === 'task' && !i.done)) {
+    try { await act('done', { id: t.id }); S.picked.delete(String(t.id)); } catch (e) { failed = e.message; }
   }
-  const b = data.blank;
-  const save = async () => {
-    const text = capture.text.trim();
-    if (!text) return;
-    const kind = capture.task ? 'task' : /^https?:\/\//i.test(text) ? 'link' : 'note';
-    await post('/api/second_brain/action/capture', { kind, text, tags: capture.tags.split(',').map((t) => t.trim()).filter(Boolean) });
-    capture.text = ''; capture.tags = ''; capture.task = false;
-    app.refresh();
-  };
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-    <${TextArea} value=${capture.text} onInput=${(e) => { capture.text = e.target.value; }} onKeyDown=${submitOnEnter(save)} hue=${hue} style=${{ background: T.panel }} />
-    <div style=${{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span class="ring" onClick=${() => { capture.task = !capture.task; app.forceUpdate(); }} style=${{ padding: '3px 9px', borderRadius: 6, fontSize: 13, cursor: 'pointer', background: capture.task ? hue : 'transparent', color: capture.task ? T.ground : T.muted }}>task</span>
-      <input placeholder="tags" value=${capture.tags} onInput=${(e) => { capture.tags = e.target.value; }} onKeyDown=${(e) => { if (e.key === 'Enter') save(); }} style=${input(hue, { flex: 1 })} />
-      <${Enter} onClick=${save} />
-    </div>
-    ${b.suggestions.length > 0 && html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 16 }}>
-      <${GroupHeader} label="suggested" />
-      ${b.suggestions.map((s) => html`<div key=${s.id} style=${{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 36, padding: '6px 12px', borderRadius: 6, background: T.panel }}>
-        <span style=${{ flex: 1, minWidth: 0 }}>${s.text}</span>
-        <${Button} label="Accept" hue=${hue} onClick=${async () => { await post('/api/second_brain/action/accept', { id: s.id }); app.refresh(); }} />
-        <${Button} label="Dismiss" onClick=${async () => { await post('/api/second_brain/action/dismiss', { id: s.id }); app.refresh(); }} />
-      </div>`)}
-    </div>`}
-  </div>`;
+  if (failed) toast(failed);
+  await refresh();
 }
+
+// ---- capture ------------------------------------------------------------------------------------
+// A link is a link because it starts with one; the segment is the only thing that says task.
+async function save() {
+  const box = $('#captureBox'), tagBox = $('#captureTags');
+  const text = box ? box.value.trim() : '';
+  if (!text) return;
+  const tags = ((tagBox && tagBox.value.match(/[\w-]+/g)) || []).map((t) => t.toLowerCase());
+  const k = kind === 'Task' ? 'task' : /^https?:\/\//i.test(text) ? 'link' : 'note';
+  await run('capture', { kind: k, text, tags }, () => { S.capture = false; });
+}
+function openCapture() {
+  S.capture = !S.capture;
+  if (S.capture) kind = 'Note';
+  renderMain();
+  const box = $('#captureBox');
+  if (S.capture && box) box.focus();
+}
+function captureBox() {
+  const close = () => { S.capture = false; renderMain(); };
+  const seg = segEl(['Note', 'Task'], kind, (k) => { kind = k; for (const b of seg.children) b.classList.toggle('on', b.textContent === k); });
+  const keys = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save(); } if (e.key === 'Escape') close(); };
+  return h('div', { class: `capture${S.capture ? ' open' : ''}` },
+    h('textarea', { id: 'captureBox', onkeydown: keys }),
+    h('div', { class: 'crow' }, seg,
+      h('input', { id: 'captureTags', placeholder: '#', autocomplete: 'off', spellcheck: 'false', onkeydown: keys }),
+      h('button', { class: 'btn primary', onclick: save }, 'Save')));
+}
+
+// ---- the daemon's verbs -------------------------------------------------------------------------
+// What can be done with a row, and the question a destructive one asks, are the daemon's answer. Rows and the
+// pane both carry that list, so a button on a row and the same button in the pane ask the same thing.
+const actionOf = (i, verb) => (i.actions || []).find((a) => a.verb === verb);
+const fire = (i, a) => (e) => {
+  if (a.href) { window.open(a.href, '_blank', 'noopener'); return; }
+  const write = () => run(a.verb, { id: i.id }, () => { if (a.removes) drop(i); });
+  if (a.confirm) confirmPop(e.currentTarget, a.confirm, write); else write();
+};
+const rowAct = (i, verb, svg) => { const a = actionOf(i, verb); return a ? [a.label, fire(i, a), svg] : null; };
+// Red is for what destroys, which is what the daemon asks about first; a link opens under its own symbol.
+function actionEls(i) {
+  return h('div', { class: 'actions' }, ...(i.actions || []).map((a) => (a.href
+    ? h('button', { title: a.label, class: `ico btn${a.primary ? ' primary' : ''}`, onclick: fire(i, a) }, icon(I.external))
+    : h('button', { class: `btn${a.primary ? ' primary' : a.confirm ? ' danger' : ''}`, onclick: fire(i, a) }, a.label))));
+}
+
+// ---- rows ---------------------------------------------------------------------------------------
+const itemCells = (i) => [
+  chk(i),
+  i.kind === 'task'
+    ? h('span', { class: 'box', style: `--c:${hue(MOD)}`, onclick: (e) => { e.stopPropagation(); flip(i); } })
+    : icon(MARK[i.kind] || I.note),
+  titleCell(i, undefined, { hideFixed: true }),
+  stampCell(i, true),
+  acts(i, i.kind === 'task'
+    ? [rowAct(i, i.done ? 'reopen' : 'done'), tagAct(i)]
+    : [tagAct(i), rowAct(i, 'forget', I.trash)]),
+];
+// A suggestion is not one of the owner's items: the daemon marks it untaggable, so the tick, ctrl-click, x, t and
+// the bulk bar all pass it by, and the cell follows that one flag rather than restating it.
+const suggestionCells = (i) => [
+  chk(i),
+  icon(modOf(MOD).icon),
+  titleCell(i, undefined, { hideFixed: true }),
+  stampCell(i, true),
+  acts(i, [rowAct(i, 'accept'), rowAct(i, 'dismiss')]),
+];
+
+// ---- detail -------------------------------------------------------------------------------------
+const when = (i) => `${dayLabel(i.when)} ${String(i.when).slice(11, 16)}`.trim();
+const stampOf = (i) => (i.when ? dateLine(when(i)) : null);
+
+export default {
+  cols: '18px 14px minmax(0,1fr) 70px',
+  chips: ['All', 'Tasks', 'Notes', 'Links'],
+  async load() {
+    const [left, blank] = await Promise.all([get(`/api/${MOD}/left`), get(`/api/${MOD}/blank`)]);
+    const items = (left.groups || []).flatMap((g) => g.rows || []);
+    return { items: [...(blank.suggestions || []), ...items] };
+  },
+  filter: (list, chip) => (chip === 'Tasks' ? list.filter((i) => i.kind === 'task')
+    : chip === 'Notes' ? list.filter((i) => ['note', 'quote', 'fact'].includes(i.kind))
+      : chip === 'Links' ? list.filter((i) => i.kind === 'link') : list),
+  groups: (list) => {
+    const open = list.filter((i) => i.kind === 'suggestion').sort(newest);
+    const rest = list.filter((i) => i.kind !== 'suggestion').sort(newest);
+    return [...(open.length ? [{ label: '', rows: open }] : []), ...byDay(rest)];
+  },
+  cells: (i) => (i.kind === 'suggestion' ? suggestionCells(i) : itemCells(i)),
+  rowClass: (i) => (i.done ? 'done dim' : ''),
+  tools: () => [h('button', { title: 'Capture', class: 'ico btn primary', onclick: openCapture }, icon(I.plus))],
+  above: () => captureBox(),
+  bulk: (on) => (on.some((i) => i.kind === 'task' && !i.done)
+    ? [h('button', { title: 'Done', class: 'ico btn', onclick: () => doneAll(on) }, icon(I.check))]
+    : []),
+  // An item's text is its title, and the owner's notes run to paragraphs: the first line is the heading and the rest
+  // is prose, so a long note reads as a note instead of as one long heading.
+  detail: (i) => {
+    const text = String(i.title || ''), cut = text.indexOf('\n');
+    const head = cut === -1 ? (text.length > 120 ? `${text.slice(0, 120).trimEnd()}…` : text) : text.slice(0, cut);
+    const rest = cut === -1 ? (text.length > 120 ? text : '') : text.slice(cut + 1).trim();
+    return [h('h2', null, head), stampOf(i), i.kind === 'suggestion' ? null : tagLine(i),
+      rest ? h('div', { class: 'prose' }, rest) : null, actionEls(i)];
+  },
+};

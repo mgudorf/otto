@@ -5,7 +5,7 @@ from datetime import date, timedelta
 
 from app.daemon import build
 from app.modules.finance import MANIFEST, setup
-from app.modules.finance.routes import day_label, next_due
+from app.modules.finance.routes import next_due
 from tests.conftest import run
 from tests.test_app import client_for
 
@@ -29,19 +29,23 @@ def test_finance_end_to_end(config):
             assert (await cap({"kind": "recurring", "name": "NoCadence", "amount": "1"})).status_code == 400
             left = (await c.get("/api/finance/left")).json()
             assert [g["label"] for g in left["groups"]] == ["Accounts", "Recurring", "Holdings", "Budgets"]
-            assert left["groups"][0]["rows"][0]["stampText"] == "1,250.50"
-            assert left["groups"][1]["rows"][0]["stampText"] == "120.00 /yr"
-            left = (await c.get("/api/finance/left?chip=Holdings&query=shares")).json()
-            assert [g["label"] for g in left["groups"]] == ["Holdings"] and left["groups"][0]["rows"][0]["text"] == "VTI"
+            checking = left["groups"][0]["rows"][0]
+            assert (checking["title"], checking["amount"], checking["cadence"], checking["ended"]) == ("Checking", 125050, None, None)
+            assert checking["fixed"] == ["account"] and checking["tags"] == []   # the kind is an identity tag, never written into the title
+            domain = left["groups"][1]["rows"][0]
+            assert (domain["title"], domain["amount"], domain["cadence"], domain["due"]) == ("Domain", 12000, "yearly", None)
+            # the rows hook is what the cross-module routes read: one holding, carrying its kind
+            assert [(r["title"], r["amount"]) for r in (await c.get("/api/items?tags=holding")).json()["items"]] == [("VTI", 300000)]
             blank = (await c.get("/api/finance/blank")).json()
             assert blank["totals"] == {"accounts": 125050, "holdings": 300000, "monthly_recurring": 1000, "monthly_budget": 40000}
             assert (await c.post("/api/finance/action/update", json={"id": acct, "amount": "1300"})).json()["amount"] == 130000
             item = (await c.get(f"/api/finance/item/{acct}")).json()
-            assert [h["amount"] for h in item["history"]] == [130000, 125050] and item["text"] == "Checking\n1,300.00"
+            assert [h["amount"] for h in item["history"]] == [130000, 125050]
+            assert (item["title"], item["amount"], item["note"]) == ("Checking", 130000, None)
             assert [a["verb"] for a in item["actions"]] == ["update", "end", "forget"]
             assert (await c.post("/api/finance/action/end", json={"id": acct})).status_code == 200
-            left = (await c.get("/api/finance/left?chip=Accounts")).json()
-            assert left["groups"][0]["rows"][0]["done"] is True and "leading" not in left["groups"][0]["rows"][0]
+            ended = (await c.get("/api/finance/left")).json()["groups"][0]["rows"][0]
+            assert ended["ended"] is not None and ended["title"] == "Checking"
             assert (await c.get("/api/finance/blank")).json()["totals"]["accounts"] == 0
             numbers = (await c.get("/api/home/numbers")).json()
             fin_n = next(n for n in numbers if n["module"] == "finance")
@@ -94,16 +98,15 @@ def test_finance_due_dates(config):
             assert (await cap({"kind": "recurring", "name": "Bad", "amount": "1", "cadence": "monthly", "due_on": "15 Oct"})).status_code == 400
 
             item = (await c.get(f"/api/finance/item/{rent}")).json()
-            assert item["due_on"] == today.isoformat() and item["next_due"] == today.isoformat()
-            assert f"next {day_label(today.isoformat())}" in item["text"]
+            assert item["due_on"] == today.isoformat() and item["due"] == today.isoformat()   # the anchor the box edits, and the occurrence the row shows
             assert [a["verb"] for a in item["actions"]] == ["update", "due", "end", "forget"]
             assert "due" not in [a["verb"] for a in (await c.get(f"/api/finance/item/{acct}")).json()["actions"]]
-            assert (await c.get(f"/api/finance/item/{acct}")).json()["next_due"] is None   # a date is ignored off a recurring entry
+            assert (await c.get(f"/api/finance/item/{acct}")).json()["due"] is None   # a date is ignored off a recurring entry
 
             rows = next(g for g in (await c.get("/api/finance/left")).json()["groups"] if g["label"] == "Recurring")["rows"]
-            assert [r["text"] for r in rows] == ["Rent", "Gym", "Domain"]   # soonest first, undated last; by name it would be Domain, Gym, Rent
-            assert rows[0]["stampText"] == f"1,800.00 /mo · {day_label(today.isoformat())}"
-            assert rows[2]["stampText"] == "120.00 /yr"
+            assert [r["title"] for r in rows] == ["Rent", "Gym", "Domain"]   # soonest first, undated last; by name it would be Domain, Gym, Rent
+            assert (rows[0]["amount"], rows[0]["cadence"], rows[0]["due"]) == (180000, "monthly", today.isoformat())
+            assert (rows[2]["amount"], rows[2]["cadence"], rows[2]["due"]) == (12000, "yearly", None)
 
             assert (await c.post("/api/finance/action/due", json={"id": acct, "due_on": today.isoformat()})).status_code == 400
             assert (await c.post("/api/finance/action/due", json={"id": domain, "due_on": "nope"})).status_code == 400
@@ -114,7 +117,7 @@ def test_finance_due_dates(config):
             assert (await c.get(f"/api/finance/item/{domain}")).json()["due_on"] is None
 
             assert (await c.post("/api/finance/action/end", json={"id": rent})).status_code == 200
-            assert (await c.get(f"/api/finance/item/{rent}")).json()["next_due"] is None   # an ended payment is not due again
+            assert (await c.get(f"/api/finance/item/{rent}")).json()["due"] is None   # an ended payment is not due again
             ev = [e["verb"] for e in (await c.get("/api/events?module=finance")).json()["events"]]
             assert ev[:2] == ["ended", "dated"]
         await app.state.runner.drain(1)

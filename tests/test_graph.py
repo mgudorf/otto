@@ -5,7 +5,7 @@ import json
 from app.config import ROOT
 from app.daemon import build as build_app
 from app.modules.graph import build, tasks, tools
-from app.store import now_iso
+from app.store import add_tags, now_iso
 from tests.conftest import run
 from tests.test_app import client_for
 
@@ -69,6 +69,18 @@ def test_rebuild_from_sources(store):
     assert (nodes(store), edges(store)) == before
 
 
+def test_app_tags_reach_the_graph(store):
+    """A tag the owner writes on an email is a node like any other, and co-occurs with the rest of that row's tags."""
+    seed(store)
+    add_tags(store, "email", "18f2a", ["Ledger", "tax"])
+    with store.tx() as conn:
+        assert build.rebuild(conn) == (5, 4)
+    n = nodes(store)
+    assert (n["tax"]["count"], n["tax"]["items"], n["tax"]["sessions"]) == (3, 1, 2)
+    assert (n["ledger"]["count"], n["ledger"]["items"]) == (2, 2)
+    assert edges(store)[("ledger", "tax", "cooccur")] == 1
+
+
 def test_overlays_and_sources_untouched(store, config):
     seed(store)
     read, full = FakeServer(), FakeServer()
@@ -125,7 +137,7 @@ def test_graph_routes(config):
             numbers = (await c.get("/api/home/numbers")).json()
             assert next(n for n in numbers if n["module"] == "graph")["value"] == 2
             shell = (await c.get("/api/shell")).json()
-            assert next(m for m in shell["modules"] if m["name"] == "graph")["hue"] == "#b3b06a"
+            assert next(m for m in shell["modules"] if m["name"] == "graph")["hue"] == "#C1BE75"
         await app.state.runner.drain(1)
         app.state.store.close()
 

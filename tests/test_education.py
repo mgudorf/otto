@@ -70,7 +70,7 @@ def test_education_end_to_end(config):
         async with client_for(app) as c:
             shell = (await c.get("/api/shell")).json()
             edu = next(m for m in shell["modules"] if m["name"] == "education")
-            assert edu["hue"] == "#7a9fd6" and edu["order"] == 2 and edu["agent"]["skills"] == ["question-gen", "quiz", "explain", "plan"]
+            assert edu["hue"] == "#86AAE3" and edu["order"] == 2 and edu["agent"]["skills"] == ["question-gen", "quiz", "explain", "plan"]
             r = await c.post("/api/education/action/add_topic", json={"name": "Physics", "description": ""})
             assert r.status_code == 200, r.text
             tid = r.json()["id"]
@@ -90,9 +90,11 @@ def test_education_end_to_end(config):
             assert "error" in add_question(store, tid, "Why is the sky blue?", "again", DEFS, "s", PARTS, "nightly", False)
             left = (await c.get("/api/education/left")).json()
             row = left["groups"][0]["rows"][0]
-            assert left["chips"] == ["active", "completed"] and left["chip"] == "active"
-            assert left["groups"][0]["label"] == "" and row["id"] == qid and row["leading"] == {"pct": 0} and "done" not in row
-            assert (await c.get("/api/education/left?chip=completed")).json()["groups"] == []
+            # one group carrying both slices as ROWs: the chips narrow it in the browser
+            assert left["groups"][0]["label"] == "" and left["more"] is False and row["id"] == qid
+            assert row["title"] == "Why is the sky blue?" and row["status"] == "active" and row["pct"] == 0 and row["score"] is None
+            assert row["topic"] == "Physics" and row["fixed"] == ["physics", "rayleigh scattering"] and row["tags"] == []
+            assert row["when"] and row["snippet"] == "Pinned output · Low temperature · Smallest gradient · Fourth"
             n = next(x for x in (await c.get("/api/home/numbers")).json() if x["module"] == "education")
             assert n["value"] == 1 and n["label"] == "due"
             home = (await c.get("/api/home/left")).json()
@@ -185,33 +187,34 @@ def test_education_end_to_end(config):
             # a revision after completion recomputes the mean and never moves the difficulty again
             assert grade(store, qid, 4, 60, "revised")["question_score"] == 88
             assert store.scalar("SELECT difficulty FROM education_topics WHERE id = ?", (tid,)) == start_d + 1
-            # LEFT: the completed tab lists it by day with its score; the active tab holds the generated one
-            left = (await c.get("/api/education/left?chip=completed")).json()
-            assert left["chip"] == "completed" and [r["id"] for g in left["groups"] for r in g["rows"]] == [qid] and left["more"] is False
-            assert left["groups"][0]["rows"][0]["leading"] == {"pct": 88}
+            # LEFT: one group, the queue first and the completed history behind it, each row carrying its own score
             left = (await c.get("/api/education/left")).json()
-            assert [r["id"] for g in left["groups"] for r in g["rows"]] == [gid]
+            listed = {x["id"]: x for g in left["groups"] for x in g["rows"]}
+            assert [x["id"] for g in left["groups"] for x in g["rows"]] == [gid, qid] and left["more"] is False
+            assert listed[qid]["status"] == "completed" and listed[qid]["score"] == 88 and listed[qid]["pct"] == 100
+            assert listed[gid]["status"] == "active" and listed[gid]["score"] is None
             t = (await c.get("/api/education/blank")).json()["topics"][0]
             assert (t["completed"], t["asked"], t["average"], t["recent"]) == (1, 2, 88, [88])
             assert next(x for x in (await c.get("/api/home/numbers")).json() if x["module"] == "education")["value"] == 1
-            # search reads title, setup, tags and part titles, within the tab
-            assert (await c.get("/api/education/left?chip=completed&query=sky")).json()["groups"] != []
-            assert (await c.get("/api/education/left?query=sky")).json()["groups"] == []
-            assert (await c.get("/api/education/left?query=gradient")).json()["groups"] != []
-            assert (await c.get("/api/education/left?chip=completed&query=zzz")).json()["groups"] == []
-            # tags, on a completed question too: trimmed, unique, searchable
+            # what the search bar narrows on rides with the row: the title, the topic and the part titles
+            assert "sky" in listed[qid]["title"].lower() and "Smallest gradient" in listed[qid]["snippet"] and listed[qid]["topic"] == "Physics"
+            # tags, on a completed question too: trimmed, unique, and on the row
             r = await c.post("/api/education/action/tags", json={"id": qid, "tags": [" hard ", "hard", "", "bootstrap"]})
             assert r.status_code == 200 and r.json()["tags"] == ["hard", "bootstrap"]
             assert (await c.get(f"/api/education/item/{qid}")).json()["tags"] == ["hard", "bootstrap"]
-            assert (await c.get("/api/education/left?chip=completed&query=bootstrap")).json()["groups"] != []
+            listed = {x["id"]: x for g in (await c.get("/api/education/left")).json()["groups"] for x in g["rows"]}
+            assert listed[qid]["tags"] == ["hard", "bootstrap"]
+            # the rows hook puts the same ROWs on the cross-module routes, where the topic is a tag like any other
+            cross = {x["id"]: x for x in (await c.get("/api/items")).json()["items"] if x["module"] == "education"}
+            assert set(cross) == {qid, gid} and cross[qid]["tags"] == ["hard", "bootstrap"]
+            assert {x["id"] for x in (await c.get("/api/items?tags=physics")).json()["items"]} == {qid, gid}
             assert (await c.post("/api/education/action/tags", json={"id": qid, "tags": "x"})).status_code == 400
             # delete: an active question leaves both slices and every count, and is kept whole so it can never be asked again
             store.execute("INSERT INTO education_feedback(ts, topic_id, question_id, text) VALUES (?, ?, ?, ?)", (now_iso(), tid, gid, "too easy"))
             assert (await c.post("/api/education/action/delete", json={"id": qid})).status_code == 409       # a completed one stays
             assert [a["removes"] for a in (await c.get(f"/api/education/item/{gid}")).json()["actions"]] == [True]
             assert (await c.post("/api/education/action/delete", json={"id": gid})).status_code == 200
-            assert (await c.get("/api/education/left")).json()["groups"] == []
-            assert [r["id"] for g in (await c.get("/api/education/left?chip=completed")).json()["groups"] for r in g["rows"]] == [qid]
+            assert [x["id"] for g in (await c.get("/api/education/left")).json()["groups"] for x in g["rows"]] == [qid]
             assert (await c.get(f"/api/education/item/{gid}")).status_code == 404
             assert next(x for x in (await c.get("/api/home/numbers")).json() if x["module"] == "education")["value"] == 0
             t = (await c.get("/api/education/blank")).json()["topics"][0]
@@ -387,9 +390,8 @@ def test_setup_migrates_v1(config):
                 "n": 1, "label": "a", "title": "Explain why the sky is blue…", "text": "Explain why the sky is blue and not violet at noon",
                 "answer": "a", "answered_at": "2026-09-09T01:00:00+00:00", "verdict": "partial", "score": 80, "graded_at": "2026-09-09T02:00:00+00:00",
             }]
-            left = (await c.get("/api/education/left?chip=completed")).json()
-            assert left["groups"][0]["rows"][0]["leading"] == {"pct": 80}
-            assert [r["id"] for g in (await c.get("/api/education/left")).json()["groups"] for r in g["rows"]] == [3]
+            rows = [r for g in (await c.get("/api/education/left")).json()["groups"] for r in g["rows"]]
+            assert [r["id"] for r in rows] == [3, 1] and rows[1]["score"] == 80 and rows[1]["status"] == "completed"
         app.state.store.close()
 
     run(main())

@@ -17,7 +17,7 @@ from fastapi import HTTPException
 
 from app.config import ROOT
 from app.daemon import build
-from app.modules.science import notebook, runs, state, tasks
+from app.modules.science import notebook, routes, runs, state, tasks
 from app.modules.science.kernels import Kernel
 from app.store import iso, now, now_iso, parse
 from tests.conftest import run
@@ -39,22 +39,17 @@ def sci(config, tmp_path: Path):
     return dataclasses.replace(config, science=dataclasses.replace(config.science, root=root, python=sys.executable))
 
 
-def flat(nodes):
-    for n in nodes:
-        yield n
-        if n["kind"] == "dir":
-            yield from flat(n["children"])
-
-
 def test_science_tree_and_reads(sci):
     async def main():
         app = build(sci)
         await app.state.runner.start()
         async with client_for(app) as c:
             left = (await c.get("/api/science/left")).json()
-            assert [(n["id"], n["kind"]) for n in left["tree"]] == [("sub", "dir"), ("analysis.ipynb", "ipynb"), ("etl.py", "py")]
-            assert [n["id"] for n in left["tree"][0]["children"]] == ["sub/deep.py"] and left["tree"][1]["live"] is False
-            assert all(n["live"] is False for n in flat(left["tree"]) if n["kind"] != "dir")
+            assert {g["label"]: sorted(r["id"] for r in g["rows"]) for g in left["groups"]} == {"": ["analysis.ipynb", "etl.py"], "sub/": ["sub/deep.py"]}
+            assert left["more"] is False and all(g["count"] == len(g["rows"]) for g in left["groups"])
+            row = next(r for g in left["groups"] for r in g["rows"] if r["id"] == "analysis.ipynb")
+            assert row["title"] == "analysis.ipynb" and row["kind"] == "ipynb" and row["fixed"] == ["notebook"] and row["tags"] == [] and row["when"]
+            assert row["kernel"] is None and row["running"] is False and row["schedule"] is None
             item = (await c.get("/api/science/item/analysis.ipynb")).json()
             assert item["kind"] == "ipynb" and item["kernel"] is None and item["schedule"] is None
             assert [x["type"] for x in item["cells"]] == ["code", "markdown"] and item["cells"][0]["source"] == "print(1)"
@@ -115,6 +110,9 @@ def test_science_run_streams_and_saves(sci, monkeypatch):
             job = (await c.get("/api/jobs")).json()[0]
             assert job["task"] == "science.run" and job["resource"] == "kernel:analysis.ipynb" and job["status"] == "done"
             assert (await c.post("/api/science/action/run", json={"id": "analysis.ipynb", "index": 2})).status_code == 400
+            assert (await c.post("/api/science/action/run", json={"id": "analysis.ipynb"})).status_code == 200   # no cell named: the notebook, top to bottom
+            await settle(app)
+            assert sum(1 for j in (await c.get("/api/jobs")).json() if j["task"] == "science.run") == 2
             assert (await c.post("/api/science/action/restart", json={"id": "analysis.ipynb"})).status_code == 409
             assert (await c.get("/api/events?module=science")).json()["events"][0]["verb"] == "ran"
         await app.state.runner.drain(1)
@@ -161,6 +159,8 @@ def test_science_edits_write_valid_notebooks(sci):
         root = sci.science.root
         async with client_for(app) as c:
             post = lambda verb, body: c.post(f"/api/science/action/{verb}", json=body)
+            assert set(routes.ACTIONS) == {"run", "new"} | set(routes.KERNEL_ACTIONS) | set(routes.EDIT_ACTIONS) | set(routes.SCHEDULE_ACTIONS)
+            assert (await post("nonsense", {"id": "analysis.ipynb"})).status_code == 404
             assert (await post("set_cell", {"id": "analysis.ipynb", "index": 0, "source": "print(2)"})).status_code == 200
             assert (await post("insert_cell", {"id": "analysis.ipynb", "after": 0, "type": "markdown"})).json()["index"] == 1
             assert (await post("insert_cell", {"id": "analysis.ipynb"})).json()["index"] == 3
@@ -177,7 +177,8 @@ def test_science_edits_write_valid_notebooks(sci):
             assert (await post("new", {"path": "", "kind": "py"})).status_code == 400
             assert (await post("new", {"path": "x", "kind": "txt"})).status_code == 400
             left = (await c.get("/api/science/left")).json()
-            assert [n["id"] for n in flat(left["tree"])] == ["lab", "lab/2026", "sub", "sub/deep.py", "sub/notes.py", "analysis.ipynb", "etl.py", "fresh.ipynb"]
+            assert sorted(r["id"] for g in left["groups"] for r in g["rows"]) == ["analysis.ipynb", "etl.py", "fresh.ipynb", "sub/deep.py", "sub/notes.py"]
+            assert {g["label"] for g in left["groups"]} == {"", "sub/"}   # an empty folder has no rows, so no group
             assert [e["verb"] for e in (await c.get("/api/events?module=science")).json()["events"]] == ["created", "created", "created", "deleted"]
         for name in ("analysis.ipynb", "fresh.ipynb"):
             nb = nbformat.read(str(root / name), as_version=4)
@@ -299,7 +300,7 @@ def test_science_schedules_and_due(sci, monkeypatch):
             assert (await post("schedule", {"id": "etl.py", "every": "30m"})).status_code == 200
             assert (await post("schedule", {"id": "missing.py", "every": "30m"})).status_code == 404
             item = (await c.get("/api/science/item/analysis.ipynb")).json()
-            assert item["schedule"]["every_seconds"] == 86400 and item["schedule"]["at"] == "06:00" and item["schedule"]["last_run"] is None
+            assert item["schedule"] == "every 1 d at 06:00" and parse(item["next_run"]) > now()
             assert (await post("unschedule", {"id": "etl.py"})).status_code == 200
             assert (await c.get("/api/science/item/etl.py")).json()["schedule"] is None
             assert [e["verb"] for e in (await c.get("/api/events?module=science")).json()["events"]] == ["unscheduled", "scheduled", "scheduled"]

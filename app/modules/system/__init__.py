@@ -5,7 +5,7 @@ from app.modules import Manifest, Schedule
 MANIFEST = Manifest(
     name="system",
     title="System",
-    hue="#8b8f98",
+    hue="#A6ACB8",
     icon="",
     order=99,
     page=False,

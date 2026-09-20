@@ -83,9 +83,12 @@ def test_done_and_suggestion_actions(config):
             assert item["actions"][0] == {"verb": "done", "label": "Done", "primary": True}
             assert (await c.post("/api/second_brain/action/done", json={"id": mid})).json() == {"id": mid}
             item = (await c.get(f"/api/second_brain/item/{mid}")).json()
-            assert item["done_at"] and item["actions"][0]["verb"] == "forget"
+            assert item["done"] is True and [a["verb"] for a in item["actions"]] == ["reopen", "forget"]
             left = (await c.get("/api/second_brain/left?chip=Tasks")).json()
-            assert left["groups"][0]["rows"][0]["done"] is True and left["groups"][0]["rows"][0]["leading"] == {"task": True}
+            task = left["groups"][0]["rows"][0]
+            assert task["done"] is True and task["fixed"] == ["task"] and task["title"] == "call the bank"
+            assert (await c.post("/api/second_brain/action/reopen", json={"id": mid})).json() == {"id": mid}
+            assert (await c.get(f"/api/second_brain/item/{mid}")).json()["done"] is False
 
             # A suggestion carries its own row id, "s<n>", so it never collides with an item of the same number.
             sid = store.execute(
@@ -105,7 +108,7 @@ def test_done_and_suggestion_actions(config):
             assert (await c.post("/api/second_brain/action/dismiss", json={"id": mid})).status_code == 404     # an item is not a suggestion
             assert (await c.get("/api/second_brain/item/nope")).status_code == 404
             verbs = [e["verb"] for e in (await c.get("/api/events?module=second_brain")).json()["events"]]
-            assert verbs[:2] == ["accepted", "completed"]
+            assert verbs[:3] == ["accepted", "reopened", "completed"]
             missing = await c.post("/api/second_brain/action/done", json={"id": mid + 999})
             assert missing.status_code == 404, missing.text
             for bad in ({}, {"id": "abc"}):   # a malformed id is a 400, not a 500

@@ -7,7 +7,7 @@ from app.modules import Agent, Manifest, Schedule
 MANIFEST = Manifest(
     name="graph",
     title="Graph",
-    hue="#b3b06a",
+    hue="#C1BE75",
     icon='<circle cx="5" cy="6" r="2"></circle><circle cx="15" cy="5" r="2"></circle><circle cx="10" cy="15" r="2"></circle><circle cx="16" cy="13" r="1.5"></circle><path d="M7 6.5l6-1M6 7.5l3 6M11.5 14l3-1"></path>',
     order=7,
     schedules=(Schedule(task="rebuild", every="15m", resource="graph"),),

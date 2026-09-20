@@ -9,17 +9,17 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from app.modules import int_id
-from app.store import Store, iso, now_iso
+from app.store import Store, iso, now_iso, tags_for
 
 router = APIRouter(prefix="/api/finance")
 
 KINDS = ("account", "recurring", "holding", "budget")
 CADENCES = ("monthly", "yearly", "weekly")
-CHIPS = {"All": None, "Accounts": "account", "Recurring": "recurring", "Holdings": "holding", "Budgets": "budget"}
 LABELS = dict(zip(KINDS, ("Accounts", "Recurring", "Holdings", "Budgets")))
 SUFFIX = {"monthly": "/mo", "yearly": "/yr", "weekly": "/wk"}
 PER_MONTH = {"monthly": Decimal(1), "yearly": Decimal(1) / 12, "weekly": Decimal(52) / 12}
 PERIOD_MONTHS = {"monthly": 1, "yearly": 12}
+HISTORY = 12                                   # the amounts one open entry carries; finance_amounts keeps every one
 RESOURCE = "finance"
 
 
@@ -44,11 +44,6 @@ def to_date(value) -> str | None:
         return date.fromisoformat(text).isoformat()
     except ValueError:
         raise HTTPException(400, "due date must be YYYY-MM-DD")
-
-
-def day_label(iso_date: str) -> str:
-    """10-05-2026, the date format the rest of the UI uses."""
-    return date.fromisoformat(iso_date).strftime("%m-%d-%Y")
 
 
 def amount_text(r: dict) -> str:
@@ -82,36 +77,38 @@ def next_due(r: dict, today: date) -> str | None:
     return (d if d >= today else _month_step(a, (periods + 1) * step)).isoformat()
 
 
-def _row(r: dict, today: date) -> dict:
-    """Row.stampText wins over Row.stamp, so the next occurrence rides with the amount in that one slot."""
-    nxt = next_due(r, today)
+def _row(r: dict, today: date, tags: list[str]) -> dict:
+    """One ROW: the kind is the identity tag, the amount stays in cents, the date is the next occurrence.
+    The note travels with the row so typing a word from it finds the entry."""
     return {
         "id": r["id"],
         "module": "finance",
-        "text": r["name"],
-        "stamp": r["updated_at"],
-        "stampText": amount_text(r) + (f" · {day_label(nxt)}" if nxt else ""),
-        "done": bool(r["ended_at"]),
+        "title": r["name"],
+        "when": r["updated_at"],
+        "tags": tags,
+        "fixed": [r["kind"]],
+        "kind": r["kind"],
+        "amount": r["amount"],
+        "cadence": r["cadence"],
+        "due": next_due(r, today),
+        "ended": r["ended_at"],
+        "note": r["note"],
     }
 
 
-def _group_by_kind(rows: list[dict], today: date) -> list[dict]:
+def _rows(store: Store, entries: list[dict], today: date) -> list[dict]:
+    tags = tags_for(store, "finance", [r["id"] for r in entries])
+    return [_row(r, today, tags[r["id"]]) for r in entries]
+
+
+def _group_by_kind(store: Store, entries: list[dict], today: date) -> list[dict]:
     """Recurring reads as what is due soonest; undated entries follow, ended ones stay last everywhere."""
     by_kind: dict[str, list[dict]] = {k: [] for k in KINDS}
-    for r in rows:
+    for r in entries:
         by_kind[r["kind"]].append(r)
     by_kind["recurring"].sort(key=lambda r: (bool(r["ended_at"]), next_due(r, today) or "9999", r["name"]))
-    groups = {k: {"label": LABELS[k], "count": len(v), "rows": [_row(r, today) for r in v]} for k, v in by_kind.items()}
+    groups = {k: {"label": LABELS[k], "count": len(v), "rows": _rows(store, v, today)} for k, v in by_kind.items()}
     return [g for g in groups.values() if g["rows"]]
-
-
-def _search(query: str) -> tuple[list[str], list[str]]:
-    """One LIKE per word over name and note, all words required."""
-    where, params = [], []
-    for term in query.split():
-        where.append("(name LIKE ? OR COALESCE(note, '') LIKE ?)")
-        params += [f"%{term}%", f"%{term}%"]
-    return where, params
 
 
 def _get(store: Store, entry_id: int) -> dict:
@@ -126,33 +123,29 @@ def _active(store: Store) -> list[dict]:
 
 
 def totals(store: Store) -> dict:
-    rows = _active(store)
+    active = _active(store)
     return {
-        "accounts": sum(r["amount"] for r in rows if r["kind"] == "account"),
-        "holdings": sum(r["amount"] for r in rows if r["kind"] == "holding"),
-        "monthly_recurring": sum(monthly(r) for r in rows if r["kind"] == "recurring"),
-        "monthly_budget": sum(monthly(r) for r in rows if r["kind"] == "budget"),
+        "accounts": sum(r["amount"] for r in active if r["kind"] == "account"),
+        "holdings": sum(r["amount"] for r in active if r["kind"] == "holding"),
+        "monthly_recurring": sum(monthly(r) for r in active if r["kind"] == "recurring"),
+        "monthly_budget": sum(monthly(r) for r in active if r["kind"] == "budget"),
     }
 
 
 @router.get("/left")
-def left(request: Request, query: str = "", chip: str = "All") -> dict:
+def left(request: Request) -> dict:
+    """Every entry, grouped by kind. The page narrows by chip and by the search bar's tokens."""
     store: Store = request.app.state.store
-    kind = CHIPS.get(chip)
-    where, params = _search(query)
-    if kind:
-        where.append("kind = ?")
-        params.append(kind)
-    sql_where = ("WHERE " + " AND ".join(where)) if where else ""
-    rows = store.query(f"SELECT * FROM finance_entries {sql_where} ORDER BY ended_at IS NOT NULL, name", tuple(params))
-    return {"groups": _group_by_kind(rows, date.today()), "chips": list(CHIPS), "chip": chip if chip in CHIPS else "All"}
+    entries = store.query("SELECT * FROM finance_entries ORDER BY ended_at IS NOT NULL, name")
+    return {"groups": _group_by_kind(store, entries, date.today()), "more": False}
 
 
 @router.get("/blank")
 def blank(request: Request) -> dict:
+    """What the page needs beyond its rows: the four totals, the choices the capture form offers, and the
+    word each kind goes by, so the chips and the group headers read what this module calls them."""
     store: Store = request.app.state.store
-    counts = {r["kind"]: r["n"] for r in store.query("SELECT kind, COUNT(*) AS n FROM finance_entries WHERE ended_at IS NULL GROUP BY kind")}
-    return {"kinds": list(KINDS), "cadences": list(CADENCES), "counts": counts, "totals": totals(store)}
+    return {"kinds": list(KINDS), "labels": dict(LABELS), "cadences": list(CADENCES), "totals": totals(store)}
 
 
 @router.get("/item/{entry_id}")
@@ -161,17 +154,19 @@ def item_route(request: Request, entry_id: int) -> dict:
 
 
 def item(store: Store, entry_id: str) -> dict:
+    """The ROW plus what only the open entry needs: the anchor date the Set date box edits, its recent amounts."""
     r = _get(store, int(entry_id))
-    history = store.query("SELECT ts, amount FROM finance_amounts WHERE entry_id = ? ORDER BY ts DESC", (r["id"],))
-    nxt = next_due(r, date.today())
-    actions = [{"verb": "update", "label": "Update", "primary": True}]
+    history = store.query(
+        "SELECT ts, amount FROM finance_amounts WHERE entry_id = ? ORDER BY ts DESC LIMIT ?", (r["id"], HISTORY)
+    )
+    actions = [{"verb": "update", "label": "Update amount", "primary": True}]
     if r["kind"] == "recurring":
         actions.append({"verb": "due", "label": "Set date"})
     if not r["ended_at"]:
         actions.append({"verb": "end", "label": "End"})
     actions.append({"verb": "forget", "label": "Forget", "confirm": "Forget this entry and its history?", "removes": True})
-    text = "\n".join(p for p in (r["name"], amount_text(r), f"next {day_label(nxt)}" if nxt else None, r["note"]) if p)
-    return {**r, "module": "finance", "text": text, "next_due": nxt, "history": history, "actions": actions}
+    row = _rows(store, [r], date.today())[0]
+    return {**row, "due_on": r["due_on"], "history": history, "actions": actions}
 
 
 @router.post("/action/{verb}")
@@ -283,8 +278,14 @@ def numbers(store: Store) -> dict:
 
 def today(store: Store) -> list[dict]:
     start = iso(datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0))
-    rows = store.query("SELECT * FROM finance_entries WHERE updated_at >= ? ORDER BY updated_at DESC", (start,))
-    return [_row(r, date.today()) for r in rows]
+    entries = store.query("SELECT * FROM finance_entries WHERE updated_at >= ? ORDER BY updated_at DESC", (start,))
+    return _rows(store, entries, date.today())
+
+
+def rows(store: Store, limit: int = 200) -> list[dict]:
+    """Every entry, most recently touched first: what the tag page, Home's Recent and the Graph read."""
+    entries = store.query("SELECT * FROM finance_entries ORDER BY updated_at DESC, id DESC LIMIT ?", (max(1, limit),))
+    return _rows(store, entries, date.today())
 
 
 def _context_line(r: dict, today: date) -> str:

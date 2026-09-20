@@ -8,7 +8,7 @@ from datetime import datetime
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from app.modules import int_id
-from app.store import Store, now_iso, parse
+from app.store import Store, now_iso, parse, tags_for
 
 router = APIRouter(prefix="/api/second_brain")
 
@@ -16,26 +16,40 @@ KINDS = ("note", "link", "quote", "fact", "task")
 CHIPS = {"All": None, "Tasks": "task"}   # the kinds stay in the table for the agent; the page names only tasks
 SUGGESTION = "s"                                   # a suggestion's row id, "s12"; an item carries the bare integer
 RESOURCE = "second_brain"
+MODULE = "second_brain"
 
 
-def _row(r: dict) -> dict:
-    row = {"id": r["id"], "module": "second_brain", "text": r["text"], "stamp": r["created_at"], "done": bool(r.get("done_at"))}
-    if r["kind"] == "task":
-        row["leading"] = {"task": True}
-    return row
+def _when(ts: str) -> str:
+    """A ROW's `when`: the owner's wall clock, so the page groups by their day and shows their time."""
+    return parse(ts).astimezone().strftime("%Y-%m-%dT%H:%M")
 
 
-def _day_label(ts: str) -> str:
-    return parse(ts).astimezone().strftime("%m-%d-%Y")
+def _row(r: dict, tags: list[str]) -> dict:
+    """One item as a ROW: what it is drives `fixed`, the owner's own tags stay editable."""
+    return {
+        "id": r["id"], "module": MODULE, "title": r["text"], "when": _when(r["created_at"]),
+        "kind": r["kind"], "fixed": [r["kind"]], "tags": tags, "done": bool(r["done_at"]),
+    }
 
 
-def _group_by_day(rows: list[dict]) -> list[dict]:
+def _rows(store: Store, rs: list[dict]) -> list[dict]:
+    tags = tags_for(store, MODULE, [r["id"] for r in rs])
+    return [_row(r, tags[r["id"]]) for r in rs]
+
+
+def _day_label(when: str) -> str:
+    return f"{when[5:7]}-{when[8:10]}-{when[:4]}"
+
+
+def _group_by_day(store: Store, rs: list[dict]) -> list[dict]:
+    """A listed row carries its verbs, so a button on the row asks what the same button in the pane asks."""
     groups: list[dict] = []
-    for r in rows:
-        label = _day_label(r["created_at"])
+    verbs = {r["id"]: _actions(r) for r in rs}
+    for row in _rows(store, rs):
+        label = _day_label(row["when"])
         if not groups or groups[-1]["label"] != label:
             groups.append({"label": label, "count": 0, "rows": []})
-        groups[-1]["rows"].append(_row(r))
+        groups[-1]["rows"].append({**row, "actions": verbs[row["id"]]})
         groups[-1]["count"] += 1
     return groups
 
@@ -45,7 +59,7 @@ def _fts(query: str) -> str:
 
 
 def _tags(store: Store, item_id: int) -> list[str]:
-    return [r["tag"] for r in store.query("SELECT tag FROM second_brain_tags WHERE item_id = ? ORDER BY tag", (item_id,))]
+    return tags_for(store, MODULE, [item_id])[item_id]
 
 
 def _get(store: Store, item_id: int) -> dict:
@@ -63,8 +77,29 @@ def _suggestion_id(value) -> int:
     return int(text[len(SUGGESTION):])
 
 
+def _suggestion_actions(r: dict) -> list[dict]:
+    """A suggestion waits on a yes or a no; once it has one it offers nothing. The no is final, so it asks first."""
+    if r["status"] != "open":
+        return []
+    return [{"verb": "accept", "label": "Accept", "primary": True, "removes": True},
+            {"verb": "dismiss", "label": "Dismiss", "confirm": "Dismiss this suggestion?", "removes": True}]
+
+
+def _actions(r: dict) -> list[dict]:
+    """The verbs an item offers, and the question the destructive one must ask before it runs."""
+    actions = []
+    if r["kind"] == "link":
+        actions.append({"verb": "open", "label": "Open", "primary": True, "href": r["text"].split()[0]})
+    elif r["kind"] == "task":
+        actions.append({"verb": "reopen", "label": "Reopen", "primary": True} if r["done_at"] else {"verb": "done", "label": "Done", "primary": True})
+    actions.append({"verb": "forget", "label": "Forget", "confirm": "Forget this item?", "removes": True})
+    return actions
+
+
 def _suggestion_row(r: dict) -> dict:
-    return {"id": f"{SUGGESTION}{r['id']}", "module": "second_brain", "text": r["text"], "stamp": r["created_at"]}
+    """A suggestion as a ROW: no row of the owner's stands behind it, so `taggable` false keeps every tagging path off it."""
+    return {"id": f"{SUGGESTION}{r['id']}", "module": MODULE, "title": r["text"], "when": _when(r["created_at"]),
+            "kind": "suggestion", "fixed": ["suggestion"], "tags": [], "taggable": False, "actions": _suggestion_actions(r)}
 
 
 @router.get("/left")
@@ -82,9 +117,9 @@ def left(request: Request, query: str = "", chip: str = "All", page: int = 0) ->
         params.append(_fts(query))
     sql_where = ("WHERE " + " AND ".join(where)) if where else ""
     total = store.scalar(f"SELECT COUNT(*) FROM second_brain_items m {sql_where}", tuple(params))
-    rows = store.query(f"SELECT m.* FROM second_brain_items m {sql_where} ORDER BY m.created_at DESC LIMIT ?", (*params, limit))
+    found = store.query(f"SELECT m.* FROM second_brain_items m {sql_where} ORDER BY m.created_at DESC LIMIT ?", (*params, limit))
     return {
-        "groups": _group_by_day(rows),
+        "groups": _group_by_day(store, found),
         "chips": list(CHIPS),
         "chip": chip if chip in CHIPS else "All",
         "more": total > limit,
@@ -105,24 +140,14 @@ def _suggestion_item(store: Store, sid: int) -> dict:
     r = store.one("SELECT * FROM second_brain_suggestions WHERE id = ?", (sid,))
     if r is None:
         raise HTTPException(404, "no such suggestion")
-    actions = []
-    if r["status"] == "open":
-        actions.append({"verb": "accept", "label": "Accept", "primary": True, "removes": True})
-        actions.append({"verb": "dismiss", "label": "Dismiss", "removes": True})
-    return {**r, "id": f"{SUGGESTION}{r['id']}", "module": "second_brain", "kind": "suggestion", "actions": actions}
+    return {**_suggestion_row(r), "status": r["status"]}
 
 
 def item(store: Store, item_id: str) -> dict:
     if not str(item_id).isdigit():
         return _suggestion_item(store, _suggestion_id(item_id))
     r = _get(store, int(item_id))
-    actions = []
-    if r["kind"] == "link":
-        actions.append({"verb": "open", "label": "Open", "primary": True, "href": r["text"].split()[0]})
-    elif r["kind"] == "task" and not r["done_at"]:
-        actions.append({"verb": "done", "label": "Done", "primary": True})
-    actions.append({"verb": "forget", "label": "Forget", "confirm": "Forget this item?", "removes": True})
-    return {**r, "module": "second_brain", "tags": _tags(store, r["id"]), "actions": actions}
+    return {**_row(r, _tags(store, r["id"])), "actions": _actions(r)}
 
 
 @router.post("/action/{verb}")
@@ -212,6 +237,18 @@ def _done(store: Store, body: dict):
     return write
 
 
+def _reopen(store: Store, body: dict):
+    r = _get(store, int_id(body))
+
+    def write(ctx) -> dict:
+        with ctx.commit() as conn:
+            conn.execute("UPDATE second_brain_items SET done_at = NULL, updated_at = ? WHERE id = ?", (now_iso(), r["id"]))
+        ctx.event("reopened", r["text"][:120], ref=str(r["id"]))
+        return {"id": r["id"]}
+
+    return write
+
+
 def _decide(status: str):
     """One verb per decision, each taking {id}: what the page posts is what Home posts."""
 
@@ -232,7 +269,7 @@ def _decide(status: str):
 
 
 ACTIONS = {
-    "capture": _capture, "forget": _forget, "tag": _tag, "untag": _untag, "done": _done,
+    "capture": _capture, "forget": _forget, "tag": _tag, "untag": _untag, "done": _done, "reopen": _reopen,
     "accept": _decide("accepted"), "dismiss": _decide("dismissed"),
 }
 
@@ -244,16 +281,20 @@ def numbers(store: Store) -> dict:
 
 def queue(store: Store) -> list[dict]:
     """Every suggestion still waiting on a yes or no, newest first; Home lists these under Review."""
-    rows = store.query("SELECT * FROM second_brain_suggestions WHERE status = 'open' ORDER BY created_at DESC, id DESC")
-    return [_suggestion_row(r) for r in rows]
+    open_rows = store.query("SELECT * FROM second_brain_suggestions WHERE status = 'open' ORDER BY created_at DESC, id DESC")
+    return [_suggestion_row(r) for r in open_rows]
 
 
 def today(store: Store) -> list[dict]:
     start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
     from app.store import iso
 
-    rows = store.query("SELECT * FROM second_brain_items WHERE created_at >= ? ORDER BY created_at DESC", (iso(start),))
-    return [_row(r) for r in rows]
+    return _rows(store, store.query("SELECT * FROM second_brain_items WHERE created_at >= ? ORDER BY created_at DESC", (iso(start),)))
+
+
+def rows(store: Store, limit: int = 200) -> list[dict]:
+    """Every captured item as a ROW, newest first: what the tag intersection and Home's Recent read."""
+    return _rows(store, store.query("SELECT * FROM second_brain_items ORDER BY created_at DESC, id DESC LIMIT ?", (limit,)))
 
 
 def context(store: Store, registry) -> str:
@@ -264,5 +305,5 @@ def context(store: Store, registry) -> str:
     lines.append("Most recent (id, kind, text):")
     lines += [f"  {r['id']} {r['kind']}: {r['text'][:140]}" for r in recent] or ["  none"]
     if open_s:
-        lines.append("Open suggestions: " + "; ".join(f"#{s['id']} {s['text'][:100]}" for s in open_s))
+        lines.append("Open suggestions: " + "; ".join(f"#{s['id']} {s['title'][:100]}" for s in open_s))
     return "\n".join(lines)
