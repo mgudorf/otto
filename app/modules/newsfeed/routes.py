@@ -82,15 +82,20 @@ def _group_by_day(rows: list[dict]) -> list[dict]:
     return groups
 
 
+def _like(term: str) -> str:
+    """A typed word as a needle: % , _ and the escape itself stand for themselves."""
+    return "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
 def _search(query: str) -> tuple[list[str], list[str]]:
     """One LIKE per word over text, url, summary and tags, all words required."""
     where, params = [], []
     for term in query.split():
         where.append(
-            "(text LIKE ? OR url LIKE ? OR summary LIKE ?"
-            " OR id IN (SELECT ref FROM newsfeed_tags WHERE kind = 'item' AND tag LIKE ?))"
+            "(text LIKE ? ESCAPE '\\' OR url LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\'"
+            " OR id IN (SELECT ref FROM newsfeed_tags WHERE kind = 'item' AND tag LIKE ? ESCAPE '\\'))"
         )
-        params += [f"%{term}%"] * 4
+        params += [_like(term)] * 4
     return where, params
 
 
@@ -133,8 +138,9 @@ def searches(store: Store) -> list[dict]:
 
 @router.get("/left")
 def left(request: Request, query: str = "", chip: str = "All", limit: int = ROW_LIMIT) -> dict:
+    """The typed words and the chip narrow the whole feed; the page raises `limit` until `more` goes false."""
     store: Store = request.app.state.store
-    limit = max(1, min(limit, 1000))
+    limit = max(1, limit)
     chip = chip if chip in CHIPS else "All"
     where, params = _search(query)
     where.append(CHIPS[chip])

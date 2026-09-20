@@ -1,8 +1,11 @@
 // Newsfeed: what the nightly searches brought back, by the day they found it. The second view is the searches themselves.
 import { S, h, icon, I, chk, titleCell, stampCell, acts, tagAct, tagEl, card, byDay, newest, dayLabel, hue, dateLine, tagLine, confirmPop, toast, refresh, select } from '../core.js';
-import { get, post } from '../api.js';
+import { get, post, q } from '../api.js';
 
 const isSearch = (id) => String(id).startsWith('s');   // a search's row id is s12, an entry's is its bare integer
+const ROWS = 200;             // one list's worth of entries; More asks for another on top of it
+let deep = 1, asked = '';     // how many lists deep the list stands, and the text it was asked with
+const more = () => { deep += 1; refresh(); };
 
 // Every decision runs the module's own route and the page reloads from the daemon; nothing changes on screen alone.
 async function act(verb, id, removes) {
@@ -83,15 +86,23 @@ export default {
   cols: '18px 8px minmax(0,1fr) 164px', colsSplit: '18px 8px minmax(0,1fr) 150px',
   chips: ['Open', 'Accepted', 'All'],
   seg: ['Entries', 'Searches'],
-  async load() {
-    const [left, blank] = await Promise.all([get('/api/newsfeed/left'), get('/api/newsfeed/blank')]);
-    return { items: left.groups.flatMap((g) => g.rows), searches: blank.searches || [] };
+  serverQuery: true,   // the daemon searches every entry's text, url, summary and tags, so the typed text goes to it
+  // New words are a new search of the feed: the list goes back to its first stretch of what they match.
+  async load({ q: typed }) {
+    const text = typed || '';
+    if (text !== asked) { deep = 1; asked = text; }
+    const [left, blank] = await Promise.all([
+      get(q('/api/newsfeed/left', { query: text, limit: ROWS * deep })),
+      get('/api/newsfeed/blank')]);
+    return { items: left.groups.flatMap((g) => g.rows), searches: blank.searches || [], more: !!left.more };
   },
   filter: (list, chip) => { sync(); return chip === 'Open' ? list.filter((i) => i.status === 'open') : chip === 'Accepted' ? list.filter((i) => i.status === 'accepted') : list; },
   groups: (list) => byDay(list.slice().sort(newest)),
   cells: (i) => [chk(i), h('span', { class: `st${i.status === 'open' ? ' open' : ''}`, style: `--c:${hue('newsfeed')}` }), titleCell(i), stampCell(i),
     acts(i, i.status === 'open' ? [...OPEN_ACTS.map((a) => [a.label, fire(a, i.id)]), tagAct(i)] : [tagAct(i)])],
   rowClass: (i) => (i.status === 'open' ? '' : 'dim'),
+  // Only the entries stop short; the searches all arrive at once.
+  tools: (d) => (d.more && (S.seg.newsfeed || 'Entries') === 'Entries' ? [h('button', { class: 'btn quiet', onclick: more }, 'More')] : []),
   alt: (data) => searchesView(data),
   detail: (i, data) => (isSearch(i.id) ? searchView(i.id, data) : entryView(i)),
 };

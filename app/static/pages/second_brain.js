@@ -2,11 +2,15 @@
 // the suggestions the nightly run proposes sit on their own plate above the days.
 import { S, $, h, I, icon, hue, modOf, chk, titleCell, stampCell, acts, tagAct, byDay, newest,
   dateLine, tagLine, segEl, confirmPop, dayLabel, select, refresh, renderMain, toast } from '../core.js';
-import { get, post } from '../api.js';
+import { get, post, q } from '../api.js';
 
 const MOD = 'second_brain';
 const MARK = { link: I.link, quote: I.quote, note: I.note, fact: I.note };
 let kind = 'Note';                                   // what the capture box writes; every opening starts on Note
+let deep = 0, asked = '';                            // which page of the table is in hand, and the text it was asked with
+const more = () => { deep += 1; refresh(); };
+// A suggestion is not in the table the daemon searches, so the page holds it to the same words.
+const hits = (i, text) => !text || `${i.title || ''} ${(i.tags || []).join(' ')}`.toLowerCase().includes(text.toLowerCase());
 
 const act = (verb, body) => post(`/api/${MOD}/action/${verb}`, body);
 // Every write is the daemon's; the page reloads from it rather than changing a row in place.
@@ -102,10 +106,16 @@ const stampOf = (i) => (i.when ? dateLine(when(i)) : null);
 export default {
   cols: '18px 14px minmax(0,1fr) 70px',
   chips: ['All', 'Tasks', 'Notes', 'Links'],
-  async load() {
-    const [left, blank] = await Promise.all([get(`/api/${MOD}/left`), get(`/api/${MOD}/blank`)]);
+  serverQuery: true,   // second_brain_fts searches every captured item, so the typed text goes to the daemon
+  // New words are a new recall: the list goes back to the first page of what they match.
+  async load({ q: typed }) {
+    const text = typed || '';
+    if (text !== asked) { deep = 0; asked = text; }
+    const [left, blank] = await Promise.all([
+      get(q(`/api/${MOD}/left`, { query: text, page: deep })),
+      get(`/api/${MOD}/blank`)]);
     const items = (left.groups || []).flatMap((g) => g.rows || []);
-    return { items: [...(blank.suggestions || []), ...items] };
+    return { items: [...(blank.suggestions || []).filter((s) => hits(s, text)), ...items], more: !!left.more };
   },
   filter: (list, chip) => (chip === 'Tasks' ? list.filter((i) => i.kind === 'task')
     : chip === 'Notes' ? list.filter((i) => ['note', 'quote', 'fact'].includes(i.kind))
@@ -117,7 +127,10 @@ export default {
   },
   cells: (i) => (i.kind === 'suggestion' ? suggestionCells(i) : itemCells(i)),
   rowClass: (i) => (i.done ? 'done dim' : ''),
-  tools: () => [h('button', { title: 'Capture', class: 'ico btn primary', onclick: openCapture }, icon(I.plus))],
+  tools: (d) => [
+    d.more ? h('button', { class: 'btn quiet', onclick: more }, 'More') : null,
+    h('button', { title: 'Capture', class: 'ico btn primary', onclick: openCapture }, icon(I.plus)),
+  ],
   above: () => captureBox(),
   bulk: (on) => (on.some((i) => i.kind === 'task' && !i.done)
     ? [h('button', { title: 'Done', class: 'ico btn', onclick: () => doneAll(on) }, icon(I.check))]

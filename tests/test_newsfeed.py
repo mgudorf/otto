@@ -66,6 +66,8 @@ def test_newsfeed_end_to_end(config):
             assert [r["id"] for r in (await c.get("/api/items?tags=remote")).json()["items"]] == [a]   # the owner's tags, through the rows hook
             assert (await c.get("/api/newsfeed/left?query=game")).json()["groups"] != []      # a tag is searchable
             assert (await c.get("/api/newsfeed/left?query=acme")).json()["groups"] != []
+            assert (await c.get("/api/newsfeed/left?query=%25")).json()["groups"] == []   # a wildcard is a letter like any other
+            assert (await c.get("/api/newsfeed/left?limit=1")).json()["more"] is True     # a list cut short says so
             assert (await c.get("/api/newsfeed/left?chip=Accepted")).json()["groups"] == []
 
             item = (await c.get(f"/api/newsfeed/item/{a}")).json()

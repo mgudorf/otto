@@ -256,6 +256,11 @@ def test_email_actions(email_config, fake):
             unread = (await c.get("/api/email/left?chip=Unread")).json()
             assert [r["id"] for g in unread["groups"] for r in g["rows"]] == ["m3", "m2"]
             assert (await c.get("/api/email/left?chip=Priority")).json()["groups"] == []
+            # what is typed narrows the whole mailbox through email_fts too, never the rows the page happens to hold
+            found = (await c.get("/api/email/left?query=lunch")).json()
+            assert [r["id"] for g in found["groups"] for r in g["rows"]] == ["m2"] and found["more"] is False
+            assert (await c.get("/api/email/left?query=lunch&chip=Flagged")).json()["groups"] == []
+            assert (await c.get("/api/email/left?limit=1")).json()["more"] is True   # a list cut short says so
 
             r = await c.post("/api/email/action/archive", json={"ids": ["m1"]})
             assert r.status_code == 200 and r.json() == {"count": 1}, r.text

@@ -36,6 +36,11 @@ def test_finance_end_to_end(config):
             assert (domain["title"], domain["amount"], domain["cadence"], domain["due"]) == ("Domain", 12000, "yearly", None)
             # the rows hook is what the cross-module routes read: one holding, carrying its kind
             assert [(r["title"], r["amount"]) for r in (await c.get("/api/items?tags=holding")).json()["items"]] == [("VTI", 300000)]
+            # what is typed reaches the note, which no row carries, and a wildcard in it is a letter like any other
+            titles = lambda d: [r["title"] for g in d["groups"] for r in g["rows"]]
+            assert titles((await c.get("/api/finance/left?query=shares")).json()) == ["VTI"]
+            assert titles((await c.get("/api/finance/left?query=domain")).json()) == ["Domain"]
+            assert (await c.get("/api/finance/left?query=%25")).json()["groups"] == []
             blank = (await c.get("/api/finance/blank")).json()
             assert blank["totals"] == {"accounts": 125050, "holdings": 300000, "monthly_recurring": 1000, "monthly_budget": 40000}
             assert (await c.post("/api/finance/action/update", json={"id": acct, "amount": "1300"})).json()["amount"] == 130000
