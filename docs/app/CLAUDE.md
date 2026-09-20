@@ -171,7 +171,7 @@ Wire shape for LEFT: `{groups: [{label, count, rows: [ROW]}], meta?, more?}`, wh
 | Google Chrome | found through the `App Paths\chrome.exe` registry key |
 | Windows PowerShell 5.1 with System.Drawing, .NET Framework C# compiler | ship with Windows; `python -m app build` scales the logo and compiles `Otto.exe` with them (`%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`) |
 | SQLite with FTS5 and JSON | 3.50.4, stdlib |
-| Vendored frontend | `app/static/vendor/`: marked.esm.js 18.0.12, katex/ 0.18.7 (module, stylesheet, 20 woff2 fonts), highlight/ 11.11.1 (core and the python grammar, ES builds), and under `fonts/` the 16 PP Formula cuts, the 4 PT Serif cuts and Geist Mono 400/500, all pinned by `SHA256SUMS`. preact.mjs, htm.mjs, Inter and JetBrains Mono are left from the shell this replaced and nothing imports them |
+| Vendored frontend | `app/static/vendor/`: marked.esm.js 18.0.12, katex/ 0.18.7 (module, stylesheet, 20 woff2 fonts), highlight/ 11.11.1 (core and the python grammar, ES builds), and under `fonts/` the 16 PP Formula cuts, the 4 PT Serif cuts and Geist Mono 400/500, all pinned by `SHA256SUMS` |
 | Google OAuth client and token | `data/secrets/google_client.json` (web client, redirect `http://localhost:8756/m/email/api/oauth/callback`), `data/secrets/token.json`, scope `gmail.modify`, refreshed in place |
 
 Not used: Node, APScheduler, pywebview, PyInstaller, `claude-agent-sdk`, nbclient, an Anthropic API key, paid search APIs, a graph database, Microsoft Edge.

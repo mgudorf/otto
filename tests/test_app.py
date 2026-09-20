@@ -93,7 +93,7 @@ def test_second_brain_end_to_end(config):
             dump = json.loads(Path(r["path"]).read_text("utf-8"))
             assert dump["app_settings"] and "second_brain_items" in dump and (await c.get("/api/data")).json()["exports"] == 1
             # every static file revalidates, so a restarted daemon never serves stale modules
-            assert (await c.get("/shell.js")).headers["cache-control"] == "no-cache"
+            assert (await c.get("/core.js")).headers["cache-control"] == "no-cache"
             # a run counts against the nightly budget from the moment it starts, so concurrent runs see each other
             app.state.store.execute("INSERT INTO app_llm_runs(ts, module, task, status, budgeted) VALUES (?, 'second_brain', 'second_brain.suggest', 'running', 1)", (now_iso(),))
             assert (await c.get("/api/shell")).json()["budget"]["used"] == 1
