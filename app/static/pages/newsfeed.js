@@ -1,103 +1,97 @@
-// Newsfeed: LEFT = chips + entries by the day they were found, open ones bright · MIDDLE blank = the searches, each killable · selected = entry or search.
-import { html, T, meta13, nums, Row, rowStyle, GroupHeader, Chips, Search, Empty, More, dateLabel } from '../rows.js';
+// Newsfeed: what the nightly searches brought back, by the day they found it. The second view is the searches themselves.
+import { S, h, icon, I, chk, titleCell, stampCell, acts, tagAct, tagEl, card, byDay, newest, dayLabel, hue, dateLine, tagLine, confirmPop, toast, refresh, select } from '../core.js';
 import { get, post } from '../api.js';
-import { Inspector } from '../shell.js';
 
-const RED = '#cf7b7b';
+const isSearch = (id) => String(id).startsWith('s');   // a search's row id is s12, an entry's is its bare integer
 
-export async function load(app) {
-  const { query, chip, more } = app.state;
-  const q = new URLSearchParams({ query, chip, page: String(more) });
-  const [left, blank] = await Promise.all([get(`/api/newsfeed/left?${q}`), get('/api/newsfeed/blank')]);
-  return { left, blank };
+// Every decision runs the module's own route and the page reloads from the daemon; nothing changes on screen alone.
+async function act(verb, id, removes) {
+  try { await post(`/api/newsfeed/action/${verb}`, { id }); } catch (e) { toast(e.message); return; }
+  if (String(S.sel) === String(id)) { if (removes) select(null); else S.item = null; }   // its buttons follow its status
+  await refresh();
 }
 
-export function Left({ app, data, mod }) {
-  const sel = app.state.sel;
-  const rerun = (patch) => app.setState(patch, () => app.refresh());
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-    <${Search} value=${app.state.query} hue=${mod.hue} onInput=${(v) => rerun({ query: v, more: 0 })} />
-    <${Chips} chips=${data.left.chips} active=${data.left.chip} hue=${mod.hue} onPick=${(c) => rerun({ chip: c, more: 0 })} />
-    ${data.left.groups.length === 0 && html`<${Empty} text=${app.state.query ? 'no matches' : 'nothing found yet'} />`}
-    ${data.left.groups.map((g) => html`<div key=${g.label} style=${{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <${GroupHeader} label=${g.label} />
-      ${g.rows.map((r) => html`<${Row} key=${r.id} row=${r} hue=${mod.hue} selected=${!!sel && String(sel.id) === String(r.id)} onSelect=${() => app.select({ module: 'newsfeed', id: r.id })} />`)}
-    </div>`)}
-    ${data.left.more && html`<${More} onClick=${() => rerun({ more: app.state.more + 1 })} />`}
-  </div>`;
+// The one date an entry is bound to: the day it happens, else the day to come back to it, else the day it was found.
+const oneDate = (i) => (i.happens ? dayLabel(i.happens) + (i.happens.length > 10 ? ` ${i.happens.slice(11)}` : '') : dayLabel(i.followUp || i.when));
+
+// The two verbs the item route declares for an open entry. A list row is never fetched one by one, so the page holds
+// them here and both the row and the pane fire the same action: one verb, one question, asked the one way.
+const OPEN_ACTS = [{ verb: 'accept', label: 'Accept', primary: true }, { verb: 'dismiss', label: 'Dismiss', removes: true }];
+const asks = (a) => !!(a.confirm || a.removes);   // anything that ends the entry asks first
+const fire = (a, id) => {
+  const run = () => act(a.verb, id, a.removes);
+  return (e) => (asks(a) ? confirmPop(e.currentTarget, a.confirm || `${a.label}?`, run) : run());
+};
+
+// A button the daemon offers: primary in the hue, a link as its symbol.
+function actionBtn(i, a) {
+  if (a.verb === 'link') return a.href ? h('button', { class: 'btn ico', title: a.label, onclick: () => window.open(a.href, '_blank', 'noopener') }, icon(I.external)) : null;
+  return h('button', { class: `btn${a.primary ? ' primary' : asks(a) ? ' danger' : ''}`, onclick: fire(a, i.id) }, a.label);
 }
 
-let tagDraft = '';
-
-// Tag chips on an entry or a search: a click removes, Enter in the box adds. `id` is what the routes take: 12 or "s12".
-function Tags({ id, tags, hue, onChange }) {
-  return html`<div style=${{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', ...meta13, color: T.muted }}>
-    ${(tags || []).map((t) => html`<span key=${t} class="ring" title="remove" onClick=${async () => { await post('/api/newsfeed/action/untag', { id, tag: t }); onChange(); }} style=${{ padding: '2px 8px', borderRadius: 6, cursor: 'pointer', boxShadow: 'inset 0 0 0 1px rgba(230,231,234,.1)' }}>${t}</span>`)}
-    <input placeholder="+ tag" value=${tagDraft} onInput=${(e) => { tagDraft = e.target.value; }}
-      onKeyDown=${async (e) => { if (e.key === 'Enter' && e.target.value.trim()) { const v = e.target.value.trim(); tagDraft = ''; e.target.value = ''; await post('/api/newsfeed/action/tag', { id, tags: [v] }); onChange(); } }}
-      style=${{ width: 96, height: 26, padding: '0 8px', border: 0, borderRadius: 6, background: T.raised, color: T.text, fontSize: 13, '--hue': hue }} />
-  </div>`;
+// The pane belongs to the list under it: a search has no row once the control shows entries, and an entry has none
+// under the searches, so the view that cannot carry the open row closes it rather than acting on what is off screen.
+function sync() {
+  if (S.sel === null || S.sel === undefined) return;
+  if (((S.seg.newsfeed || 'Entries') === 'Searches') !== isSearch(S.sel)) { S.sel = null; S.selMod = null; S.item = null; S.cursor = -1; }
 }
 
-// The day an entry happens: "Fri 10-09-2026", plus the time when the listing gave one.
-function when(starts) {
-  const [day, clock] = starts.split('T');
-  const d = new Date(`${day}T12:00`);
-  return `${d.toDateString().slice(0, 3)} ${dateLabel(day)}${clock ? ` ${clock}` : ''}`;
+// Killing a search is asked in one place, so the row and the pane end it the same way.
+const kill = (s) => (e) => confirmPop(e.currentTarget, `Kill ${s.name}? Its entries stay.`, () => act('kill', s.id, true));
+
+const SCOLS = 'minmax(0,1fr) 112px 100px 110px 74px';
+// The standing searches: what each one looks for, how often, how much one run may bring, and the day it next runs.
+function searchesView(data) {
+  const list = data.searches || [];
+  if (!list.length) return h('div', { class: 'empty' }, 'Nothing here yet.');
+  return card('', 0, list.map((s) => h('div', { class: `row${String(S.sel) === String(s.id) ? ' sel' : ''}`, style: `--cols:${SCOLS}`, onclick: () => select(s.id) },
+    h('span', { class: `t${s.tags.length ? ' with-tags' : ''}` }, h('span', { class: 'title' }, s.name),
+      s.tags.length ? h('span', { class: 'tags-inline' }, ...s.tags.map((t) => tagEl(t))) : null),
+    h('span', { class: 'c num' }, `every ${s.every_days} d`),
+    h('span', { class: 'c num' }, `${s.cap} per run`),
+    h('span', { class: 'c num' }, dayLabel(s.next_run)),
+    h('span', { class: 'r num', style: s.open ? `color:${hue('newsfeed')}` : null }, s.open ? `${s.open} open` : ''),
+    acts(s, [['Kill', kill(s), I.trash]]))));
 }
 
-export function Middle({ app, data, mod, fmt }) {
-  const hue = mod.hue;
-  if (app.state.sel) {
-    const item = app.state.item;
-    const act = async (a) => {
-      if (a.href) { window.open(a.href, '_blank'); return; }
-      if (a.confirm && !window.confirm(a.confirm)) return;
-      await post(`/api/newsfeed/action/${a.verb}`, { id: item.id });
-      if (a.removes) app.select(null); else app.loadItem(app.state.sel);
-      app.refresh();
-    };
-    const reload = () => { app.loadItem(app.state.sel); app.refresh(); };
-    let detail = null;
-    if (item && !item.error && item.kind === 'search') {
-      const bad = item.last_result && item.last_result.startsWith('bad');
-      detail = html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <pre style=${{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit', lineHeight: 1.6 }}>${item.prompt}</pre>
-        <span style=${{ ...meta13, ...nums, color: T.dim }}>every ${item.every_days} d · ${item.cap} per run · next ${dateLabel(item.next_run)}</span>
-        ${bad && html`<span style=${{ ...meta13, color: RED }}>${item.last_result}</span>`}
-        <${Tags} id=${item.id} tags=${item.tags} hue=${hue} onChange=${reload} />
-      </div>`;
-    } else if (item && !item.error) {
-      const line = [item.search, item.follow_up_at && `follow up ${dateLabel(item.follow_up_at)}`].filter(Boolean).join(' · ');
-      detail = html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        ${item.starts_at && html`<span style=${{ ...meta13, ...nums, color: hue }}>${when(item.starts_at)}</span>`}
-        ${item.summary && html`<span style=${{ lineHeight: 1.6 }}>${item.summary}</span>`}
-        <span style=${{ ...meta13, color: T.muted, wordBreak: 'break-all' }}>${item.url}</span>
-        ${line && html`<span style=${{ ...meta13, ...nums, color: T.dim }}>${line}</span>`}
-        <${Tags} id=${item.id} tags=${item.tags} hue=${hue} onChange=${reload} />
-      </div>`;
-    }
-    return html`<${Inspector} app=${app} item=${item} mod=${mod} fmt=${fmt} onAction=${act}>${detail}<//>`;
-  }
-  const b = data.blank;
-  const kill = async (s) => {
-    if (!window.confirm(`Kill ${s.name}? Its entries stay.`)) return;
-    await post('/api/newsfeed/action/kill', { id: s.id });
-    app.refresh();
-  };
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-    ${b.searches.length === 0 && html`<${Empty} text="no searches yet" />`}
-    ${b.searches.map((s) => {
-      const bad = s.last_result && s.last_result.startsWith('bad');
-      return html`<div key=${s.id} class="row" style=${{ ...rowStyle({ hue }), height: 'auto', minHeight: 44, padding: '6px 12px', cursor: 'default' }}>
-        <div style=${{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span onClick=${() => app.select({ module: 'newsfeed', id: s.id })} style=${{ cursor: 'pointer', display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            ${s.name}<span style=${{ ...meta13, ...nums, color: hue }}>${s.open ? `${s.open} open` : ''}</span></span>
-          <span style=${{ ...meta13, ...nums, color: T.dim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${[`next ${dateLabel(s.next_run)}`, ...s.tags].join(' · ')}</span>
-        </div>
-        ${bad && html`<span style=${{ ...meta13, color: RED, maxWidth: 220, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title=${s.last_result}>${s.last_result}</span>`}
-        <span class="bright-hover" title="kill" onClick=${() => kill(s)} style=${{ cursor: 'pointer', color: T.dim, padding: '0 4px', lineHeight: 1 }}>×</span>
-      </div>`;
-    })}
-  </div>`;
+// A search in the pane: the words it looks with, its schedule, its tags, and the button that ends it. The searches
+// arrive with the page's own load, so opening one asks the daemon for nothing.
+function searchView(id, data) {
+  const s = ((data && data.searches) || []).find((x) => String(x.id) === String(id));
+  if (!s) return null;
+  return [h('h2', null, s.name),
+    dateLine(`every ${s.every_days} d · ${s.cap} per run · ${dayLabel(s.next_run)}`),
+    h('div', { class: 'tagline' }, h('span', { class: 'tags' }, ...s.tags.map((t) => tagEl(t, { lg: true })))),
+    s.prompt ? h('div', { class: 'prose' }, s.prompt) : null,
+    h('div', { class: 'actions' }, h('button', { class: 'btn danger', onclick: kill(s) }, 'Kill'))];
 }
+
+// An entry in the pane: its headline, its one date, its tags, where it came from, and the buttons the daemon offers.
+function entryView(i) {
+  const kv = [
+    i.search ? [h('dt', null, 'Search'), h('dd', null, i.search)] : null,
+    i.url ? [h('dt', null, 'Link'), h('dd', null, h('a', { href: i.url, target: '_blank', rel: 'noopener', style: 'color:var(--ink-2)' }, i.url))] : null,
+  ].filter(Boolean);
+  const buttons = (i.actions || []).map((a) => actionBtn(i, a)).filter(Boolean);
+  return [h('h2', null, i.title), dateLine(oneDate(i)), tagLine(i),
+    kv.length ? h('dl', { class: 'kv' }, ...kv) : null,
+    i.summary ? h('div', { class: 'prose' }, i.summary) : null,
+    buttons.length ? h('div', { class: 'actions' }, ...buttons) : null];
+}
+
+export default {
+  cols: '18px 8px minmax(0,1fr) 164px', colsSplit: '18px 8px minmax(0,1fr) 150px',
+  chips: ['Open', 'Accepted', 'All'],
+  seg: ['Entries', 'Searches'],
+  async load() {
+    const [left, blank] = await Promise.all([get('/api/newsfeed/left'), get('/api/newsfeed/blank')]);
+    return { items: left.groups.flatMap((g) => g.rows), searches: blank.searches || [] };
+  },
+  filter: (list, chip) => { sync(); return chip === 'Open' ? list.filter((i) => i.status === 'open') : chip === 'Accepted' ? list.filter((i) => i.status === 'accepted') : list; },
+  groups: (list) => byDay(list.slice().sort(newest)),
+  cells: (i) => [chk(i), h('span', { class: `st${i.status === 'open' ? ' open' : ''}`, style: `--c:${hue('newsfeed')}` }), titleCell(i), stampCell(i),
+    acts(i, i.status === 'open' ? [...OPEN_ACTS.map((a) => [a.label, fire(a, i.id)]), tagAct(i)] : [tagAct(i)])],
+  rowClass: (i) => (i.status === 'open' ? '' : 'dim'),
+  alt: (data) => searchesView(data),
+  detail: (i, data) => (isSearch(i.id) ? searchView(i.id, data) : entryView(i)),
+};

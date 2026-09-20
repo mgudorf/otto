@@ -10,7 +10,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
-from app.store import Store, iso, now_iso, parse
+from app.store import Store, iso, now_iso, parse, tags_for
 
 router = APIRouter(prefix="/api/newsfeed")
 
@@ -18,36 +18,66 @@ CHIPS = {"All": "status != 'dismissed'", "Open": "status = 'open'", "Accepted": 
 LISTED = CHIPS["All"]                              # a dismissed entry leaves every list; the row stays so no run proposes it again
 SEARCH = "s"                                       # a search's row id, "s12"; an entry carries the bare integer
 RESOURCE = "newsfeed"
+ROW_LIMIT = 200                                    # one list per load; the shell narrows it in the browser
 
 
-def _day(ts: str) -> str:
-    return parse(ts).astimezone().strftime("%m-%d-%Y")
+def _when(ts: str) -> str:
+    """A stored moment in the owner's own clock; the client reads the day and the time off the string."""
+    return parse(ts).astimezone().strftime("%Y-%m-%dT%H:%M")
 
 
-def _happens(starts_at: str) -> str:
-    return datetime.fromisoformat(starts_at).strftime("%a %m-%d-%Y")
+def _day(when: str) -> str:
+    y, m, d = when[:10].split("-")
+    return f"{m}-{d}-{y}"
 
 
-def _row(r: dict) -> dict:
-    row = {
-        "id": r["id"],
-        "module": "newsfeed",
-        "text": r["text"],
-        "stamp": r["found_at"],
-        "unread": r["status"] == "open",   # bright until decided, like unread mail
-    }
-    if r["starts_at"]:
-        row["stampText"] = _happens(r["starts_at"])
-    return row
+def _fixed(store: Store, ids: list[int]) -> dict[int, list[str]]:
+    """The tags a run wrote on an entry, its search's among them: what the entry is, so the owner cannot edit them."""
+    out: dict[int, list[str]] = {i: [] for i in ids}
+    if not ids:
+        return out
+    marks = ",".join("?" * len(ids))
+    for r in store.query(f"SELECT ref, tag FROM newsfeed_tags WHERE kind = 'item' AND ref IN ({marks}) ORDER BY tag", tuple(ids)):
+        out[r["ref"]].append(r["tag"])
+    return out
+
+
+def _rows(store: Store, entries: list[dict]) -> list[dict]:
+    """Entries as ROWs: the headline, the day found, both tag sets, and the fields the page's cells read."""
+    if not entries:
+        return []
+    ids = [r["id"] for r in entries]
+    fixed, mine = _fixed(store, ids), tags_for(store, "newsfeed", ids)
+    names = {s["id"]: s["name"] for s in store.query("SELECT id, name FROM newsfeed_searches")}
+    rows_out = []
+    for r in entries:
+        row = {
+            "id": r["id"],
+            "module": "newsfeed",
+            "title": r["text"],
+            "when": _when(r["found_at"]),
+            "tags": mine.get(r["id"], []),
+            "fixed": fixed.get(r["id"], []),
+            "status": r["status"],
+            "summary": r["summary"],
+            "url": r["url"],
+            "search": names.get(r["search_id"]),
+        }
+        if r["starts_at"]:
+            row["happens"] = r["starts_at"]
+        if r["follow_up_at"]:
+            row["followUp"] = r["follow_up_at"]
+        rows_out.append(row)
+    return rows_out
 
 
 def _group_by_day(rows: list[dict]) -> list[dict]:
     groups: list[dict] = []
-    for r in rows:
-        label = _day(r["found_at"])
+    for row in rows:
+        label = _day(row["when"])
         if not groups or groups[-1]["label"] != label:
             groups.append({"label": label, "count": 0, "rows": []})
-        groups[-1]["rows"].append(_row(r))
+        groups[-1]["rows"].append(row)
         groups[-1]["count"] += 1
     return groups
 
@@ -94,26 +124,25 @@ def _get_search(store: Store, search_id: int) -> dict:
 
 def searches(store: Store) -> list[dict]:
     """Every search with its tags and how many of its entries still wait, for the blank state and the agent."""
-    rows = store.query(
+    found = store.query(
         "SELECT s.*, (SELECT COUNT(*) FROM newsfeed_items i WHERE i.search_id = s.id AND i.status = 'open') AS open"
         " FROM newsfeed_searches s ORDER BY s.created_at, s.id"
     )
-    return [{**r, "id": f"{SEARCH}{r['id']}", "tags": tags_of(store, "search", r["id"])} for r in rows]
+    return [{**r, "id": f"{SEARCH}{r['id']}", "tags": tags_of(store, "search", r["id"])} for r in found]
 
 
 @router.get("/left")
-def left(request: Request, query: str = "", chip: str = "All", page: int = 0) -> dict:
+def left(request: Request, query: str = "", chip: str = "All", limit: int = ROW_LIMIT) -> dict:
     store: Store = request.app.state.store
-    size = int(store.setting("ui.page_size"))
-    limit = size * (page + 1)
+    limit = max(1, min(limit, 1000))
     chip = chip if chip in CHIPS else "All"
     where, params = _search(query)
     where.append(CHIPS[chip])
     sql_where = "WHERE " + " AND ".join(where)
     total = store.scalar(f"SELECT COUNT(*) FROM newsfeed_items {sql_where}", tuple(params))
-    rows = store.query(f"SELECT * FROM newsfeed_items {sql_where} ORDER BY found_at DESC, id DESC LIMIT ?", (*params, limit))
+    entries = store.query(f"SELECT * FROM newsfeed_items {sql_where} ORDER BY found_at DESC, id DESC LIMIT ?", (*params, limit))
     return {
-        "groups": _group_by_day(rows),
+        "groups": _group_by_day(_rows(store, entries)),
         "chips": list(CHIPS),
         "chip": chip,
         "more": total > limit,
@@ -143,7 +172,8 @@ def _search_item(store: Store, search_id: int) -> dict:
         "id": f"{SEARCH}{r['id']}",
         "module": "newsfeed",
         "kind": "search",
-        "text": r["name"],
+        "title": r["name"],
+        "when": _when(r["created_at"]),
         "tags": tags_of(store, "search", r["id"]),
         "open": store.scalar("SELECT COUNT(*) FROM newsfeed_items WHERE search_id = ? AND status = 'open'", (r["id"],)),
         "entries": store.scalar("SELECT COUNT(*) FROM newsfeed_items WHERE search_id = ?", (r["id"],)),
@@ -160,17 +190,9 @@ def item(store: Store, item_id: str) -> dict:
     if r["status"] == "open":
         actions.append({"verb": "accept", "label": "Accept", "primary": True})
         actions.append({"verb": "dismiss", "label": "Dismiss", "removes": True})
-    actions.append({"verb": "link", "label": "Open", "href": r["url"]})
-    search = store.one("SELECT name FROM newsfeed_searches WHERE id = ?", (r["search_id"],)) if r["search_id"] else None
-    return {
-        **r,
-        "module": "newsfeed",
-        "kind": "entry",
-        "created_at": r["found_at"],
-        "search": search["name"] if search else None,
-        "tags": tags_of(store, "item", r["id"]),
-        "actions": actions,
-    }
+    if r["url"]:
+        actions.append({"verb": "link", "label": "Open", "href": r["url"]})   # no url, no button: there is nothing to open
+    return {**_rows(store, [r])[0], "kind": "entry", "actions": actions}
 
 
 @router.post("/action/{verb}")
@@ -265,17 +287,26 @@ def numbers(store: Store) -> dict:
 def today(store: Store) -> list[dict]:
     """Entries found today, plus any that happen today; the day's feed and the day's plan."""
     start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
-    rows = store.query(
+    entries = store.query(
         f"SELECT * FROM newsfeed_items WHERE {LISTED} AND (found_at >= ? OR starts_at BETWEEN ? AND ?) ORDER BY found_at DESC, id DESC",
         (iso(start), start.strftime("%Y-%m-%d"), start.strftime("%Y-%m-%dT23:59")),
     )
-    return [_row(r) for r in rows]
+    return _rows(store, entries)
 
 
 def queue(store: Store) -> list[dict]:
     """Every entry still waiting on a yes or no, newest first; Home lists these under Review however old they are."""
-    rows = store.query("SELECT * FROM newsfeed_items WHERE status = 'open' ORDER BY found_at DESC, id DESC")
-    return [_row(r) for r in rows]
+    entries = store.query("SELECT * FROM newsfeed_items WHERE status = 'open' ORDER BY found_at DESC, id DESC")
+    return _rows(store, entries)
+
+
+def rows(store: Store, limit: int = ROW_LIMIT) -> list[dict]:
+    """Every entry still listed, newest first; the tag intersection and Home's Recent read these."""
+    entries = store.query(
+        f"SELECT * FROM newsfeed_items WHERE {LISTED} ORDER BY found_at DESC, id DESC LIMIT ?",
+        (max(1, min(limit, 1000)),),
+    )
+    return _rows(store, entries)
 
 
 def context(store: Store, registry) -> str:

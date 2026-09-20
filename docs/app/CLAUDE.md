@@ -15,7 +15,7 @@ Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps 
 | Window | Google Chrome in app mode on its own profile in `app/.chrome-profile/`, first-run, default-browser and sync prompts off; its title bar and taskbar button show the Otto icon, which Chrome takes from the shell's favicon `app/static/otto.ico`. The app never touches Microsoft Edge |
 | Store | one SQLite file `data/otto.db` in WAL mode, platform and module tables together, every table named `<module>_<name>` (`app_` for the platform), timestamps as UTC ISO strings. At boot, before any schema runs, `app/migrate.py` renames an older database's tables to the current names: a backup into `data/backups/` first, then one transaction, refused when a new name already holds a table with rows. After the schemas, `MODULE_RENAMES` rewrites the rows that still name a module by an old name, behind its own backup (`tests/test_migrate.py`) |
 | LLM | the Claude Code CLI (2.1.263) headless under the owner's claude.ai Max login; no API key exists anywhere in the app |
-| Frontend | static ES modules, Preact + htm vendored, marked + KaTeX vendored for markdown and LaTeX in MIDDLE and in the session pane, inline styles ported from the artboard; no build step, no Node |
+| Frontend | static ES modules and one stylesheet, no framework: `core.js` renders every page from its config, `styles.css` is the approved design and `fonts.css` declares the vendored PP Formula, PT Serif and Geist Mono cuts. marked, KaTeX and highlight.js are vendored for markdown, LaTeX and code; no build step, no Node, nothing fetched from the network at runtime |
 | Modules built | Home, Chat, Email, Education, Second Brain, Science, Newsfeed, Finance, Graph, Database have pages; System and Feedback have none. The rail shows only modules whose package exists and that declare a page |
 
 Run: `Otto.exe` at the repo root, tracked in git, is how Otto is opened: it runs `.venv/Scripts/python.exe -m app` from its own directory with no console, which checks the port and code revision, starts or restarts the daemon, then opens the window; a failed launch's output shows in a box. A pinned `Otto.exe` and the open window are two taskbar buttons, since the window carries Chrome's app identity. `python -m app setup` registers the Windows Task Scheduler entry `Otto` that starts the daemon at logon. `python -m app build` derives `app/static/otto.ico` from `otto.png` and recompiles `Otto.exe`; both are committed, so it runs only after the logo or the launcher source changes. `python -m app status` prints health. `python -m app.modules.email.gmail consent` runs the Gmail OAuth flow once and writes the token file. Tests: `.venv/Scripts/python.exe -m pytest -q`, offline; the CLI is mocked at `app.claude.spawn` and a real invocation raises; no Jupyter kernel is started.
@@ -33,7 +33,7 @@ app/runner.py     one queue, per-resource locks, worker count = cap, job rows an
 app/revision.py   sha256 of app/** and config.toml, served by /health
 app/claude.py     CLI spawn, event stream, read-only allowlist, nightly budget
 app/modules/      registry, agent_base.md, one package per module (contract under Daemon)
-app/static/       index.html, otto.ico, shell.js, session.js, rows.js, api.js, feedback.js, module_settings.js, md.js, pages/<name>.js, vendor/
+app/static/       index.html, styles.css, fonts.css, otto.ico, app.js, core.js, chat.js, point.js, api.js, md.js, pages/<name>.js, vendor/
 data/             otto.db, daemon.log and its rotations, secrets/, workspace/ (Science's root: chat/<id>/ and the owner's notebooks, scripts and folders), backups/, exports/; .gitignore covers data/*.log and data/*.log.*, the db, secrets, workspace, backups and exports
 .claude/          skills/ (feature-flow, feedback-queue, sync-architecture, data-migration): the repo's own workflows
 otto.png          the logo, the one source of otto.ico and of Otto.exe's icon
@@ -150,9 +150,9 @@ A module is a package `app/modules/<name>/` plus `app/static/pages/<name>.js`. T
 | `routes.py` | `router = APIRouter(prefix="/api/<name>")` with `GET left`, `GET item/{id}`, `POST action/{verb}` (through `runner.run_action`), plus hooks `numbers(store) -> {value, label}`, `today(store) -> rows`, `queue(store) -> rows` (everything still waiting on the owner; Home lists every one), `item(store, id)`, `context(store, registry) -> str`. Route handlers must not share a hook's name. Each action `item` offers is `{verb, label, primary?, confirm?, href?, removes?}`: without an `href` the verb must be a key of the module's own action table, since Home posts it verbatim with `{id}`, and `removes: true` says the row leaves the list, which is how a page and Home know to close the inspector standing on it. `tests/test_platform.py::test_item_verbs_are_routes_the_module_serves` walks every module's action literals against its table |
 | `tools.py` | `register(read, full, store, config)`: read tools on both servers, write tools on `full` |
 | `agent.md` | the agent's job in the owner's terms |
-| `pages/<name>.js` | `load(app)`, `Left({app, data, mod, fmt})`, `Middle({app, data, mod, fmt})` and optionally `Right(...)`, which replaces the session pane, returning Preact nodes; the shell owns rail, header, tracks and the session pane; `md.js` exports `Markdown` for prose with LaTeX; `rows.js` exports the tokens, `Row`, `GroupHeader`, `Plus`, `Enter`, `DateInput` and the date helpers every page draws with |
+| `pages/<name>.js` | one default-exported config — `load()`, `cols`, `colsSplit`, `chips`, `seg`, `filter`, `groups`, `cells`, `rowClass`, and optionally `tools`, `summary`, `above`, `alt`, `detail` — which `core.js` renders. The shell owns the rail, the header, the search bar, the keyboard, the drawer and the list and detail frame; a page owns what is in a row and in the pane. See `## UI` |
 
-Wire shape for LEFT: `{groups: [{label, count, rows: [{id, module, text, stamp, stampText?, leading?: {pct|task}, done?, unread?, live?}]}], chips?, chip?, more?}`. `stamp` orders a row and is never drawn (the day label above already says the day); `stampText` is drawn at the row's right edge when the row carries one (an amount, an event day); `unread: false` dims a row the owner has dealt with, `done` strikes it through, `live` sets it in the hue; a group whose `label` is `""` has no header. External systems follow one pattern: tasks get a read client, action routes get a write client, and a test proves the split.
+Wire shape for LEFT: `{groups: [{label, count, rows: [ROW]}], meta?, more?}`, where a ROW is `{id, module, title, when, tags, fixed, …extras}` and the extras are exactly the fields that module's `cells()` and `detail()` read. `when` is the owner's wall clock, so the page groups by their day and prints their time; the client decides whether a row shows a date, a time or nothing. `rows(store, limit)` returns the same ROWs for the cross-module routes. External systems follow one pattern: tasks get a read client, action routes get a write client, and a test proves the split.
 
 **Dismissed and deleted rows leave every list.** A row the owner dismisses (a Newsfeed entry, a Second Brain suggestion) or deletes (an Education question) is gone from the module's LEFT, from `today`, from `queue` and from the agent's `context`, and its item offers no verb but a link. The row stays in its table, which is what stops a scout or generator producing it a second time: each of those prompts lists what is already recorded and says a dismissed one shows what to stop bringing. `done` on a row is for a state the owner reached, not one they refused: a completed Second Brain task and an ended Finance entry stay listed, struck through.
 
@@ -171,7 +171,7 @@ Wire shape for LEFT: `{groups: [{label, count, rows: [{id, module, text, stamp, 
 | Google Chrome | found through the `App Paths\chrome.exe` registry key |
 | Windows PowerShell 5.1 with System.Drawing, .NET Framework C# compiler | ship with Windows; `python -m app build` scales the logo and compiles `Otto.exe` with them (`%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`) |
 | SQLite with FTS5 and JSON | 3.50.4, stdlib |
-| Vendored frontend | `app/static/vendor/`: preact.mjs, htm.mjs, marked.esm.js 18.0.12, katex/ 0.18.7 (module, stylesheet, 20 woff2 fonts), highlight/ 11.11.1 (core and the python grammar, ES builds), Inter 400/500/600, JetBrains Mono 400/500, pinned by `SHA256SUMS` |
+| Vendored frontend | `app/static/vendor/`: marked.esm.js 18.0.12, katex/ 0.18.7 (module, stylesheet, 20 woff2 fonts), highlight/ 11.11.1 (core and the python grammar, ES builds), and under `fonts/` the 16 PP Formula cuts, the 4 PT Serif cuts and Geist Mono 400/500, all pinned by `SHA256SUMS`. preact.mjs, htm.mjs, Inter and JetBrains Mono are left from the shell this replaced and nothing imports them |
 | Google OAuth client and token | `data/secrets/google_client.json` (web client, redirect `http://localhost:8756/m/email/api/oauth/callback`), `data/secrets/token.json`, scope `gmail.modify`, refreshed in place |
 
 Not used: Node, APScheduler, pywebview, PyInstaller, `claude-agent-sdk`, nbclient, an Anthropic API key, paid search APIs, a graph database, Microsoft Edge.
@@ -197,75 +197,164 @@ One doc per module, `docs/<module>/CLAUDE.md`: the owner's requirements, `## Bui
 
 ## UI
 
-Follows style of, but not limited to, the Claude Design project `9459ddf2-3c53-45d8-9252-7a17bd027bf4` (`Personal Dashboard App.dc.html`). The artboard and its runtime are imported to `docs/design/`; open the html in a browser to run it.
+The window is the shell the owner approved as `docs/design/otto-next.html`, built into the app: one dense list per module with a detail pane beside it, tags on every row and cross-module tag pages, a search bar whose tokens narrow every list, a command palette that also holds the agent's skills, the agent as a collapsible drawer, a point-at-anything mode, and Graph as a map of every tag whose selection is those search tokens. It is plain ES modules and one stylesheet: no framework, no build step, nothing fetched from the network at runtime.
 
 ### Frame contract
 
-Every page uses three fixed tracks. Selection swaps what renders inside MIDDLE and never moves a track.
+`.app` is one CSS grid. Nothing floats over the page.
 
 | Region | Spec |
 |---|---|
-| Rail | 56px wide, 32px icon buttons (20px SVG, stroke 1.5), 6px gap, 14px top padding; active background `#23262c`; Activity and Settings pinned at the foot |
-| Header | 48px, padding `14px 32px 0`, the 20px/600 title and nothing else; at the right edge two 28px icon controls: on a module page a sliders icon opens the module's settings (the `runs` toggle when it has tasks, `model` and `effort` selects, in a 280px panel), and a speech-bubble icon opens feedback on every page |
-| Loading line | 1px, margin `0 32px`; a 30% `#8b8f98` bar animates `translateX(-100% to 340%)` over 1.2s while a fetch is in flight |
-| Tracks | `2fr 5fr 2fr` with a `5%` column gap, padding `19px 24px 24px`: LEFT · gap · MIDDLE · gap · RIGHT are 20 · 5 · 50 · 5 · 20 of the frame's width at every window size, so a wider window widens all three and opens no ground between them; opacity fades out and in over 120ms on page switch |
-| LEFT | panel `#1a1c21`, radius 6, padding `12px 8px 24px`: search (36px, `#23262c`, 1px focus ring in the hue) with `+` beside it where the page creates something, chips, groups of boxed one-line rows under an `MM-DD-YYYY` day label, `more` under a cut list; no counts anywhere |
-| MIDDLE | ground, padding `8px 16px 40px`, content fills the track: the module's blank state or the item inspector, prose included (the inspector, Activity's detail, Education's question, Email's reader and Chat's conversation run the track's full width); Home's number grid holds 640px, Finance's totals strip 720px and each Settings section 560px |
-| RIGHT | panel, padding `16px 12px 12px`: the session pane, identical on every page |
+| Grid | `var(--navw) minmax(0,1fr) var(--chatw)` under a `var(--toph)` header row: rail 248px (56px collapsed with `[`), main, drawer 400px (`]` closes it). The drawer is a grid column at every window width, never a sheet over the page; when the window narrows the page's plates ask for less and, if it is still squeezed, main scrolls sideways rather than hide under it |
+| Grips | the gutter left of the drawer and left of the detail pane drag, with nothing drawn for them, and write `--chatw` / `--listw` to `localStorage`. The drawer is capped so main keeps room for its plates: 840px split (660 at ≤1280), 520 unsplit; the cap is re-applied on load, on resize and on every render |
+| Header | the brand, then the page's title left of the search bar and the page's own controls right of it (so a page's summary is the first row of main and its plates start level with the drawer's), then the daemon's pulse and six icon buttons: rail, point, palette, keys, theme, drawer |
+| Search bar | tokens then a bare input, with the Quick access bookmark at its end. A token is a tag, a module, an `is:` filter or free text; `Ctrl+Space` focuses it, `Ctrl+Shift+Space` clears it, `↑ ↓ ↵` take a suggestion. Tokens narrow every list, including Home in both its modes, and the tag tokens are Graph's selection |
+| Rail | module entries in manifest order, a thin rule, then Quick access, and Activity and Settings at the foot. No headings, no counts. A Quick access entry that is one tag's page is marked `#`, the rest `»` |
+| Main | the page's summary, then `.content`: the list, and the detail pane beside it when an item is open (`.content.split`) |
+| Drawer | the open module's agent: rounded tabs on a shaded strip, one per open session, sized to the title up to 180px and cut off flat, with a `+` tab; the transcript; a composer that is a plain box like the search bar, with what is being discussed as a token inside it and the send arrow at its edge |
 
 | Token | Value |
 |---|---|
-| Ground / panel / box / raised | `#101114` / `#1a1c21` / `#1e2126` (a row on its panel) / `#23262c` (selection, inputs, user bubbles) |
-| Text / muted / dim | `#e6e7ea` / `#8b8f98` / `#5f636c` |
-| Hairline / row hover / table row hover | `rgba(230,231,234,.08)` / `#202329` / `#16181c` |
-| Hues and rail order | home `#e6e7ea` 0, chat `#d9915b` 1 (not in the artboard; speech-bubble icon; ties with email and sorts first), email `#cf7b7b` 1, education `#7a9fd6` 2, second_brain `#d1a36a` 3, science `#6fb3b8` 4, finance `#7fb894` 5 (the artboard's Money hue and banknote icon), newsfeed `#c98ba8` 6 (not in the artboard; feed-arcs icon), graph `#b3b06a` 7, database `#a68bd0` 8; System and Feedback `#8b8f98` 99 have no rail entry |
-| Type | Inter everywhere: 15px/1.4 body, 13px meta, 20px/600 title, 28px/500 numbers with tabular figures; JetBrains Mono 13px for code alone (notebook cells, scripts, the SQL editor, markdown code); vendored with `system-ui` / `ui-monospace` fallbacks |
-| Rows | 36px list rows, 32px compact rows, 28px group headers, padding `0 12px`, gap 12px, radius 6, 4px between rows. Every row is a box: `#1e2126` with a hairline ring, weight 500 while `unread`; transparent and `#8b8f98` once read or done (Gmail's convention, no dots); raised with a 2px hue bar at its left edge when selected; `#252830` on hover. The leading slot is a 40px progress bar or a 10px task square; nothing on a row repeats the day label above it |
-| Chips / buttons | padding `3px 9px` / `5px 10px`, radius 6, 13px; active or primary is hue background with `#101114` text; inactive or secondary is `#8b8f98` text with a 1px inset ring on hover. `+` in a 28px ring is the one control for anything new (a conversation, a topic, an entry, a file or folder, a cell, a session tab), raised while the new thing is the one open; `↵` in a ring sends every composer and capture box |
-| Toggle | 28x16 track, 12px knob; on `#e6e7ea` / `#101114`, off `rgba(230,231,234,.14)` / `#8b8f98` |
-| Dates | `MM-DD-YYYY` everywhere (`09-12-1990` is September 12th): group labels, the inspector's line, tables and schedules; a stamp shows the time (`ui.time_format`) on the same day, else the date. A typed date is `DateInput`: digits only, the dashes placed as they come, the unfilled part of `MM-DD-YYYY` shown dim, sent as `YYYY-MM-DD` once complete |
-| Markdown | `md.js`: marked with `breaks` and `gfm`, math lifted out first and rendered by KaTeX (`$…$` inline, `$$…$$` display), the `.md` rules and the KaTeX stylesheet added to the document once |
-| Composer | `rows.js` `TextArea`, every composer and capture box: three lines when empty, no placeholder, grows with its text (`field-sizing: content`) to half the viewport, then scrolls; raised surface, 15px/1.5, focus ring in the hue; a capture box sits on the panel surface, the Database editor in mono. Enter sends and Shift+Enter breaks a line everywhere but the SQL editor (Ctrl+Enter) and the notebook cells (JupyterLab's keys) |
+| Themes | Rainbow and Dark, both dark, toggled in the header and kept in `otto-next-theme`. `--m` is the open module's hue; Rainbow mixes it into every surface, Dark leaves them neutral. There is no light theme |
+| Colour | the module's hue on a card's left border and on a primary button (`--accent`, the hue mixed toward the ink so it is never white on dark); `--danger` tints a destructive button. Nothing else carries colour. A hovered card deepens its own tint and leaves its neighbours theirs |
+| Type | PP Formula for the chrome (module names, rail, header, palette, dates and numbers), PT Serif for what is read (item titles, prose, chat, descriptors, tags, key caps, the search bar, an Education question body), Geist Mono for code. `fonts.css` declares all 22 vendored cuts with the `ascent-override` / `descent-override` that centre text on its capitals, so a glyph sits level with the icon beside it |
+| Rows | `--rowh` 42px; a row's columns come from its page's `cols`, and from `colsSplit` while the detail pane is open. Five tags show on a row, then `+N` |
+| Dates | `MM-DD-YYYY`, bare: a date carries no word before it, and a stamp shows the time only for something that arrived today |
+| Focus | a lift off the page, not a ring, except on buttons |
 
-Session pane: a blank pane shows nothing but its controls. A tab strip, one tab per open session (its label, ellipsized at 140px, `…` appended while another tab's turn runs; the active tab raised), `+` for a blank tab whose first send opens the session (raised while the blank tab is the one open), and `×` at the right edge to close the active tab (sends `/clear`: the tagger names it, the tab disappears once `tagged` arrives and a blank tab opens); user turns are raised bubbles aligned right at max 85% width, model turns markdown with LaTeX through `md.js`, tool calls one 13px line `▸ tool` with the status at the right edge; the box with no placeholder, then `/` (a menu of the agent's skills; a pick puts `/name ` in the box), a pulsing hue dot while a turn runs, and `↵`; Enter sends, Shift+Enter breaks a line. The newest open tab is shown on arrival, and the strip re-lists on every shell refresh (the `tick` prop), so a turn a page action started lands in view: a blank tab follows it, another tab shows `…` on it.
+### Pages
 
-Item inspector: 16px hue glyph, the item's `MM-DD-YYYY HH:MM` dim, `×` to clear, the body as markdown through `md.js`, then a primary action in the hue, secondary actions, and `Send to session` right-aligned, which prefills the composer with the item's reference; no kind is written. Email's reader keeps the glyph, time, `×` and `Send to session` and carries no actions; those sit in its LEFT bar.
+`app/static/pages/<name>.js` default-exports one config; `core.js` renders every page from it and never imports a page (`app.js` hands them over with `registerPages`).
+
+| Field | What it is |
+|---|---|
+| `load()` | the page's only fetch, run on open, on every refresh and after every action; returns data and renders nothing |
+| `cols`, `colsSplit` | the row's grid template, closed and split |
+| `chips`, `seg` | the segment controls; one chip draws none |
+| `filter`, `groups` | narrowing by chip, then the cards to draw |
+| `cells`, `rowClass` | the row's contents and its state |
+| `tools`, `summary`, `above`, `alt` | the header's controls, the first row of main, an editor or capture box over the list, the alternate view under `seg` |
+| `detail` | the pane beside the list. Its buttons are built from the item's own `actions` (`verb`, `label`, `primary`, `confirm`, `removes`, `href`), so a page offers exactly what its module allows; a verb carrying `confirm` or `removes` is a red button and asks in a popover first |
+
+### Tags, and what is one system
+
+`app_tags(module, item_id, tag)` holds the owner's tags on any module's row; Second Brain keeps `second_brain_tags`, which its own tools read and write, and `app.store.tags_for` reads both, so a tag means the same thing everywhere. `GET /api/tags` lists them with their counts, `POST /api/tags/add` and `/remove` write them, and `GET /api/items?tags=a,b` returns the rows of every module carrying all of them, which is what a tag page, Home's Recent and the Graph pane show. Every tagged row reaches the graph: `app_tags` is one of its sources beside Second Brain's items and the tagged sessions. A row also carries `fixed` tags — what it is, by kind, topic or the search that found it — which look the same and cannot be edited.
+
+### Keyboard
+
+`?` opens the one list of keys; no control anywhere else names its own. `← →` walk the rail, the list, the open page, the chat tabs and the composer; `↑ ↓ ↵` act inside one. A plain letter fires only without a modifier, so `Ctrl+C` still copies. `j k` step rows, `x` selects one, `t` tags it, `a` asks about it, `c` opens a chat and `C` reopens the last closed one, `o` is point mode, `Alt+←` and `Alt+→` walk history, `Esc` always leaves.
+
+### History and refresh
+
+Every page change and every opened item is a history entry (`pushState`), so the mouse's back and forward buttons walk pages. Pages fetch on `ui.refresh_seconds` and after every action; the header's pulse reads `/health` and `/api/tasks` and says when the daemon last synced and what is running, and nothing when it reports nothing. Static files go out `Cache-Control: no-cache`, and the window reloads itself once when `/api/shell` returns a `rev` other than the one it booted under.
+
+### Point mode
+
+`o`, or the crosshair in the header, aims at anything: a row, a paragraph, a notebook cell, a rail entry, a Home number, the search bar, the drawer. Clicking opens a popover naming exactly what was pointed at — down to which paragraph — with four actions: Ask (the reference becomes the drawer's token), Summarize and tag (a real turn of that module's agent), Capture (a Second Brain item carrying the tags over), and Feedback (filed through the Feedback module against that reference, which is what `/feedback-queue` later prints). `Esc` leaves.
+
+### Files
+
+| File | What it is |
+|---|---|
+| `index.html` | the skeleton: header, rail, main, drawer, and the popovers, palette, key list and toast |
+| `styles.css` | the design, ported from the preview; later rules override earlier ones, so changes are appended |
+| `fonts.css` | the generated `@font-face` block for the cuts vendored under `vendor/fonts` |
+| `core.js` | state, DOM helpers, the chrome, the search bar, Quick access, history, the keyboard, the tag popover, the palette, the key list, and the generic list and detail renderer |
+| `app.js` | registers the twelve pages, the drawer and point mode, then boots |
+| `chat.js` | the drawer: tabs, transcript, composer, streaming. It owns what is inside the plate; core owns the plate |
+| `point.js` | aiming and the point popover |
+| `pages/*.js` | one per module |
+| `api.js`, `md.js` | the fetch wrappers with the in-flight count behind the loading line, and markdown with KaTeX |
 
 ### Activity and Settings
 
-Activity: LEFT is the `events` log by day with a chip per module, each row boxed with the clock, the verb in its module's hue (red when failed) and the text, `more` under the cut; MIDDLE blank state is the task table with its toggles, one line `nightly used / max · window · every N min` (`· open` inside the window), and the last fifty jobs; selecting an event shows its module, verb and time, its text and its job's result as markdown, then the error and log. Settings: LEFT four boxed rows; General (start page among the modules with a page, refresh, time format, rows per page), Modules (every module, page or not, its title in its hue: `shown` in the rail for a module with a page, kept here because a hidden module's page cannot be reached to show it again; `runs`, `model` and `effort` read `on its page` for a module with a page and are editable here for one without; a failed module shows its error), Claude (binary, model, the models and efforts a module may pick, agents dir, workspace, sessions kept, background jobs; read-only), Data (database path and size, last backup and last export, `Back up now` through the SQLite backup API into `data/backups/`, `Export`: every table as JSON rows in one file under `data/exports/`, `Vacuum`).
+Activity is the daemon's own log: events by day, a chip per module and one for failures, the task table with its toggles, and the nightly window and how much of its run budget is used; a failed job opens its error in the pane. Settings is a grid of tiles — Otto first (general, data, app), then every module, each tile carrying its hue as a deeper tint — and a pane: for a module, its agent's model and effort and the switches that hold its page and its tasks; for Otto, the general, data and app settings and the backup, export and vacuum controls. Feedback has its own tile listing what is pending and what was cleared.
 
-### Departures from the artboard
+### Departures from the design preview
 
-- Activity's MIDDLE blank state is the task table, required by the Daemon section.
-- Finance is the artboard's `Money` entry; the web scouting that sat in Business and Social is Newsfeed's, a module the artboard does not have.
-- The rail shows only built modules with a page.
-- The header carries settings and feedback icons the artboard does not have; module settings live there instead of on the Settings page.
+- The preview's header pulse reads `synced 14:20, 1 job running` as a fixed string; here it is the daemon's own last sync and running-job count, and it is empty when there is nothing to report.
+- Point mode's entry toast is gone: it was a hint, and it named a key outside the `?` overlay.
+- The preview's sample tags are single words; real tags are phrases, so a tag that cannot fit its row ends cleanly instead of being sliced, and a row drops its inline tags while the detail pane is open, where the open item's own tag line shows them in full.
+- Settings' module pane is a list of rows, not the preview's model-and-effort table: the daemon keeps one model and one effort per module, and a table with a column head over a single row was two pieces of chrome (UI tenets 1 and 2). What the preview offered and the daemon does not keep is a patch below.
 - Each module's own departures are the `Departures` row of its doc's `## Built` table.
 
 ## Patches
 
-### Activity lists system twice among its chips
+### Reopening a chat inside the tagging window finds it still open
+
+- Kind: defect
+- Where: `app/api.py` (`session_send` `/clear`, `session_reopen`), `app/static/chat.js` (`closeChat`, `reopenChat`)
+- Found: 2026-09-20, building the agent drawer
+- Status: open
+
+What happens: closing a tab posts `/clear`, which returns as soon as the tagging one-shot is submitted; the row is closed only when that run finishes, seconds later. The drawer removes the tab at once. Pressing `C` inside that window reopens a session that was never closed: the route answers 200, the tab comes back, and then the tagger's close lands and the tab disappears again on the next sync.
+
+Expected: reopening always returns a tab that stays, whether or not the tagger has finished.
+
+Fix: either the drawer holds the reopen until the close settles (it already knows the session is being tagged, since `tagged` arrives on the stream), or the platform can cancel a queued close so a reopen inside the window supersedes it. The second is the smaller surface and keeps the drawer free of daemon timing.
+
+### Home's counts strip has room for eight, and the owner has nine modules that count
+
+- Kind: defect
+- Where: `app/static/styles.css` (`.page-tools .stat-strip`, the `max-width: 1560px` rule), `app/modules/home/routes.py` `numbers_route`
+- Found: 2026-09-20, measuring the header while porting the shell
+- Status: open, needs a decision
+
+What happens: nine modules report a number (Chat, Email, Education, Second Brain, Science, Finance, Newsfeed, Graph, Database). Eight are enabled today and, since the strip was tightened, all eight fit at 1600px with about 16px to spare. A ninth needs roughly 61px more than the header has. Between 1561 and 1575px the strip also borrows up to 14px of the header's right gutter, leaving as little as 2px before the first icon button; below 1560px the strip hides itself, as designed.
+
+Expected: every count Home shows keeps its word at every width the strip is shown at, because a number without its word means nothing (UI tenet 2).
+
+Fix: the owner's call, because the only ways out cut something the tenets protect. Either Home shows a chosen subset of counts and the rest live on their own pages, or the strip hides itself at a wider breakpoint than 1560px, or it wraps to a second header row. Nothing here should shorten a label or drop the icon.
+
+### Feedback and System ship no mark, so their Settings tiles carry none
+
+- Kind: gap
+- Where: `app/modules/feedback/__init__.py` and `app/modules/system/__init__.py` (`MANIFEST.icon`), drawn by `app/static/pages/settings.js` (`tileGrid`)
+- Found: 2026-09-20, fixing the ported Settings page
+- Status: open, needs a decision
+
+What happens: both manifests set `icon=""`. The Settings grid is the only place a page-less module is drawn, and a tile's mark is a tinted square with the module's glyph inside it, so an empty icon painted a filled box with nothing in it. The page now draws no mark when the manifest has none, which leaves those two tiles as the only ones without one.
+
+Expected: every tile carries a mark, as every tile in the preview does.
+
+Fix: one line in each manifest. The glyph is the owner's call: `docs/design/` is the source for a module's mark and neither module appears there. The page draws whatever the manifest gives it.
+
+### The Otto pane has no Theme control
+
+- Kind: gap
+- Where: `app/static/core.js` (`dark`, `setTheme`, both private to the file), `app/static/pages/settings.js` (`ottoPane`)
+- Found: 2026-09-20, fixing the ported Settings page
+- Status: open, needs a decision
+
+What happens: the preview's General section offered Rainbow and Dark as a segment; the ported pane has no such row. The header's theme button still switches the theme, so nothing is unreachable. The page cannot rebuild the row on its own: core keeps the theme's reader and writer to itself, and a page that read `document.documentElement.dataset.theme` and wrote the `otto-next-theme` key would be a second way of doing what core already does.
+
+Expected: either the pane offers the theme the way the approved preview does, or the header's button is its one home and the pane is right to leave it out.
+
+Fix: if the row comes back, core exports the pair and the pane draws the segment with them, a line each. The owner decides, because a control that is already a symbol in the header may not want a second home.
+
+### Point mode files feedback against a Settings tile as if it were an item
+
 - Kind: bug
-- Where: `app/static/pages/activity.js` `load`
-- Found: 2026-09-18, the UI review
+- Where: `app/static/point.js` (`refOf`, `findItem`, `feedbackBox`), `app/static/core.js` (`loadItem`, the `local` row)
+- Found: 2026-09-20, fixing the ported Settings page
 - Status: open
 
-What happens: the chip strip is built as `All`, every module the shell lists, then `system` appended; the shell now lists System as a module, so `system` appears twice and the strip wraps to a fifth line.
+What happens: a page may hand core a row that is the whole item (`local: true`), and Settings uses one per tile, so `S.item` holds a tile. Aiming point mode at the open pane takes that tile for a daemon row and posts `item: {module: "settings", id: "email"}` to `/api/feedback/action/add`; the filing agent is then told an item was selected that no module can resolve. Activity's and Graph's local rows stand for real records, so only Settings is affected.
 
-Expected: one `system` chip.
+Expected: pointing at the Settings pane files against the page, the way pointing at the toolbar or the rail does.
 
-Fix: drop the appended `system` in `load`; the shell's module list already carries it.
-### Visual system reads as generated
-- Kind: roadmap
-- Where: `app/static/index.html`, `app/static/rows.js` (`T`, `rowStyle`, `Row`, `Chips`, `Button`, `Plus`, `Enter`), `app/static/shell.js` (rail, header, tracks), `app/static/session.js`, `app/static/pages/settings.js` (the native select), `docs/design/Personal Dashboard App.dc.html`
-- Found: 2026-09-18, the owner's request (the UI review)
-- Status: open
+Fix: mark the row, not the page. A local row that stands for no record carries a flag, and `refOf` skips such a row so it falls through to the `kind: 'ui'` branch. Both files are the shell's; the row already travels through `loadItem` untouched.
 
-What happens: every surface is one of four greys a few percent apart with no edge or light direction; every row is a 6px-radius box with a hairline ring on a panel of the same shape, as are chips, buttons, inputs and tabs; the dim grey `#5f636c` carries every date, stamp, group label, empty state and blank-state line at 2.8:1 against the panel; the type scale is 13/15/20 in Inter at default tracking; `+ × ↵ ▸ /` are typed characters beside drawn icons and Settings uses a native select; the rail stacks eight pastel hues; MIDDLE is one dim line on Email, Second Brain, Science, Chat and Settings and RIGHT an empty plate until a tab opens, while LEFT truncates titles to fit a full date. The owner reads this as flat and generated.
+### The Settings pane reaches four of Otto's settings and not the rest
 
-Expected: a sleek, dense instrument: matte plates under one light, white readings, module hues as small marks only, readable greys, one type scale with a display size for numbers and titles, drawn icons, no dead track.
+- Kind: gap
+- Where: `app/api.py` (`/api/shell`, `PUT /api/settings`), `app/static/pages/settings.js` (`ottoPane`, `modulePane`)
+- Found: 2026-09-20, fixing the ported Settings page
+- Status: open, needs a decision
 
-Fix: in `T` and `index.html`: ground `#0f1013`, plate `#16171c` with `inset 0 1px 0 rgba(255,255,255,.05)` and a `0 0 0 1px rgba(0,0,0,.35)` outline, field `#1e2026` (inputs get an inset shadow), text `#f2f3f5` / `#a3a7b0` / `#7a7f89`, radius 10 plates, 8 rail and fields, 6 controls, 4 tags; rows flat 30px on the plate (hover field, selected field with the 2px hue bar, no ring, a hairline only between groups, the stamp in a fixed right column); type IBM Plex Sans 14/1.45 body, 12.5 meta, 12 labels, 22/600 title at -0.01em, 38/500 numbers at -0.025em tabular, IBM Plex Mono for code and tool lines (vendored; keeping Inter with the same scale is the owner's alternative); rail icons in the tertiary grey with the hue on the active and hovered one only; `+ × ↵ ▸ /` drawn as 20-grid SVG at stroke 1.6 and the select replaced by chips; column gap 2.5% with the width to LEFT; RIGHT collapsed to a 44px strip until a tab is open; each module's blank MIDDLE a panel of its state (content per module is the owner's call); the artboard restyled in the same change. Owner decisions before the change: typeface, the RIGHT collapse, the track split, each blank state's content. A mock of Home in this system was rendered on 2026-09-18 for the review.
+What happens: `PUT /api/settings` accepts four live keys, the start page, the refresh seconds, the time format and the rows per page, plus each module's shown, runs, model and effort. The preview's pane also offered the scheduler's tick and concurrency, the nightly turn and minute caps, the agent drawer's opening state, launch at logon, app window or browser tab, a model and effort for each scheduled task and each skill, and every module's own `config.toml` knobs. None of those is a live setting: they are boot values, and `/api/shell` carries no `[module]` sections, so the pane shows nothing for them.
 
-On 2026-09-18 the owner widened this to a full overhaul on branch `alternate-ui`: the LEFT lists read as clunky and slow to parse, tags should carry organization, search and referencing, and the agent pane should collapse. A clickable preview of that shell, built outside the app with invented data, is `docs/design/otto-next.html` (open it in a browser): one dense table per module with a detail pane beside it, tags on every row with cross-module tag pages, a search bar that takes `#tag`, `@module` and `is:` tokens, a command palette that also holds the agent's skills, keyboard rows, the agent as a collapsible drawer, a point-at-anything mode (aim at a row, a paragraph, a cell or a control, or highlight text, then Ask, Summarize and tag, Capture or Feedback), neutral tags, and Graph as a map of all tags whose selection is an intersection (a click picks a tag, Ctrl+click adds one, Ctrl+Shift+click removes one, and the set is the search bar's tag tokens) with related items previewed in place. Every page change is a browser history entry, so the mouse back and forward buttons walk pages. No control explains itself: no placeholders, no key labels beside buttons, a symbol alone where it depicts the function. A state change is a bordered button and a destructive one is tinted red; Quick access is a snapshot of the page and the search bar's tokens, added from the bookmark at the end of the bar or from the palette under a name of the owner's choosing and removed from the rail; an entry that is one tag's page is marked # and the rest », and there is no separate pinned list. The rail has no headings: modules, a thin rule, then quick access; module counts appear only in Home's header strip, not in the rail or a page title. Home toggles between Priority, what waits, and Recent, the five newest items per module with nothing filtered out, and the search bar's tokens apply to both. A primary button wears the open module's hue in both themes; nothing is white on dark. Home's counts in the header read as module icon, number, then a label of at most two words, the one place a number needs its word. The keyboard walks four zones with ← and →: the rail (↑ ↓ and Enter there), the list, the open page (focus lands on its first control; Ctrl+Enter submits an answer) and the agent's composer, whose ← at the start of the text steps back. The drawer's chats are rounded tabs on a shaded strip at the top of its plate, each as wide as its title up to a cap and cut off flat, with a + tab; they are a keyboard zone of their own (← → along them, Enter picks, F2 renames, Delete closes). Enter on an empty tag box closes it like Esc. Keyboard position in a text box or the rail is shown by a lift off the page, not a ring. The drawer and the detail pane resize by dragging the gutter beside them, with nothing drawn for it, and the widths persist; the drawer is capped so the main column always keeps room for its plates, and at every window width it stays a column of the grid beside the page, never a sheet over it. The header holds the page: its title sits left of the search bar and its controls right of it, so a page's summary is the first row of the main column and the plates start level with the drawer; Home's counts sit in the header as icon and number, so its cards start there too. PT Serif carries the reading text (item titles, prose, chat, descriptors, tags, key caps, the search bar) and PP Formula the chrome (module names, the rail, dates and numbers, the palette, the header). A date stands alone, tags carry no label, and a plain-letter shortcut fires only without a modifier so Ctrl+C copies. Settings is a grid of tiles, Otto (general, data, app) then every module, and a pane that picks model and effort for the agent, each scheduled task and each skill, with the module's own knobs from `config.toml` beneath. Nothing in `app/static` changes until the owner picks a direction from it.
+Expected: the settings the preview showed are either editable here or are boot values the pane is right to leave in `config.toml`.
+
+Fix: the owner picks which ones become live. Each then needs a key `PUT /api/settings` accepts, a field on `/api/shell` and a row in the pane. A per-task or per-skill pick needs more than that: `Claude._choice` reads `modules.<name>.model|effort` only, so the runner has to look for the narrower key first.
+

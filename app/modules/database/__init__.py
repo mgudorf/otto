@@ -3,7 +3,7 @@ from app.modules import Agent, Manifest
 MANIFEST = Manifest(
     name="database",
     title="Database",
-    hue="#a68bd0",
+    hue="#B39BDB",
     icon='<rect x="3" y="4" width="14" height="12" rx="2"></rect><path d="M3 10h14"></path>',
     order=8,
     agent=Agent(

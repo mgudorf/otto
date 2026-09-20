@@ -14,37 +14,52 @@ from app.modules.education.questions import (
     parts_of, question, status_of, tags_of, topic_rows,
 )
 from app.runner import JobFailed
-from app.store import Store, now_iso, parse
+from app.store import Store, now_iso, tag_key, tags_for
 
 router = APIRouter(prefix="/api/education")
 
 MODULE = "education"
 RESOURCE = "education"                                         # page actions
 RESOURCE_LLM = "education.llm"                                 # the generate run: serializes with itself, never with page actions
-TABS = ("active", "completed")                                 # LEFT's chips
+ROW_LIMIT = 200                                                # the completed history one list carries; the client narrows it
 
 
-def _row(q: dict) -> dict:
-    if q["completed_at"]:
-        pct, stamp = q["score"] or 0, q["completed_at"]
-    else:
-        pct, stamp = (round(100 * q["graded_parts"] / q["parts"]) if q["parts"] else 0), q["created_at"]
-    return {"id": q["id"], "module": MODULE, "text": q["title"], "stamp": stamp, "leading": {"pct": pct}}
+def _part_facts(store: Store, ids: list[int]) -> dict[int, dict]:
+    """Per question, in one query: how many parts carry an answer, and the part titles the search reads."""
+    if not ids:
+        return {}
+    marks = ",".join("?" * len(ids))
+    rows = store.query(
+        "SELECT question_id, SUM(answered_at IS NOT NULL) AS answered, GROUP_CONCAT(COALESCE(title, ''), ' · ') AS titles"
+        f" FROM education_question_parts WHERE question_id IN ({marks}) GROUP BY question_id",
+        tuple(ids),
+    )
+    return {r["question_id"]: r for r in rows}
 
 
-def _day_label(ts: str) -> str:
-    return parse(ts).astimezone().strftime("%m-%d-%Y")
+def _owner_tags(q: dict, shared: list[str]) -> list[str]:
+    """The owner's tags: the question's own list first, then any the shell wrote to app_tags."""
+    own = [t for t in (tag_key(t) for t in tags_of(q)) if t]
+    return own + [t for t in shared if t not in own]
 
 
-def _group_by_day(rows: list[dict]) -> list[dict]:
-    groups: list[dict] = []
-    for q in rows:
-        day = _day_label(q["completed_at"])
-        if not groups or groups[-1]["label"] != day:
-            groups.append({"label": day, "count": 0, "rows": []})
-        groups[-1]["rows"].append(_row(q))
-        groups[-1]["count"] += 1
-    return groups
+def _row(q: dict, tags: list[str], facts: dict | None) -> dict:
+    """One ROW. `pct` fills the bar while the question is open, `score` replaces it once the quiz is complete."""
+    done = q["completed_at"] is not None
+    answered = (facts or {}).get("answered") or 0
+    fixed = [tag_key(q["topic"])] + ([tag_key(q["topic_tag"])] if q["topic_tag"] else [])
+    return {
+        "id": q["id"], "module": MODULE, "title": q["title"], "when": q["completed_at"] or q["created_at"],
+        "fixed": fixed, "tags": [t for t in tags if t not in fixed], "snippet": (facts or {}).get("titles") or "",
+        "topic": q["topic"], "difficulty": q["difficulty"], "status": status_of(q), "score": q["score"],
+        "pct": 100 if done else (round(100 * answered / q["parts"]) if q["parts"] else 0),
+    }
+
+
+def _rows(store: Store, qs: list[dict]) -> list[dict]:
+    ids = [q["id"] for q in qs]
+    shared, facts = tags_for(store, MODULE, ids), _part_facts(store, ids)
+    return [_row(q, _owner_tags(q, shared.get(q["id"], [])), facts.get(q["id"])) for q in qs]
 
 
 def detail(store: Store, question_id: int) -> dict | None:
@@ -68,36 +83,24 @@ def detail(store: Store, question_id: int) -> dict | None:
     setup = (f"{q['definitions']}\n\n" if q["definitions"] else "") + q["premise"]
     text = f"{q['title']}\n\n{setup}\n\n" + "\n".join(f"({p['label']}) {p['title']}: {p['text']}" for p in parts)
     return {
-        "id": q["id"], "module": MODULE, "kind": kind, "title": q["title"], "topic_tag": q["topic_tag"], "tags": tags_of(q), "text": text,
-        "definitions": q["definitions"], "premise": q["premise"], "topic_id": q["topic_id"], "topic": q["topic"], "difficulty": q["difficulty"],
-        "source": q["source"], "created_at": q["created_at"], "completed_at": q["completed_at"], "status": st, "score": q["score"],
+        **_rows(store, [q])[0], "kind": kind, "text": text,
+        "definitions": q["definitions"], "premise": q["premise"], "topic_id": q["topic_id"],
+        "source": q["source"], "created_at": q["created_at"], "completed_at": q["completed_at"],
         "parts": parts, "feedback": feedback_of(store, q["id"]), "actions": actions,
     }
 
 
 # ---- routes -------------------------------------------------------------------------------------
 @router.get("/left")
-def left(request: Request, query: str = "", chip: str = "active", page: int = 0) -> dict:
-    """`active` is the queue, one group; `completed` is history by day, paged. The search reads title, setup, tags and part titles."""
+def left(request: Request) -> dict:
+    """Every question the page holds, the queue first and the completed history behind it; the chips and the search
+    bar narrow it in the browser, so one group carries both slices."""
     store: Store = request.app.state.store
-    tab = "completed" if chip == "completed" else "active"
-    where, params = "", ()
-    if query.strip():
-        where = (
-            " AND (q.title LIKE ? OR q.premise LIKE ? OR COALESCE(q.definitions, '') LIKE ? OR q.tags LIKE ?"
-            " OR EXISTS (SELECT 1 FROM education_question_parts p WHERE p.question_id = q.id AND COALESCE(p.title, '') LIKE ?))"
-        )
-        params = (f"%{query.strip()}%",) * 5
-    out = {"chips": list(TABS), "chip": tab}
-    if tab == "active":
-        rows = store.query(f"{SELECT} WHERE {LISTED} AND {ACTIVE}{where} ORDER BY q.started_at IS NULL, q.created_at", params)
-        groups = [{"label": "", "count": len(rows), "rows": [_row(q) for q in rows]}] if rows else []   # one group, no header
-        return {**out, "groups": groups, "more": False}
-    size = int(store.setting("ui.page_size"))
-    limit = size * (page + 1)
-    total = store.scalar(f"SELECT COUNT(*) FROM education_questions q WHERE {LISTED} AND NOT ({ACTIVE}){where}", params)
-    rows = store.query(f"{SELECT} WHERE {LISTED} AND NOT ({ACTIVE}){where} ORDER BY q.completed_at DESC LIMIT ?", (*params, limit))
-    return {**out, "groups": _group_by_day(rows), "more": total > limit}
+    active = store.query(f"{SELECT} WHERE {LISTED} AND {ACTIVE} ORDER BY q.started_at IS NULL, q.created_at")
+    done = store.query(f"{SELECT} WHERE {LISTED} AND NOT ({ACTIVE}) ORDER BY q.completed_at DESC LIMIT ?", (ROW_LIMIT,))
+    total = store.scalar(f"SELECT COUNT(*) FROM education_questions q WHERE {LISTED} AND NOT ({ACTIVE})")
+    rows = _rows(store, active + done)
+    return {"groups": [{"label": "", "count": len(rows), "rows": rows}] if rows else [], "more": total > len(done)}
 
 
 @router.get("/blank")
@@ -306,7 +309,13 @@ def numbers(store: Store) -> dict:
 
 
 def today(store: Store) -> list[dict]:
-    return [_row(q) for q in due_queue(store)]
+    return _rows(store, due_queue(store))
+
+
+def rows(store: Store, limit: int = ROW_LIMIT) -> list[dict]:
+    """Every question the owner still has, the most recently answered or completed first."""
+    qs = store.query(f"{SELECT} WHERE {LISTED} ORDER BY COALESCE(q.completed_at, q.created_at) DESC LIMIT ?", (max(1, limit),))
+    return _rows(store, qs)
 
 
 def context(store: Store, registry) -> str:

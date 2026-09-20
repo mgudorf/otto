@@ -134,3 +134,74 @@ class Store:
         if self._ro is not None:
             with self.ro_lock:
                 self._ro.close()
+
+
+# ---- tags ------------------------------------------------------------------------------------
+# One tag system across every module. Second Brain keeps second_brain_tags, because its own tools read and write it;
+# every other module's tags live in app_tags. Both are read together, so a tag means the same thing everywhere.
+SECOND_BRAIN = "second_brain"
+
+
+def tag_key(tag: str) -> str:
+    """One spelling per tag: `GRADient descent` and `gradient DESCENT` are the same tag."""
+    return str(tag).strip().lower()
+
+
+def tags_for(store: Store, module: str, ids) -> dict:
+    """{id: [tag, …]} for one module's ids, keyed by the id as given."""
+    out = {i: [] for i in ids}
+    if not out:
+        return out
+    keys = {str(i): i for i in out}
+    marks = ",".join("?" * len(keys))
+    rows = store.query(f"SELECT item_id, tag FROM app_tags WHERE module = ? AND item_id IN ({marks})", (module, *keys))
+    if module == SECOND_BRAIN:
+        rows += store.query(f"SELECT item_id, tag FROM second_brain_tags WHERE item_id IN ({marks})", tuple(keys))
+    for r in rows:
+        tags = out[keys[str(r["item_id"])]]
+        tag = tag_key(r["tag"])
+        if tag and tag not in tags:
+            tags.append(tag)
+    return {i: sorted(tags) for i, tags in out.items()}
+
+
+def add_tags(store: Store, module: str, item_id, tags) -> list[str]:
+    """Add the owner's tags to one row; returns the tags that were written. An id no table knows raises IntegrityError."""
+    clean = sorted({t for t in (tag_key(t) for t in tags) if t})
+    ts = now_iso()
+    with store.tx() as conn:
+        for tag in clean:
+            if module == SECOND_BRAIN:
+                conn.execute("INSERT OR IGNORE INTO second_brain_tags(item_id, tag) VALUES (?, ?)", (str(item_id), tag))
+            else:
+                conn.execute("INSERT OR IGNORE INTO app_tags(module, item_id, tag, ts) VALUES (?, ?, ?, ?)", (module, str(item_id), tag, ts))
+    return clean
+
+
+def remove_tag(store: Store, module: str, item_id, tag: str) -> bool:
+    """Drop one tag from one row. False when the row never carried it."""
+    if module == SECOND_BRAIN:
+        cur = store.execute("DELETE FROM second_brain_tags WHERE item_id = ? AND lower(trim(tag)) = ?", (str(item_id), tag_key(tag)))
+    else:
+        cur = store.execute("DELETE FROM app_tags WHERE module = ? AND item_id = ? AND tag = ?", (module, str(item_id), tag_key(tag)))
+    return cur.rowcount > 0
+
+
+def all_tags(store: Store) -> list[dict]:
+    """Every tag in use: {tag, count, modules}, the widest first. count is the rows carrying it, across modules."""
+    rows = store.query(
+        "SELECT module, tag, COUNT(DISTINCT item_id) AS n FROM ("
+        "  SELECT module, CAST(item_id AS TEXT) AS item_id, lower(trim(tag)) AS tag FROM app_tags"
+        "  UNION ALL"
+        "  SELECT ?, CAST(item_id AS TEXT), lower(trim(tag)) FROM second_brain_tags"
+        ") WHERE tag <> '' GROUP BY tag, module",
+        (SECOND_BRAIN,),
+    )
+    out: dict[str, dict] = {}
+    for r in rows:
+        t = out.setdefault(r["tag"], {"tag": r["tag"], "count": 0, "modules": []})
+        t["count"] += r["n"]
+        t["modules"].append(r["module"])
+    for t in out.values():
+        t["modules"].sort()
+    return sorted(out.values(), key=lambda t: (-t["count"], t["tag"]))

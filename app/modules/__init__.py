@@ -4,16 +4,21 @@ A module is a package under app/modules/<name>/ with:
   __init__.py   MANIFEST
   schema.sql    its own tables, every one named <module>_<table> (optional)
   tasks.py      async def <task>(ctx) for each declared schedule (optional)
-  routes.py     router (APIRouter) plus hooks numbers(store), today(store), queue(store), item(store, id),
-                context(store, registry) (all optional; route handlers must not share these names)
+  routes.py     router (APIRouter) plus hooks numbers(store), today(store), queue(store), rows(store, limit),
+                item(store, id), context(store, registry) (all optional; route handlers must not share these names)
   tools.py      register(read, full, store, config) adding MCP tools (optional)
   agent.md      system prompt for the module's Claude session (optional)
   setup(config) / async shutdown()   on the package, for modules that own process resources (optional)
 A module that fails to import or set up is recorded and skipped; the rest of the app keeps running.
+rows(store, limit) is the module's own items as ROWs, newest first: {id, module, title, when, tags, fixed, …extras}.
+`tags` comes from app.store.tags_for, `fixed` is what the item is and cannot be edited. The cross-module routes
+/api/items, the tag intersection and Home's Recent are built on it, so a module without it appears in none of them.
 A row the owner dismisses or deletes leaves every list that presents it (the module's LEFT, today, queue and the agent's
 context) while staying in its table, so no task suggests it again. The action that removes a row says so with removes: True;
 that is how the page and Home know to close the inspector standing on it.
-Its page, app/static/pages/<name>.js, exports load, Left, Middle and optionally Right, which replaces the session pane.
+Its page, app/static/pages/<name>.js, default-exports one config: load() (its only fetch), cols and colsSplit, chips and seg,
+filter, groups, cells, rowClass, and optionally tools, summary, above, alt and detail. app/static/core.js renders it;
+the detail pane's buttons come from the item's own `actions`, so a page offers exactly what the module allows.
 """
 
 from __future__ import annotations
@@ -90,6 +95,7 @@ class Module:
     context: Callable[[Any, Any], str] | None   # (store, registry) -> text for the agent's system prompt
     register_tools: Callable[..., None] | None
     prompt: str | None
+    rows: Callable[[Any, int], list[dict]] | None = None   # (store, limit) -> ROWs newest first; /api/items and Home's Recent
     setup: Callable[[Any], None] | None = None          # (config) at build, for modules holding process resources
     shutdown: Callable[[], Awaitable[None]] | None = None  # awaited when the daemon stops
 
@@ -145,6 +151,7 @@ class Registry:
             queue=getattr(routes_mod, "queue", None),
             item=getattr(routes_mod, "item", None),
             context=getattr(routes_mod, "context", None),
+            rows=getattr(routes_mod, "rows", None),
             register_tools=getattr(tools_mod, "register", None),
             prompt=prompt_file.read_text("utf-8") if prompt_file else None,
             setup=getattr(mod, "setup", None),

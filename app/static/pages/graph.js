@@ -1,91 +1,123 @@
-// Graph: LEFT = tags by count · MIDDLE = ring of nodes with edges; selecting a tag lights its neighbours.
-import { html, T, meta13, nums, rowStyle, Search, Empty, More } from '../rows.js';
-import { get } from '../api.js';
+// Graph: the map is the page. A click picks one tag, Ctrl+click adds one, Ctrl+Shift+click removes one, and the
+// pick is written to the search bar, so the map and every module's list share one selection. The pane shows what
+// carries every selected tag, the tags shared with it, and any of those items previewed in place.
+import { S, h, $, I, icon, modOf, allTags, tagEl, card, titleCell, stampCell, dateLine, tagLine, dayLabel, go, select, refresh, renderTop, sendToAgent } from '../core.js';
+import { get, q } from '../api.js';
+import { md } from '../md.js';
+import { graphData, mapEl, neighbours, gsel, gset, gtokens, gclick, gnear } from '../graph.js';
 
-export async function load(app) {
-  const { query, more } = app.state;
-  const q = new URLSearchParams({ query, page: String(more) });
-  const [left, graph] = await Promise.all([get(`/api/graph/left?${q}`), get(`/api/graph/graph?${q}`)]);
-  return { left, graph };
-}
+const COLS = 'minmax(0,1fr) 92px 160px minmax(0,1.2fr)';
+const RELATED = '18px minmax(0,1fr) 164px';
+const mode = () => S.seg.graph || 'Map';
+const tags = () => (S.data && S.data.tags) || [];
+const key = () => gsel().join(',');
+const none = () => S.sel === null || S.sel === undefined;
 
-function neighbours(graph, tag) {
-  const s = new Set();
-  if (!tag) return s;
-  for (const e of graph.edges) {
-    if (e.a === tag) s.add(e.b);
-    else if (e.b === tag) s.add(e.a);
+let asked = null, loaded = null, seenKey = null, seenSel = null;
+
+// core opens the pane for S.sel alone, so S.sel carries what the pane is about: the selected tags, or the item being
+// previewed. The tags and the pane are two views of one selection, so whichever of them moved since the last render
+// wins: a row the keyboard lands on becomes the selection, and closing the pane drops the preview, then the tags.
+function sync() {
+  if (S.gpreview) {
+    const closed = none();
+    if (closed || String(S.sel) !== String(S.gpreview)) { S.gpreview = null; if (closed) S.sel = key() || null; }
   }
-  return s;
+  if (!S.gpreview) {
+    const k = key();
+    if (k !== seenKey || String(S.sel) === String(seenSel)) S.sel = k || null;
+    else if (none()) { S.tokens = S.tokens.filter((t) => t.kind !== 'tag'); renderTop(); }
+    else if (tags().some((r) => r.id === String(S.sel))) { gtokens([String(S.sel)]); renderTop(); }
+    else S.sel = k || null;
+  }
+  seenKey = key(); seenSel = S.sel;
+  if (key() !== loaded && key() !== asked) { asked = key(); refresh(); }   // the selection moved: reload what carries it
 }
 
-export function Left({ app, data, mod }) {
-  const selTag = app.state.sel && app.state.sel.id;
-  const near = neighbours(data.graph, selTag);
-  const g = data.left.groups[0];
-  const rerun = (patch) => app.setState(patch, () => app.refresh());
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-    <${Search} value=${app.state.query} hue=${mod.hue} onInput=${(v) => rerun({ query: v, more: 0, sel: null, item: null })} />
-    ${g.rows.length === 0 && html`<${Empty} text=${app.state.query ? 'no matches' : 'nothing tagged yet'} />`}
-    ${g.rows.map((r) => {
-      const on = r.id === selTag, nb = near.has(r.id);
-      return html`<div class="row" key=${r.id} onClick=${() => app.select({ module: 'graph', id: r.id, local: r })} style=${rowStyle({ selected: on, hue: mod.hue, height: 32 })}>
-        <span style=${{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: nb ? mod.hue : 'inherit' }}>${r.text}</span>
-        <span style=${{ flex: 'none', marginLeft: 'auto', ...meta13, ...nums, color: T.dim }}>${r.count}</span>
-      </div>`;
-    })}
-    ${data.left.more && html`<${More} onClick=${() => rerun({ more: app.state.more + 1 })} />`}
-  </div>`;
+const nodeRow = (n) => ({ id: n.tag, module: 'graph', title: n.tag, when: n.last_seen, fixed: [], tags: n.tags || [], count: n.count, local: true });
+
+function cells(i) {
+  const g = graphData((S.data && S.data.graph) || {});
+  const t = allTags().find((x) => x.tag === i.title);
+  return [h('span', { class: 't' }, tagEl(i.title)),
+    h('span', { class: 'c num' }, `${i.count} item${i.count === 1 ? '' : 's'}`),
+    h('span', { class: 'c' }, t ? t.mods.map((m) => modOf(m).title).join(', ') : ''),
+    h('span', { class: 'tags' }, ...neighbours(i.title, g.edges).slice(0, 4).map((n) => tagEl(n.tag)))];
 }
 
-// Ring layout in the artboard's 800x560 box: angle by position, radius by a hash of the tag so nodes stay put.
-function hash(s) {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h;
+const ask = () => sendToAgent(`What connects ${gsel().map((t) => `#${t}`).join(' and ')}?`);
+
+// What carries every selected tag, and the tags it shares with them.
+function focus(d) {
+  const g = graphData(d.graph), sel = gsel(), many = sel.length > 1;
+  const { any, all, deg } = gnear(g);
+  const fresh = loaded === key();                      // until the daemon answers for this selection, nothing is known
+  const items = fresh ? d.carried || [] : [];
+  const order = S.shell ? S.shell.modules.map((m) => m.name) : [];
+  const mods = [...new Set(items.map((i) => i.module))].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  const shared = [...(many ? all : any)].sort((a, b) => (deg[b] - deg[a]) || a.localeCompare(b));
+  const rest = many ? [...any].filter((t) => !all.has(t)).sort() : [];
+  const chips = (list) => h('span', { class: 'tags' }, ...list.map((t) => h('button', { class: 'tag lg', onclick: () => gset([...sel, t]) }, t)));
+  const row = (o) => h('div', { class: 'row', style: `--cols:${RELATED}`, 'data-id': o.id, onclick: () => { S.gpreview = o.id; select(o.id); } }, h('span'), titleCell(o), stampCell(o));
+  return [h('h2', null, sel.map((t) => `#${t}`).join(' and ')),
+    h('dl', { class: 'kv' },
+      h('dt', null, 'Items'), h('dd', null, items.length ? `${items.length} across ${mods.map((m) => modOf(m).title).join(', ')}` : fresh ? 'none carry all of these' : ''),
+      h('dt', null, many ? 'Shared with' : 'Linked with'), h('dd', null, shared.length ? chips(shared) : 'nothing yet'),
+      rest.length ? [h('dt', null, 'Near some'), h('dd', null, chips(rest))] : null),
+    h('div', { class: 'actions' },
+      many ? null : h('button', { class: 'btn', onclick: () => go(`tag:${sel[0]}`, true) }, 'Open as a page'),
+      h('button', { class: 'icon-btn', title: 'Ask', onclick: ask }, icon(I.chat))),
+    h('div', { class: 'related' }, ...mods.map((m) => card(modOf(m).title, 0, items.filter((o) => o.module === m).slice(0, 8).map(row), m)))];
 }
 
-function layout(nodes) {
-  const n = nodes.length;
-  return nodes.map((nd, i) => {
-    const a = (i / n) * Math.PI * 2, rad = 150 + (hash(nd.tag) % 100), r = 5 + Math.round(nd.count / 40);
-    return { ...nd, x: Math.round(400 + Math.cos(a) * rad * 1.1), y: Math.round(280 + Math.sin(a) * rad * 0.8), r };
-  });
+// An item from another module, read here without leaving the map; the head above it already names where it came from.
+function preview(o) {
+  const text = [o.summary, o.body, o.text, o.snippet].find((v) => typeof v === 'string' && v.trim());
+  return [h('h2', null, o.title), o.when ? dateLine(dayLabel(o.when)) : null, tagLine(o), text ? h('div', { class: 'prose', html: md(text) }) : null];
 }
 
-export function Middle({ app, data, mod }) {
-  const hue = mod.hue;
-  const selTag = app.state.sel && app.state.sel.id;
-  const near = neighbours(data.graph, selTag);
-  const nodes = layout(data.graph.nodes);
-  if (nodes.length === 0) return html`<${Empty} text=${app.state.query ? 'no matches' : 'nothing tagged yet'} />`;
-  const pos = Object.fromEntries(nodes.map((n) => [n.tag, n]));
-  return html`<div style=${{ height: '100%', minHeight: 420, display: 'flex', flexDirection: 'column', gap: 12 }}>
-    <div style=${{ display: 'flex', alignItems: 'center', gap: 12, height: 24, ...meta13, ...nums, color: T.dim }}>
-      <span>${selTag ? `${selTag} · ${near.size} linked` : ''}</span>
-      <span class="bright-hover" onClick=${() => app.select(null)} style=${{ marginLeft: 'auto', cursor: 'pointer', padding: '0 4px', lineHeight: 1, color: selTag ? T.dim : 'transparent' }}>×</span>
-    </div>
-    <div style=${{ flex: 1, minHeight: 0, position: 'relative' }}>
-      <svg viewBox="0 0 800 560" preserveAspectRatio="none" style=${{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
-        ${data.graph.edges.map((e) => {
-          const A = pos[e.a], B = pos[e.b];
-          if (!A || !B) return null;
-          const hot = selTag && (e.a === selTag || e.b === selTag);
-          return html`<line key=${`${e.a}|${e.b}|${e.kind}`} x1=${A.x} y1=${A.y} x2=${B.x} y2=${B.y} stroke-width="1"
-            stroke=${hot ? hue : selTag ? 'rgba(230,231,234,.06)' : 'rgba(230,231,234,.14)'} />`;
-        })}
-      </svg>
-      ${nodes.map((n) => {
-        const on = n.tag === selTag, nb = near.has(n.tag), dim = selTag && !on && !nb, right = n.x > 400;
-        return html`<div key=${n.tag} onClick=${() => app.select({ module: 'graph', id: n.tag, local: n })}
-          style=${{ position: 'absolute', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
-            flexDirection: right ? 'row-reverse' : 'row', top: `${(n.y / 5.6).toFixed(2)}%`,
-            left: right ? 'auto' : `calc(${(n.x / 8).toFixed(2)}% - ${n.r}px)`, right: right ? `calc(${(100 - n.x / 8).toFixed(2)}% - ${n.r}px)` : 'auto' }}>
-          <span style=${{ flex: 'none', borderRadius: '50%', boxSizing: 'border-box', width: n.r * 2, height: n.r * 2,
-            border: `1.5px solid ${on || nb ? hue : 'rgba(230,231,234,.3)'}`, background: on ? hue : T.panel }} />
-          <span style=${{ ...meta13, whiteSpace: 'nowrap', color: dim ? 'rgba(230,231,234,.25)' : on ? T.text : T.muted }}>${n.tag}</span>
-        </div>`;
-      })}
-    </div>
-  </div>`;
+// A tag row opened from another page: the node itself, and the way back to the map.
+function node(i) {
+  const t = allTags().find((x) => x.tag === i.title);
+  return [h('h2', null, `#${i.title}`),
+    h('dl', { class: 'kv' }, h('dt', null, 'Items'), h('dd', null, String(i.count !== undefined ? i.count : t ? t.count : 0))),
+    h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => { gset([i.title]); go('graph', true); } }, 'Graph'))];
 }
+
+export default {
+  cols: COLS,
+  chips: ['All'],
+  seg: ['Map', 'Browse'],
+  async load() {
+    seenKey = null; seenSel = null;                                            // fresh data: the tags say what the pane is about
+    const sel = gsel(), k = sel.join(',');
+    const [graph, found] = await Promise.all([
+      get('/api/graph/graph'),
+      sel.length ? get(q('/api/items', { tags: k })) : Promise.resolve({ items: [] }),
+    ]);
+    const carried = (found.items || []).filter((i) => i.module !== 'graph');   // the pane lists what carries the tags elsewhere
+    const rows = (graph.nodes || []).map(nodeRow);
+    loaded = k; asked = null;
+    return { graph, carried, tags: rows, items: [...rows, ...carried] };
+  },
+  // Both views are drawn whole from the daemon's nodes; the rows path is left to say when there is nothing at all.
+  filter: () => { sync(); return tags(); },
+  groups: () => [],
+  cells,
+  above(d) {
+    const on = mode() === 'Map' && (d.graph.nodes || []).length > 0;
+    queueMicrotask(() => { const l = $('#list'); if (l) l.classList.toggle('map', on); });   // core owns #list; the map fills it
+    return on ? mapEl(graphData(d.graph)) : null;
+  },
+  alt(d) {
+    const text = S.q.toLowerCase(), sel = gsel();
+    const rows = d.tags.filter((r) => !text || r.title.includes(text));
+    if (!rows.length) return h('div', { class: 'empty' }, text ? 'Nothing matches this filter.' : 'Nothing here yet.');
+    return card('', 0, rows.map((r) => h('div', { class: `row${sel.includes(r.id) ? ' sel' : ''}${S.picked.has(r.id) ? ' picked' : ''}`, style: `--cols:${COLS}`, 'data-id': r.id, onclick: (e) => gclick(r.id, e) }, ...cells(r))));
+  },
+  detail(sel, d) {
+    if (!d || !d.graph) return node(sel);                                        // another page borrowed this pane
+    if (S.gpreview && String(sel.id) === String(S.gpreview)) return preview(sel);
+    return focus(d);
+  },
+};

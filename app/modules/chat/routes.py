@@ -16,16 +16,27 @@ from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from app.api import event_stream, start_turn, tag_session, turns
-from app.store import Store, iso, now_iso, parse
+from app.store import Store, iso, now_iso, parse, tag_key, tags_for
 
 router = APIRouter(prefix="/api/chat")
 
 MODULE = "chat"
 NEW_TITLE = "(new)"
+DELETE = {"verb": "delete", "label": "Delete", "confirm": "Delete this conversation?", "removes": True}
+LAST_TS = "COALESCE((SELECT MAX(ts) FROM app_session_turns t WHERE t.session_id = s.id), s.opened_at) AS last_ts"
 
 
 def _key(sid: str) -> str:
     return f"chat:{sid}"
+
+
+def _when(ts: str) -> str:
+    """A ROW's `when`: the owner's wall clock, so the page groups by their day and shows their time."""
+    return parse(ts).astimezone().strftime("%Y-%m-%dT%H:%M")
+
+
+def _day_label(when: str) -> str:
+    return f"{when[5:7]}-{when[8:10]}-{when[:4]}"
 
 
 def _folder(config, sid: str) -> Path:
@@ -51,6 +62,29 @@ def _title(store: Store, row: dict) -> str:
         return row["title"]
     first = store.scalar("SELECT text FROM app_session_turns WHERE session_id = ? AND role = 'user' ORDER BY id LIMIT 1", (row["id"],))
     return (first or NEW_TITLE).splitlines()[0][:80]
+
+
+def _tags(store: Store, rows: list[dict]) -> dict:
+    """Each conversation's tags: the ones the tagger gave the session, then any the owner added on top."""
+    owner = tags_for(store, MODULE, [r["id"] for r in rows])
+    out = {}
+    for r in rows:
+        tags: list[str] = []
+        for t in [*json.loads(r["tags"] or "[]"), *owner[r["id"]]]:
+            t = tag_key(t)
+            if t and t not in tags:
+                tags.append(t)
+        out[r["id"]] = tags
+    return out
+
+
+def _rows(store: Store, rows: list[dict]) -> list[dict]:
+    """The ROW every list speaks: the title it shows, the day it last moved, its tags. Needs `last_ts` on each row."""
+    tags = _tags(store, rows)
+    return [
+        {"id": r["id"], "module": MODULE, "title": _title(store, r), "when": _when(r["last_ts"]), "tags": tags[r["id"]], "fixed": []}
+        for r in rows
+    ]
 
 
 def _files(folder: Path) -> list[dict]:
@@ -99,31 +133,32 @@ def left(request: Request, query: str = "", page: int = 0) -> dict:
     sql_where = "WHERE s.module = ?" + "".join(f" AND {w}" for w in where)
     params = [MODULE, *params]
     total = store.scalar(f"SELECT COUNT(*) FROM app_sessions s {sql_where}", tuple(params))
-    rows = store.query(
-        f"""SELECT s.id, s.title, s.opened_at,
-                   COALESCE((SELECT MAX(ts) FROM app_session_turns t WHERE t.session_id = s.id), s.opened_at) AS last_ts,
+    found = store.query(
+        f"""SELECT s.id, s.title, s.tags, s.opened_at, {LAST_TS},
                    COALESCE((SELECT MAX(id) FROM app_session_turns t WHERE t.session_id = s.id), 0) AS last_turn
               FROM app_sessions s {sql_where} ORDER BY last_ts DESC, last_turn DESC, s.rowid DESC LIMIT ?""",
         (*params, limit),
     )
     groups: list[dict] = []
-    for r in rows:
-        label = parse(r["last_ts"]).astimezone().strftime("%m-%d-%Y")
+    for r in _rows(store, found):
+        label = _day_label(r["when"])
         if not groups or groups[-1]["label"] != label:
             groups.append({"label": label, "count": 0, "rows": []})
-        groups[-1]["rows"].append({"id": r["id"], "module": MODULE, "text": _title(store, r), "stamp": r["last_ts"]})
+        groups[-1]["rows"].append(r)
         groups[-1]["count"] += 1
-    return {"groups": groups, "more": total > limit}
+    # Every conversation offers the same one verb, so the list says it once: a button on a row asks what the pane's asks.
+    return {"groups": groups, "more": total > limit, "actions": [DELETE]}
 
 
 @router.get("/item/{sid}")
 def item_route(request: Request, sid: str) -> dict:
     st = request.app.state
     row = _get(st.store, sid)
+    last = st.store.scalar("SELECT MAX(ts) FROM app_session_turns WHERE session_id = ?", (sid,)) or row["opened_at"]
+    [out] = _rows(st.store, [{**row, "last_ts": last}])
     return {
-        "id": sid, "module": MODULE, "title": _title(st.store, row), "tags": json.loads(row["tags"] or "[]"),
-        "opened_at": row["opened_at"], "busy": sid in st.session_busy,
-        "turns": turns(st.store, sid), "files": _files(_folder(st.config, sid)),
+        **out, "busy": sid in st.session_busy, "turns": turns(st.store, sid),
+        "files": _files(_folder(st.config, sid)), "actions": [DELETE],
     }
 
 
@@ -167,8 +202,16 @@ async def send(request: Request, body: dict = Body(...)) -> dict:
     return {"id": sid, "queued": job.id}
 
 
-@router.post("/delete")
-async def delete(request: Request, body: dict = Body(...)) -> dict:
+@router.post("/action/{verb}")
+async def action(request: Request, verb: str, body: dict = Body(default={})) -> dict:
+    run = ACTIONS.get(verb)
+    if run is None:
+        raise HTTPException(404, f"unknown action {verb}")
+    return await run(request, body)
+
+
+async def _delete(request: Request, body: dict) -> dict:
+    """The conversation, its turns and its folder; the only removal Chat has."""
     st = request.app.state
     row = _get(st.store, str(body.get("id", "")))
     sid = row["id"]
@@ -184,6 +227,9 @@ async def delete(request: Request, body: dict = Body(...)) -> dict:
         return {"id": sid}
 
     return await st.runner.run_action("chat.delete", MODULE, f"session:{sid}", run)
+
+
+ACTIONS = {"delete": _delete}
 
 
 @router.post("/upload/{sid}")
@@ -232,6 +278,16 @@ async def events(request: Request, sid: str):
 
 
 # ---- shell hooks ---------------------------------------------------------------------------
+def rows(store: Store, limit: int = 200) -> list[dict]:
+    """Every conversation as a ROW, the one that moved last first."""
+    found = store.query(
+        f"SELECT s.id, s.title, s.tags, s.opened_at, {LAST_TS} FROM app_sessions s WHERE s.module = ?"
+        " ORDER BY last_ts DESC, s.rowid DESC LIMIT ?",
+        (MODULE, limit),
+    )
+    return _rows(store, found)
+
+
 def numbers(store: Store) -> dict:
     return {"value": store.scalar("SELECT COUNT(*) FROM app_sessions WHERE module = ?", (MODULE,)), "label": "conversations"}
 

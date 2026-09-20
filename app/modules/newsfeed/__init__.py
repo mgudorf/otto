@@ -5,7 +5,7 @@ from app.modules import Agent, Manifest, Schedule
 MANIFEST = Manifest(
     name="newsfeed",
     title="Newsfeed",
-    hue="#c98ba8",
+    hue="#D79EBB",
     icon='<path d="M4 12a4 4 0 0 1 4 4"></path><path d="M4 8a8 8 0 0 1 8 8"></path><path d="M4 4a12 12 0 0 1 12 12"></path><circle cx="4.5" cy="15.5" r="1"></circle>',
     order=6,
     schedules=(Schedule(task="run", every="24h", resource="newsfeed", llm=True),),

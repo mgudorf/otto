@@ -21,7 +21,8 @@ import app.modules.email.tasks as tasks_mod
 from app.modules.email.tasks import sync, triage
 from app.modules.email.tools import register
 from app.runner import Runner
-from app.store import iso, now
+from app.modules.email.routes import rows as email_rows
+from app.store import add_tags, iso, now
 from tests.conftest import fake_spawn, run
 from tests.test_app import client_for
 
@@ -248,9 +249,13 @@ def test_email_actions(email_config, fake):
             left = (await c.get("/api/email/left?chip=Flagged")).json()
             assert [r["id"] for r in left["groups"][0]["rows"]] == ["m3"] and left["more"] is False
             row = left["groups"][0]["rows"][0]
-            # the bar builds its verbs from these, so it never waits on item/{id} and never changes height
-            assert "leading" not in row and row["unread"] is True and row["starred"] is True   # the page dims read rows; no dot
-            assert left["chips"] == ["All", "Flagged", "Priority"] and left["read_on_open"] is True
+            # the page seats the sender and the subject in cells of their own, so the row never joins them
+            assert (row["from"], row["title"]) == ("Cy", "Contract draft") and row["priority"] is None
+            assert row["unread"] is True and row["starred"] is True and left["read_on_open"] is True
+            # a chip narrows the whole mailbox in the daemon, never a page of results in the browser
+            unread = (await c.get("/api/email/left?chip=Unread")).json()
+            assert [r["id"] for g in unread["groups"] for r in g["rows"]] == ["m3", "m2"]
+            assert (await c.get("/api/email/left?chip=Priority")).json()["groups"] == []
 
             r = await c.post("/api/email/action/archive", json={"ids": ["m1"]})
             assert r.status_code == 200 and r.json() == {"count": 1}, r.text
@@ -263,15 +268,18 @@ def test_email_actions(email_config, fake):
 
             item = (await c.get("/api/email/item/m3")).json()
             assert item["text"] == "Contract draft\n\nplease sign the contract" and item["starred"] is True
+            assert (item["title"], item["from"], item["module"]) == ("Contract draft", "Cy", "email")
             assert item["body"] == "please sign the contract" and item["attachments"] == []
             assert item["html"] == '<p>please <b>sign</b> the contract here<span class="url" title="https://docs.example/c"></span></p>'
             assert app.state.store.scalar("SELECT COUNT(*) FROM email_bodies") == 1
-            assert [a["verb"] for a in item["actions"]] == ["archive", "trash", "read", "unstar", "open"]
+            assert [a["verb"] for a in item["actions"]] == ["archive", "read", "unstar", "open", "trash"]
             assert (await c.post("/api/email/action/read", json={"ids": ["m3"]})).json() == {"count": 1}
             assert (await c.get("/api/email/item/m3")).json()["unread"] is False
 
-            blank = (await c.get("/api/email/blank")).json()
-            assert (blank["inbox"], blank["unread"], blank["flagged"], blank["priority"]) == (1, 0, 1, 0)
+            # the rows hook is what puts email into the cross-module lists, so it carries the owner's tags
+            add_tags(app.state.store, "email", "m3", ["Contract"])
+            listed = email_rows(app.state.store)
+            assert [(r["id"], r["tags"]) for r in listed] == [("m3", ["contract"])]
             numbers = (await c.get("/api/home/numbers")).json()
             assert next(n for n in numbers if n["module"] == "email")["value"] == 0
             ev = (await c.get("/api/events?module=email")).json()
@@ -428,7 +436,7 @@ def test_email_actions_take_one_id_or_many(email_config, fake):
 
 
 def test_email_manual_sync(email_config, fake):
-    """The button runs the scheduler's own task on the scheduler's own lock, and leaves the stamp the page reads."""
+    """The button runs the scheduler's own task on the scheduler's own lock, and leaves the stamp the header reads."""
 
     async def main():
         app = build(email_config)
@@ -437,7 +445,8 @@ def test_email_manual_sync(email_config, fake):
             r = await c.post("/api/email/action/sync")
             assert r.status_code == 200 and "backfilled 3" in r.json()["result"], r.text
             synced = app.state.store.cursor("email.synced_at")
-            assert synced and (await c.get("/api/email/blank")).json()["last_sync"] == synced
+            listed = [r["id"] for g in (await c.get("/api/email/left")).json()["groups"] for r in g["rows"]]
+            assert synced and listed == ["m3", "m2", "m1"]
             job = (await c.get("/api/jobs")).json()[0]
             assert job["task"] == "email.sync" and job["resource"] == "gmail" and job["kind"] == "action"
         await app.state.runner.drain(1)
@@ -461,8 +470,8 @@ def test_email_consent_warning(store, email_config):
         if expected is None:
             assert rows == [], "outside consent_warn_days"
         else:
-            assert len(rows) == 1 and expected in rows[0]["text"] and rows[0]["module"] == "email"
-            assert "app.modules.email.gmail consent" in rows[0]["text"]
+            assert len(rows) == 1 and expected in rows[0]["title"] and rows[0]["module"] == "email"
+            assert "app.modules.email.gmail consent" in rows[0]["title"] and rows[0]["fixed"] == ["notice"]
 
 
 def test_email_body_drops_what_carries_nothing():

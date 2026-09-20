@@ -10,7 +10,7 @@ from app.modules.feedback.queue import add_cleared_at
 MANIFEST = Manifest(
     name="feedback",
     title="Feedback",
-    hue="#8b8f98",
+    hue="#A6ACB8",
     icon="",
     order=99,
     page=False,

@@ -1,10 +1,11 @@
-"""Platform routes: health, restart, shell, tasks, jobs, events, settings, data, sessions."""
+"""Platform routes: health, restart, shell, tags, items, tasks, jobs, events, settings, data, sessions."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import os
+import sqlite3
 import uuid
 from collections import defaultdict
 from datetime import datetime
@@ -13,7 +14,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.claude import ClaudeError
-from app.store import Store, now_iso
+from app.store import Store, add_tags, all_tags, now_iso, remove_tag, tag_key, tags_for
 
 router = APIRouter()
 
@@ -107,6 +108,70 @@ def shell(request: Request) -> dict:
         },
         "budget": st.claude.budget(),
     }
+
+
+# ---- tags and items ---------------------------------------------------------------------------
+# One tag set across every module, so picking a tag narrows the whole app rather than one page. A module joins by
+# defining rows(store, limit); one that does not is simply absent here.
+ROW_LIMIT = 200
+
+
+def _listing(request: Request) -> list:
+    """Every enabled module that can list its rows, in rail order."""
+    store: Store = request.app.state.store
+    return [m for m in request.app.state.registry.ordered() if m.rows and store.setting(f"modules.{m.name}.enabled") is not False]
+
+
+@router.get("/api/tags")
+def tags(request: Request) -> list[dict]:
+    return all_tags(request.app.state.store)
+
+
+@router.get("/api/items")
+def items(request: Request, tags: str = "", limit: int = ROW_LIMIT) -> dict:
+    """Rows from every module carrying all the named tags, newest first; with no tags, every module's rows."""
+    st = request.app.state
+    want = {t for t in (tag_key(t) for t in tags.split(",")) if t}
+    cap = max(1, min(limit, 1000))
+    out = []
+    for m in _listing(request):
+        for row in m.rows(st.store, cap):
+            carried = {tag_key(t) for t in [*(row.get("fixed") or []), *(row.get("tags") or [])]}
+            if want <= carried:
+                out.append(row)
+    out.sort(key=lambda r: r.get("when") or "", reverse=True)
+    return {"items": out}
+
+
+def _tagged(request: Request, body: dict) -> tuple[str, str]:
+    module, item_id = str(body.get("module") or ""), str(body.get("id") or "")
+    if module not in request.app.state.registry.modules:
+        raise HTTPException(404, "no such module")
+    if not item_id:
+        raise HTTPException(400, "id required")
+    return module, item_id
+
+
+@router.post("/api/tags/add")
+def tags_add(request: Request, body: dict = Body(...)) -> dict:
+    module, item_id = _tagged(request, body)
+    wanted = body.get("tags") or []
+    if not isinstance(wanted, list):
+        raise HTTPException(400, "tags must be a list")
+    store: Store = request.app.state.store
+    try:
+        add_tags(store, module, item_id, wanted)
+    except sqlite3.IntegrityError:
+        raise HTTPException(404, "no such item")
+    return {"module": module, "id": item_id, "tags": tags_for(store, module, [item_id])[item_id]}
+
+
+@router.post("/api/tags/remove")
+def tags_remove(request: Request, body: dict = Body(...)) -> dict:
+    module, item_id = _tagged(request, body)
+    store: Store = request.app.state.store
+    remove_tag(store, module, item_id, str(body.get("tag") or ""))
+    return {"module": module, "id": item_id, "tags": tags_for(store, module, [item_id])[item_id]}
 
 
 # ---- tasks / jobs / events -----------------------------------------------------------------
@@ -341,6 +406,34 @@ def session_one(request: Request, module: str, sid: str) -> dict:
     return {"session": sess, "turns": turns(st.store, sid), "busy": sid in st.session_busy}
 
 
+@router.post("/api/session/{module}/{sid}/reopen")
+def session_reopen(request: Request, module: str, sid: str) -> dict:
+    """The inverse of `/clear`: the tab opens again under the title and tags it was closed with."""
+    st = request.app.state
+    _module(request, module)
+    store: Store = st.store
+    row = store.one("SELECT * FROM app_sessions WHERE module = ? AND id = ?", (module, sid))
+    if row is None:
+        raise HTTPException(404, "no session with that id")
+    if row["closed_at"]:
+        store.execute("UPDATE app_sessions SET closed_at = NULL WHERE id = ?", (sid,))
+        store.event(module, "reopened", f"session: {_label(store, row)}", ref=sid)
+    return {"session": _session(store, module, sid), "turns": turns(store, sid), "busy": sid in st.session_busy}
+
+
+@router.post("/api/session/{module}/{sid}/title")
+def session_title(request: Request, module: str, sid: str, body: dict = Body(...)) -> dict:
+    """The owner's own name for a tab, which the tagger never overwrites."""
+    st = request.app.state
+    _module(request, module)
+    _session(st.store, module, sid)
+    title = str(body.get("title") or "").strip()[:80]
+    if not title:
+        raise HTTPException(400, "title required")
+    st.store.execute("UPDATE app_sessions SET title = ? WHERE id = ?", (title, sid))
+    return {"module": module, "id": sid, "title": title}
+
+
 @router.post("/api/session/{module}/send")
 async def session_send(request: Request, module: str, body: dict = Body(...)) -> dict:
     """`id` names the tab; without one the turn opens a new session. `/clear` tags and closes the tab it names."""
@@ -441,7 +534,7 @@ def start_turn(st, mod, sid: str, started: bool, text: str, prompt: str, key: st
 
 
 def tag_session(st, mod, sid: str, key: str, close: bool):
-    """Queue the tagger on `session:<sid>`: a oneshot names a title and tags. `close` also ends the session."""
+    """Queue the tagger on `session:<sid>`: a oneshot names a title and tags, unless the owner named it. `close` also ends the session."""
     store: Store = st.store
 
     async def tag(ctx):
@@ -461,6 +554,7 @@ def tag_session(st, mod, sid: str, key: str, close: bool):
                 tags = [str(t)[:40] for t in data.get("tags", [])][:8]
             except Exception as e:
                 ctx.log(f"tagging failed, keeping fallback title: {e!r}")
+        title = store.scalar("SELECT title FROM app_sessions WHERE id = ?", (sid,)) or title   # a rename outranks the tagger
         with ctx.commit() as conn:
             if close:
                 conn.execute("UPDATE app_sessions SET closed_at = ?, title = ?, tags = ? WHERE id = ?", (now_iso(), title, json.dumps(tags), sid))

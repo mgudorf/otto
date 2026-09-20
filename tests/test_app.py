@@ -154,6 +154,58 @@ def test_session_turn_and_clear(config):
     run(main())
 
 
+def test_session_rename_outranks_the_tagger(config):
+    """F2 names a tab: the name comes back on the next read, and the tagger keeps it on the way out."""
+
+    async def main():
+        app = build(config, spawn_fn=fake_spawn([INIT, TEXT, RESULT]))
+        await app.state.runner.start()
+        async with client_for(app) as c:
+            sid = (await c.post("/api/session/second_brain/send", json={"text": "anything about x?"})).json()["session"]
+            await settle(app)
+            r = await c.post(f"/api/session/second_brain/{sid}/title", json={"title": "the x thread"})
+            assert r.status_code == 200, r.text
+            assert r.json() == {"module": "second_brain", "id": sid, "title": "the x thread"}
+            assert [t["label"] for t in (await c.get("/api/session/second_brain")).json()["sessions"]] == ["the x thread"]
+            assert (await c.post(f"/api/session/second_brain/{sid}/title", json={"title": "  "})).status_code == 400
+            assert (await c.post("/api/session/second_brain/nope/title", json={"title": "y"})).status_code == 404
+            app.state.claude.spawn = fake_spawn([CLOSE])
+            await c.post("/api/session/second_brain/send", json={"text": "/clear", "id": sid})
+            await settle(app)
+            row = app.state.store.one("SELECT * FROM app_sessions WHERE id = ?", (sid,))
+            assert row["title"] == "the x thread" and json.loads(row["tags"]) == ["second_brain", "search"]
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())
+
+
+def test_session_reopen_keeps_its_tags(config):
+    """A closed tab opens again with its transcript, its tagged title and its tags, and the tagger does not run twice."""
+
+    async def main():
+        app = build(config, spawn_fn=fake_spawn([INIT, TEXT, RESULT]))
+        await app.state.runner.start()
+        async with client_for(app) as c:
+            sid = (await c.post("/api/session/second_brain/send", json={"text": "anything about x?"})).json()["session"]
+            await settle(app)
+            app.state.claude.spawn = fake_spawn([CLOSE])
+            await c.post("/api/session/second_brain/send", json={"text": "/clear", "id": sid})
+            await settle(app)
+            assert (await c.get("/api/session/second_brain")).json()["sessions"] == []
+            r = await c.post(f"/api/session/second_brain/{sid}/reopen")
+            assert r.status_code == 200, r.text
+            back = r.json()
+            assert back["session"]["closed_at"] is None and json.loads(back["session"]["tags"]) == ["second_brain", "search"]
+            assert [t["role"] for t in back["turns"]] == ["user", "model"] and back["busy"] is False
+            assert [(t["id"], t["label"]) for t in (await c.get("/api/session/second_brain")).json()["sessions"]] == [(sid, "Search for x")]
+            assert (await c.post("/api/session/second_brain/nope/reopen")).status_code == 404
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())
+
+
 def test_failed_first_turn_retires_session(config):
     async def main():
         bad = json.dumps({"type": "result", "subtype": "error_during_execution", "is_error": True, "result": "boom", "session_id": "s1"})

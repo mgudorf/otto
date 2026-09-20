@@ -8,17 +8,22 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from app.modules.email.gmail import consent_expires, read_client, write_client
-from app.store import Store, iso, now, parse
+from app.store import Store, iso, now, parse, tags_for
 
 router = APIRouter(prefix="/api/email")
 
 RESOURCE = "gmail"
-CHIPS = ("All", "Flagged", "Priority")
-CHIP_LABELS = {"All": (), "Flagged": ("STARRED",)}
+CHIPS = ("All", "Unread", "Flagged", "Priority")
+CHIP_LABELS = {"All": (), "Unread": ("UNREAD",), "Flagged": ("STARRED",)}
 CONFIG = None   # set by setup(); the queue hook is handed only the store
 PRIORITIES = ("high", "normal", "low")
+ROWS = 200      # the newest messages a list holds, the cap the platform's own row hooks use
 HAS = "EXISTS (SELECT 1 FROM json_each(m.labels) WHERE value = ?)"
 HIGH = "m.id IN (SELECT message_id FROM email_triage WHERE priority = 'high')"
+# A row carries its triage and its attachment names, so the list needs no second query and the reader no second fetch.
+SELECT = ("SELECT m.*, t.priority, b.attachments FROM email_messages m "
+          "LEFT JOIN email_triage t ON t.message_id = m.id "
+          "LEFT JOIN email_bodies b ON b.message_id = m.id")
 # verb -> (labels added, labels removed, event verb)
 VERBS = {
     "archive": ((), ("INBOX",), "archived"),
@@ -52,26 +57,42 @@ def _labels(r: dict) -> list[str]:
     return json.loads(r["labels"])
 
 
-def _row(r: dict) -> dict:
+def _local(ts: str) -> str:
+    """Local wall time: the page reads a row's day and clock straight off the string."""
+    return parse(ts).astimezone().isoformat(timespec="minutes")
+
+
+def _row(r: dict, tags: list[str]) -> dict:
+    """One ROW. The sender and the subject stay apart; the page decides how to seat them."""
     labels = _labels(r)
-    unread = "UNREAD" in labels
     return {
         "id": r["id"],
         "module": "email",
-        "text": f"{r['from_name'] or r['from_addr']}: {r['subject']}",
-        "stamp": r["internal_date"],
-        "unread": unread,
+        "title": r["subject"],
+        "from": r["from_name"] or r["from_addr"],
+        "snippet": r["snippet"],
+        "when": _local(r["internal_date"]),
+        "tags": tags,
+        "unread": "UNREAD" in labels,
         "starred": "STARRED" in labels,
+        "priority": r["priority"],
+        "attachments": json.loads(r["attachments"] or "[]"),
     }
 
 
-def _group_by_day(rows: list[dict]) -> list[dict]:
+def _rows(store: Store, records: list[dict]) -> list[dict]:
+    tags = tags_for(store, "email", [r["id"] for r in records])
+    return [_row(r, tags[r["id"]]) for r in records]
+
+
+def _group_by_day(listed: list[dict]) -> list[dict]:
     groups: list[dict] = []
-    for r in rows:
-        label = parse(r["internal_date"]).astimezone().strftime("%m-%d-%Y")
+    for r in listed:
+        y, m, d = r["when"][:10].split("-")
+        label = f"{m}-{d}-{y}"
         if not groups or groups[-1]["label"] != label:
             groups.append({"label": label, "count": 0, "rows": []})
-        groups[-1]["rows"].append(_row(r))
+        groups[-1]["rows"].append(r)
         groups[-1]["count"] += 1
     return groups
 
@@ -81,40 +102,24 @@ def _count(store: Store, *labels: str) -> int:
 
 
 def _get(store: Store, message_id: str) -> dict:
-    row = store.one("SELECT * FROM email_messages WHERE id = ?", (message_id,))
+    row = store.one(f"{SELECT} WHERE m.id = ?", (message_id,))
     if row is None:
         raise HTTPException(404, "no such message")
     return row
 
 
 @router.get("/left")
-def left(request: Request, query: str = "", chip: str = "All", page: int = 0) -> dict:
+def left(request: Request, chip: str = "All", limit: int = ROWS) -> dict:
+    """The chip narrows the whole mailbox, never a page of it, so its rows are the newest of that chip."""
     store: Store = request.app.state.store
-    size = int(store.setting("ui.page_size"))
-    limit = size * (page + 1)
     chip = chip if chip in CHIPS else "All"
-    where, params = _where(query, chip)
+    where, params = _where("", chip)
     total = store.scalar(f"SELECT COUNT(*) FROM email_messages m {where}", tuple(params))
-    rows = store.query(f"SELECT m.* FROM email_messages m {where} ORDER BY m.internal_date DESC LIMIT ?", (*params, limit))
+    out = rows(store, limit, chip)
     return {
-        "groups": _group_by_day(rows),
-        "chips": list(CHIPS),
-        "chip": chip,
-        "more": total > limit,
-        "total": total,
+        "groups": _group_by_day(out),
+        "more": total > len(out),
         "read_on_open": bool(CONFIG.email.read_on_open) if CONFIG else False,
-    }
-
-
-@router.get("/blank")
-def blank(request: Request) -> dict:
-    store: Store = request.app.state.store
-    return {
-        "inbox": _count(store, "INBOX"),
-        "unread": _count(store, "INBOX", "UNREAD"),
-        "flagged": _count(store, "INBOX", "STARRED"),
-        "priority": store.scalar(f"SELECT COUNT(*) FROM email_messages m WHERE {HAS} AND {HIGH}", ("INBOX",)),
-        "last_sync": store.cursor("email.synced_at"),
     }
 
 
@@ -147,26 +152,28 @@ async def body_of(store: Store, config, message_id: str) -> dict:
 
 
 def item(store: Store, message_id: str) -> dict:
+    """The ROW plus what only the reader needs: the body, the triage reason and the verbs this message offers."""
     r = _get(store, message_id)
+    row = _row(r, tags_for(store, "email", [message_id])[message_id])
     labels = _labels(r)
-    unread, starred, in_inbox = "UNREAD" in labels, "STARRED" in labels, "INBOX" in labels
+    in_inbox = "INBOX" in labels
     actions = []
     if in_inbox:
         actions.append({"verb": "archive", "label": "Archive", "primary": True, "removes": True})
-        actions.append({"verb": "trash", "label": "Trash", "confirm": "Trash this message?", "removes": True})
-    actions.append({"verb": "read", "label": "Mark read"} if unread else {"verb": "unread", "label": "Mark unread"})
-    actions.append({"verb": "unstar", "label": "Unstar"} if starred else {"verb": "star", "label": "Star"})
+    actions.append({"verb": "read", "label": "Mark read"} if row["unread"] else {"verb": "unread", "label": "Mark unread"})
+    actions.append({"verb": "unstar", "label": "Unstar"} if row["starred"] else {"verb": "star", "label": "Star"})
     actions.append({"verb": "open", "label": "Open in Gmail", "href": f"https://mail.google.com/mail/u/0/#all/{message_id}"})
-    b = store.one("SELECT text, html, attachments FROM email_bodies WHERE message_id = ?", (message_id,))
+    if in_inbox:   # the destructive verb sits last, away from the primary one
+        actions.append({"verb": "trash", "label": "Trash", "confirm": "Trash this message?", "removes": True})
+    b = store.one("SELECT text, html FROM email_bodies WHERE message_id = ?", (message_id,))
     body = b["text"] if b else r["snippet"]
-    tri = store.one("SELECT priority, reason FROM email_triage WHERE message_id = ?", (message_id,))
+    tri = store.one("SELECT reason FROM email_triage WHERE message_id = ?", (message_id,))
     return {
-        "id": r["id"], "module": "email", "kind": "email",
-        "subject": r["subject"], "from_name": r["from_name"], "from_addr": r["from_addr"], "to_addr": r["to_addr"],
-        "created_at": r["internal_date"], "text": f"{r['subject']}\n\n{body}",
-        "body": body, "html": b["html"] if b else None, "attachments": json.loads(b["attachments"]) if b else [],
-        "unread": unread, "starred": starred, "in_inbox": in_inbox,
-        "priority": tri["priority"] if tri else None, "reason": tri["reason"] if tri else None,
+        **row, "kind": "email",
+        "from_addr": r["from_addr"], "to_addr": r["to_addr"],
+        "text": f"{r['subject']}\n\n{body}",
+        "body": body, "html": b["html"] if b else None,
+        "in_inbox": in_inbox, "reason": tri["reason"] if tri else None,
         "actions": actions,
     }
 
@@ -232,12 +239,19 @@ def numbers(store: Store) -> dict:
     return {"value": _count(store, "INBOX", "UNREAD"), "label": "unread"}
 
 
+def rows(store: Store, limit: int = ROWS, chip: str = "All") -> list[dict]:
+    """The inbox as ROWs, newest first. The page's list, the cross-module lists and Home's Recent share it."""
+    where, params = _where("", chip if chip in CHIPS else "All")
+    records = store.query(f"{SELECT} {where} ORDER BY m.internal_date DESC LIMIT ?", (*params, max(1, limit)))
+    return _rows(store, records)
+
+
 def today(store: Store) -> list[dict]:
     start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
-    rows = store.query(
-        f"SELECT m.* FROM email_messages m WHERE {HAS} AND m.internal_date >= ? ORDER BY m.internal_date DESC", ("INBOX", iso(start))
+    records = store.query(
+        f"{SELECT} WHERE {HAS} AND m.internal_date >= ? ORDER BY m.internal_date DESC", ("INBOX", iso(start))
     )
-    return [_row(r) for r in rows]
+    return _rows(store, records)
 
 
 def queue(store: Store) -> list[dict]:
@@ -251,9 +265,11 @@ def queue(store: Store) -> list[dict]:
     return [{
         "id": "consent",
         "module": "email",
-        "text": "Gmail consent has expired; run: python -m app.modules.email.gmail consent" if gone
-                else "Gmail consent expires soon; run: python -m app.modules.email.gmail consent",
-        "stamp": iso(due),
+        "title": "Gmail consent has expired; run: python -m app.modules.email.gmail consent" if gone
+                 else "Gmail consent expires soon; run: python -m app.modules.email.gmail consent",
+        "when": _local(iso(due)),
+        "tags": [],
+        "fixed": ["notice"],
     }]
 
 

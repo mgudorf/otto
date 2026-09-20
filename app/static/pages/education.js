@@ -1,291 +1,117 @@
-// Education: LEFT = the active queue or the completed history, one chip each · MIDDLE = the question: title, tags,
-// the pinned setup (definitions, then premise), the parts folded or open with an answer box each; or the progress
-// table with Generate and `+` for a topic. Submit hands an answer to the tutor in the session pane, where the grade and explanation land.
-import { Component } from '../vendor/preact.mjs';
-import { html, T, meta13, nums, Row, GroupHeader, Chips, Search, Button, Empty, More, Plus, Enter, stamp, TextArea, submitOnEnter, input } from '../rows.js';
+// Education: the queue and the completed history, one bar per row; the pane is the question itself, set as a page of
+// a textbook — definitions, premise, then each part with its own answer box. The tutor grades in the drawer.
+import {
+  S, h, hue, chk, titleCell, acts, tagAct, card, tagEl, dateLine, tagLine, titled, confirmPop, toast, refresh, select,
+  newest, dayLabel, I,
+} from '../core.js';
 import { get, post } from '../api.js';
-import { Markdown } from '../md.js';
+import { tex } from '../md.js';
 
-const VERDICT = { correct: '#7fb894', partial: '#d1a36a', incorrect: '#cf7b7b' }; // the palette's green, amber and red
-const RED = '#cf7b7b';
-const PROSE = { fontSize: 16, lineHeight: 1.65 };   // question prose reads one step above the frame's 15px
+const HUE = () => hue('education');
+const bar = (i) => (i.status === 'completed' ? i.score || 0 : i.pct || 0);
+const drafts = {};          // a half-typed answer per part, so the poll and a sibling's Submit never throw it away
+const dkey = (item, p) => `${item.id}:${p.n}`;
+let topics = null;          // the Topics view's rows: fetched on open and while that view is up, never behind it
 
-export async function load(app) {
-  const { query, chip, more } = app.state;
-  const q = new URLSearchParams({ query, chip, page: String(more) });
-  const [left, blank] = await Promise.all([get(`/api/education/left?${q}`), get('/api/education/blank')]);
-  return { left, blank };
+// Every write goes through the module's own route; the pane reloads from the daemon rather than guessing the result.
+async function run(verb, body, removed) {
+  try { await post(`/api/education/action/${verb}`, body); } catch (e) { toast(e.message); return false; }
+  if (removed) for (const k of Object.keys(drafts)) if (k.startsWith(`${removed}:`)) delete drafts[k];
+  if (removed && String(S.sel) === String(removed)) select(null); else S.item = null;
+  await refresh();
+  return true;
 }
 
-export function Left({ app, data, mod }) {
-  const sel = app.state.sel;
-  const rerun = (patch) => app.setState(patch, () => app.refresh());
-  const empty = app.state.query ? 'no matches' : data.left.chip === 'completed' ? 'nothing completed yet' : 'nothing due';
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-    <${Search} value=${app.state.query} hue=${mod.hue} onInput=${(v) => rerun({ query: v, more: 0 })} />
-    <${Chips} chips=${data.left.chips} active=${data.left.chip} hue=${mod.hue} onPick=${(c) => rerun({ chip: c, more: 0 })} />
-    ${data.left.groups.length === 0 && html`<${Empty} text=${empty} />`}
-    ${data.left.groups.map((g, i) => html`<div key=${g.label || i} style=${{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <${GroupHeader} label=${g.label} />
-      ${g.rows.map((r) => html`<${Row} key=${r.id} row=${r} hue=${mod.hue} selected=${!!sel && String(sel.id) === String(r.id)} onSelect=${() => app.select({ module: 'education', id: r.id })} />`)}
-    </div>`)}
-    ${data.left.more && html`<${More} onClick=${() => rerun({ more: app.state.more + 1 })} />`}
-  </div>`;
+// The pane's buttons are the server's: primary is the module's hue, anything that asks or removes is the red one.
+function actionEl(item, a) {
+  const risky = !!(a.confirm || a.removes);
+  const cls = `btn${a.primary ? ' primary' : risky ? ' danger' : ''}`;
+  if (a.href) return h('button', { class: cls, onclick: () => window.open(a.href, '_blank', 'noopener') }, a.label);
+  const go = () => run(a.verb, { id: item.id }, a.removes ? item.id : null);
+  return h('button', { class: cls, onclick: (e) => (risky ? confirmPop(e.currentTarget, a.confirm || `${a.label}?`, go) : go()) }, a.label);
 }
 
-// One part. The header row (letter, title, score, caret) folds it; open, it shows the prompt and the answer box.
-// The grade and the tutor's explanation live in the session pane; here only the score shows.
-function Part({ p, item, hue, open, onToggle, draft, busy, error, onDraft, onSubmit }) {
-  const color = VERDICT[p.verdict] || T.muted;
-  const awaiting = !!p.answered_at && !p.graded_at;   // a new answer clears the old grade until the tutor grades again
+// One part: its title and ask as a single paragraph, the answer under it, and the score it came back with.
+function partEl(item, p) {
+  const graded = p.score !== null && p.score !== undefined;
   const closed = item.status === 'completed';
-  const score = p.score === null || p.score === undefined ? (awaiting ? '…' : '–') : String(p.score);
-  const header = html`<div class="row" onClick=${onToggle} style=${{ display: 'flex', alignItems: 'center', gap: 12, height: 36, padding: '0 12px', margin: '0 -12px', borderRadius: 6, cursor: 'pointer' }}>
-    <span style=${{ ...meta13, color: hue, flex: 'none', width: 28 }}>(${p.label})</span>
-    <span style=${{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 500 }}>${p.title}</span>
-    <span style=${{ ...meta13, ...nums, color, flex: 'none', fontWeight: 500 }}>${score}</span>
-    <span style=${{ ...meta13, color: T.dim, flex: 'none', width: 12, textAlign: 'center' }}>${open ? '▾' : '▸'}</span>
-  </div>`;
-  if (!open) return header;
-  let status = null;
-  if (error) status = html`<span style=${{ ...meta13, color: RED }}>${error}</span>`;
-  else if (busy) status = html`<span style=${{ ...meta13, color: T.dim }}>sending…</span>`;
-  else if (awaiting) status = html`<span style=${{ ...meta13, color: T.dim }}>grading…</span>`;
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-    ${header}
-    <div style=${{ paddingLeft: 40, display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style=${PROSE}><${Markdown} text=${p.text} /></div>
-      ${closed
-        ? html`<div style=${{ background: T.raised, borderLeft: `3px solid ${color}`, borderRadius: 6, padding: '8px 12px', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-            ${p.answer || html`<span style=${{ ...meta13, color: T.dim }}>not answered</span>`}</div>`
-        : html`<${TextArea} value=${draft} disabled=${busy} placeholder="Answer" hue=${hue}
-            onInput=${(e) => onDraft(e.target.value)} onKeyDown=${submitOnEnter(onSubmit)} />
-          <div style=${{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 28 }}>
-            <${Button} label=${p.graded_at ? 'Resubmit' : 'Submit'} primary=${!busy} hue=${hue} onClick=${() => !busy && onSubmit()} />
-            ${status}
-          </div>`}
-    </div>
-  </div>`;
-}
-
-// The setup, pinned while the parts scroll and capped at half the viewport; a fade at its foot says it goes on below the cap.
-class Pinned extends Component {
-  constructor() {
-    super();
-    this.state = { more: false };
-  }
-
-  componentDidMount() { this.check(); }
-  componentDidUpdate() { this.check(); }
-
-  check() {
-    const el = this.el;
-    if (!el) return;
-    const more = el.scrollHeight - el.scrollTop - el.clientHeight > 2;
-    if (more !== this.state.more) this.setState({ more });
-  }
-
-  render({ children }, { more }) {
-    return html`<div style=${{ position: 'sticky', top: 0, zIndex: 1, background: T.ground, borderBottom: `1px solid ${T.hair}` }}>
-      <div ref=${(el) => (this.el = el)} onScroll=${() => this.check()} style=${{ maxHeight: '50vh', overflow: 'auto', padding: '8px 0 14px', display: 'flex', flexDirection: 'column', gap: 16 }}>${children}</div>
-      <div style=${{ position: 'absolute', left: 0, right: 0, bottom: 1, height: 48, pointerEvents: 'none', background: `linear-gradient(to bottom, transparent, ${T.ground})`, opacity: more ? 1 : 0, transition: 'opacity 120ms' }} />
-    </div>`;
-  }
-}
-
-// The question view: title with `×`, chips and tags, the pinned setup, the parts, feedback, actions.
-// Drafts, in-flight submits and which parts are open live here; a new question is a new instance (key = id).
-class Question extends Component {
-  constructor() {
-    super();
-    this.state = { drafts: {}, busy: {}, errors: {}, open: {}, defs: true, tag: '', error: null };
-  }
-
-  async submit(p) {
-    const { app, item } = this.props;
-    const draft = this.state.drafts[p.n];
-    const text = (draft !== undefined ? draft : p.answer || '').trim();
-    if (!text || this.state.busy[p.n]) return;
-    this.setState({ busy: { ...this.state.busy, [p.n]: true }, errors: { ...this.state.errors, [p.n]: null } });
-    let error = null;
-    try {
-      await post('/api/education/action/answer', { id: item.id, n: p.n, answer: text });
-    } catch (e) {
-      error = e.message;
-    }
-    this.setState({ busy: { ...this.state.busy, [p.n]: false }, errors: { ...this.state.errors, [p.n]: error } });
-    if (app.state.sel && String(app.state.sel.id) === String(item.id)) app.loadItem(app.state.sel);
-    app.refresh();
-  }
-
-  // An action that fails says so in the fixed line under the buttons; nothing moves when it appears.
-  async act(a) {
-    const { app, item } = this.props;
-    if (a.confirm && !window.confirm(a.confirm)) return;
-    this.setState({ error: null });
-    try {
-      await post(`/api/education/action/${a.verb}`, { id: item.id });
-    } catch (e) {
-      this.setState({ error: e.message });
-      return;
-    }
-    if (a.removes) app.select(null);
-    else app.loadItem(app.state.sel);
-    app.refresh();
-  }
-
-  async saveTags(tags) {
-    const { app, item } = this.props;
-    this.setState({ error: null, tag: '' });
-    try {
-      await post('/api/education/action/tags', { id: item.id, tags });
-    } catch (e) {
-      this.setState({ error: e.message });
-      return;
-    }
-    app.loadItem(app.state.sel);
-  }
-
-  // A graded part sits folded until opened; an ungraded one is open until folded.
-  isOpen(p) {
-    const o = this.state.open[p.n];
-    return o !== undefined ? o : p.score === null || p.score === undefined;
-  }
-
-  render({ app, item, mod }, { drafts, busy, errors, defs, tag, error }) {
-    const hue = mod.hue;
-    const chip = { padding: '2px 8px', borderRadius: 6, fontSize: 13, color: T.muted, boxShadow: 'inset 0 0 0 1px rgba(230,231,234,.1)' };
-    const tags = item.tags || [];
-    const addTag = () => {
-      const t = tag.trim();
-      if (t && !tags.includes(t)) this.saveTags([...tags, t]);
-      else this.setState({ tag: '' });
-    };
-    return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div style=${{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style=${{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-          <div style=${{ fontSize: 18, fontWeight: 600, lineHeight: 1.3, flex: 1, minWidth: 0 }}>${item.title}</div>
-          <span class="bright-hover" onClick=${() => app.select(null)} style=${{ cursor: 'pointer', color: T.dim, padding: '0 4px', lineHeight: 1.3, flex: 'none' }}>×</span>
-        </div>
-        <div style=${{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
-          <span style=${chip}>${item.topic}</span>
-          ${item.topic_tag && html`<span style=${chip}>${item.topic_tag}</span>`}
-          ${tags.map((t) => html`<span key=${t} style=${{ ...chip, color: hue }}>${t}
-            <span class="bright-hover" title="remove" onClick=${() => this.saveTags(tags.filter((x) => x !== t))} style=${{ marginLeft: 6, cursor: 'pointer', color: T.dim }}>×</span></span>`)}
-          <input placeholder="+ tag" value=${tag} onInput=${(e) => this.setState({ tag: e.target.value })}
-            onKeyDown=${(e) => { if (e.key === 'Enter') addTag(); }} onBlur=${addTag}
-            style=${{ width: 96, height: 24, padding: '0 8px', border: 0, borderRadius: 6, background: 'transparent', boxShadow: 'inset 0 0 0 1px rgba(230,231,234,.1)', color: T.text, fontSize: 13, '--hue': hue }} />
-        </div>
-      </div>
-      <${Pinned}>
-        ${item.definitions && html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span onClick=${() => this.setState({ defs: !defs })} style=${{ ...meta13, color: hue, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>definitions<span style=${{ color: T.dim }}>${defs ? '▾' : '▸'}</span></span>
-          ${defs && html`<div style=${PROSE}><${Markdown} text=${item.definitions} /></div>`}
-        </div>`}
-        <div style=${{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style=${{ ...meta13, color: hue }}>premise</span>
-          <div style=${PROSE}><${Markdown} text=${item.premise} /></div>
-        </div>
-      <//>
-      <div style=${{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        ${item.parts.map((p) => html`<${Part} key=${p.n} p=${p} item=${item} hue=${hue} open=${this.isOpen(p)}
-          onToggle=${() => this.setState({ open: { ...this.state.open, [p.n]: !this.isOpen(p) } })}
-          draft=${drafts[p.n] !== undefined ? drafts[p.n] : p.answer || ''} busy=${!!busy[p.n]} error=${errors[p.n]}
-          onDraft=${(v) => this.setState({ drafts: { ...drafts, [p.n]: v } })} onSubmit=${() => this.submit(p)} />`)}
-      </div>
-      ${item.feedback.length > 0 && html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 4, ...meta13, color: T.muted }}>
-        ${item.feedback.map((f, i) => html`<span key=${i}>“${f}”</span>`)}
-      </div>`}
-      <div style=${{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
-        <div style=${{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          ${item.actions.map((a) => html`<${Button} key=${a.verb} label=${a.label} primary=${a.primary} hue=${hue} onClick=${() => this.act(a)} />`)}
-          <${Button} label="Send to session" right=${true} onClick=${() => app.sendToSession(`Q${item.id} "${item.title}": `)} />
-        </div>
-        <div style=${{ ...meta13, color: RED, minHeight: 18 }}>${error || ''}</div>
-      </div>
-    </div>`;
-  }
-}
-
-// Generate: one press, one question on the topic that has waited longest; the page selects it when it lands.
-class Generate extends Component {
-  constructor() {
-    super();
-    this.state = { busy: false, error: null };
-  }
-
-  async run() {
-    if (this.state.busy) return;
-    this.setState({ busy: true, error: null });
-    try {
-      const r = await post('/api/education/action/generate');
-      this.setState({ busy: false });
-      await this.props.app.refresh();
-      this.props.app.select({ module: 'education', id: r.id });
-    } catch (e) {
-      this.setState({ busy: false, error: e.message });
-    }
-  }
-
-  render({ hue }, { busy, error }) {
-    return html`<div style=${{ display: 'flex', alignItems: 'center', gap: 12 }}>
-      <${Button} label=${busy ? 'generating…' : 'Generate'} primary=${!busy} hue=${hue} onClick=${() => this.run()} />
-      ${error && html`<span style=${{ ...meta13, color: RED }}>${error}</span>`}
-    </div>`;
-  }
-}
-
-const topic = { open: false, name: '', description: '' };   // the `+` boxes, page-local
-
-export function Middle({ app, data, mod, fmt }) {
-  const hue = mod.hue;
-  if (app.state.sel) {
-    const item = app.state.item;
-    if (!item) return html`<div style=${{ ...meta13, color: T.dim }}>loading…</div>`;
-    if (item.error) return html`<div style=${{ ...meta13, color: RED }}>${item.error}</div>`;
-    return html`<${Question} key=${item.id} app=${app} item=${item} mod=${mod} fmt=${fmt} />`;
-  }
-  const b = data.blank;
-  const save = async () => {
-    const name = topic.name.trim();
-    if (!name) return;
-    await post('/api/education/action/add_topic', { name, description: topic.description.trim() });
-    topic.name = ''; topic.description = ''; topic.open = false;
-    app.refresh();
+  const k = dkey(item, p);
+  const box = h('textarea', {
+    class: 'answer', disabled: closed || null, 'data-part': k,
+    // A draft is text the daemon has not seen. An emptied box holds none, so it stops standing in front of the answer.
+    oninput: (e) => { if (e.target.value) drafts[k] = e.target.value; else delete drafts[k]; },
+    onkeydown: (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } },
+  });
+  box.value = closed ? (p.answer || '') : (drafts[k] ?? (p.answer || ''));   // no draft: what the daemon holds
+  const send = async () => {
+    const text = box.value.trim();
+    if (!text) return;
+    delete drafts[k];                                          // the daemon's copy takes over, unless it refused it
+    if (!(await run('answer', { id: item.id, n: p.n, answer: text }))) drafts[k] = text;
   };
-  const onKey = (e) => {
-    if (e.key === 'Enter') save();
-    if (e.key === 'Escape') { topic.open = false; app.forceUpdate(); }
-  };
-  const retire = async (t) => {
-    if (!window.confirm(`Retire ${t.name}?`)) return;
-    await post('/api/education/action/retire_topic', { id: t.id });
-    app.refresh();
-  };
-  const cols = 'minmax(0,1fr) 32px 56px 40px 120px 96px 16px';
-  const cell = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-    <div style=${{ display: 'flex', alignItems: 'center', gap: 12 }}>
-      <${Generate} app=${app} hue=${hue} />
-      <span style=${{ marginLeft: 'auto' }}><${Plus} title="new topic" active=${topic.open} onClick=${() => { topic.open = !topic.open; app.forceUpdate(); }} /></span>
-    </div>
-    ${topic.open && html`<div style=${{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <input autofocus placeholder="Topic name" value=${topic.name} onInput=${(e) => { topic.name = e.target.value; }} onKeyDown=${onKey} style=${input(hue, { width: 220, fontSize: 15 })} />
-      <input placeholder="Purpose (optional)" value=${topic.description} onInput=${(e) => { topic.description = e.target.value; }} onKeyDown=${onKey} style=${input(hue, { flex: 1 })} />
-      <${Enter} onClick=${save} />
-    </div>`}
-    <div style=${{ display: 'flex', flexDirection: 'column', ...meta13, ...nums }}>
-      <div style=${{ display: 'grid', gridTemplateColumns: cols, gap: 12, height: 28, alignItems: 'center', padding: '0 12px', color: T.muted }}>topic<span>d</span><span>done</span><span>avg</span><span>recent</span><span>last</span><span /></div>
-      ${b.topics.length === 0 && html`<${Empty} text="no topics yet" />`}
-      ${b.topics.map((t) => html`<div key=${t.id} class="trow" title=${t.description || ''} style=${{ display: 'grid', gridTemplateColumns: cols, gap: 12, height: 32, alignItems: 'center', padding: '0 12px', borderTop: `1px solid ${T.hair}`, color: T.text }}>
-        <span style=${{ ...cell, fontSize: 15 }}>${t.name}</span>
-        <span style=${{ color: hue }}>d${t.difficulty}</span>
-        <span style=${{ color: T.muted }}>${t.completed}/${t.asked}</span>
-        <span>${t.average === null ? '–' : t.average}</span>
-        <span style=${{ ...cell, color: T.muted }}>${t.recent.join(' ') || '–'}</span>
-        <span style=${{ color: T.dim }}>${t.last_asked ? stamp(t.last_asked, fmt) : '–'}</span>
-        <span class="bright-hover" title="retire" onClick=${() => retire(t)} style=${{ cursor: 'pointer', color: T.dim, textAlign: 'right' }}>×</span>
-      </div>`)}
-    </div>
-  </div>`;
+  return h('div', { class: 'related' },
+    graded ? h('span', { class: 'num', style: 'float:right' }, `${p.score}/100`) : null,
+    h('div', { class: 'qbody', html: titled(p.title, tex(p.text)) }),
+    box,
+    closed ? null : h('div', { class: 'actions', style: 'margin-top:8px' }, h('button', { class: 'btn primary', onclick: send }, graded ? 'Resubmit' : 'Submit')));
 }
+
+// Ctrl+Enter sends the box the caret sits in. The palette runs the same action with the caret nowhere, so there it
+// sends the open question's first part holding an answer the daemon has not seen. With nothing to send it says so.
+function submitHere() {
+  const boxes = [...document.querySelectorAll('#detail .answer:not([disabled])')];
+  const at = document.activeElement;
+  const box = boxes.includes(at) ? at : boxes.find((b) => drafts[b.dataset.part] !== undefined);
+  if (!box || !box.value.trim()) { toast(boxes.length ? 'Nothing typed to send' : 'Open a question first'); return; }
+  box.parentElement.querySelector('.actions .btn.primary').click();
+}
+
+function questionView(i) {
+  const head = [h('h2', null, i.title), i.when ? dateLine(dayLabel(i.when)) : null, tagLine(i)];
+  if (!i.parts) return head;                                   // the row is open while the daemon answers with the body
+  const buttons = i.actions || [];
+  return [...head,
+    h('div', { class: 'prose qbody', html: (i.definitions ? tex(i.definitions) : '') + tex(i.premise) }),
+    ...i.parts.map((p) => partEl(i, p)),
+    buttons.length ? h('div', { class: 'actions' }, ...buttons.map((a) => actionEl(i, a))) : null];
+}
+
+// Topics: what each one has cost so far, the name doubling as the tag its questions carry.
+function topicsView(rows) {
+  const cols = 'minmax(0,1fr) 120px 88px';
+  return h('div', null, card('', 0, rows.map((t) => h('div', { class: 'row', style: `--cols:${cols}` },
+    h('span', { class: 't' }, tagEl(String(t.name).trim().toLowerCase(), { fixed: true })),
+    h('span', { class: 'c num' }, `${t.completed}/${t.asked}`),
+    h('span', { class: 'r num strong' }, t.average === null || t.average === undefined ? '' : String(t.average))))));
+}
+
+async function generate() {
+  let r;
+  try { r = await post('/api/education/action/generate'); } catch (e) { toast(e.message); return; }
+  await refresh();
+  if (r && r.warning) toast(r.warning);
+  if (r && r.id) select(r.id);
+}
+
+export default {
+  cols: '18px 44px minmax(0,1fr) 70px', colsSplit: '18px 44px minmax(0,1fr) 64px',
+  chips: ['Active', 'Completed'],
+  seg: ['Questions', 'Topics'],
+  keys: [['Submit the answer', 'Ctrl+↵', submitHere]],
+  async load() {
+    const want = topics === null || S.seg.education === 'Topics';   // /blank feeds the Topics view and nothing else
+    const [left, blank] = await Promise.all([get('/api/education/left'), want ? get('/api/education/blank') : null]);
+    if (blank) topics = blank.topics || [];
+    return { items: (left.groups || []).flatMap((g) => g.rows), topics };
+  },
+  filter: (list, chip) => list.filter((i) => (chip === 'Completed' ? i.status === 'completed' : i.status === 'active')),
+  groups: (list) => [{ label: '', rows: [...list].sort(newest) }],
+  cells: (i) => [chk(i),
+    h('span', { class: 'pbar', style: `--c:${HUE()}` }, h('i', { style: `width:${bar(i)}%` })),
+    titleCell(i),
+    h('span', { class: 'r num' }, i.status === 'completed' ? i.score : ''),
+    acts(i, [tagAct(i), i.status === 'active' && ['Delete', (e) => confirmPop(e.currentTarget, `Delete "${i.title}"?`, () => run('delete', { id: i.id }, i.id)), I.trash]])],
+  tools: () => [h('button', { class: 'btn primary', onclick: generate }, 'Generate')],
+  alt: (data) => topicsView(data.topics),
+  detail: (i) => questionView(i),
+};

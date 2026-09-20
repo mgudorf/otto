@@ -9,6 +9,7 @@ from app.claude import READ_BUILTINS
 from app.config import ROOT
 from app.modules import Registry
 from app.runner import JobContext
+from app.store import add_tags, all_tags, remove_tag, tags_for
 
 FORBIDDEN_IN_TASKS = {"session_turn", "oneshot", "write_tools"}
 ACTION_KEYS = {"verb", "label", "primary", "confirm", "href", "removes"}    # everything the inspector reads off an action
@@ -38,7 +39,7 @@ def test_registry_loads_real_modules():
     import inspect
 
     for m in reg.modules.values():
-        for hook in (m.numbers, m.today, m.queue, m.item, m.context):
+        for hook in (m.numbers, m.today, m.queue, m.rows, m.item, m.context):
             if hook is not None:
                 assert "request" not in inspect.signature(hook).parameters, f"{m.name}: {hook.__name__} is a route, not a hook"
     assert reg.get("home").numbers is None and reg.get("home").context is not None
@@ -74,6 +75,22 @@ def test_registry_picks_up_queue_hook(tmp_path: Path, monkeypatch):
     assert reg.errors == {}
     assert reg.get("withq").queue(None) == [{"id": 1, "text": "waiting"}]
     assert reg.get("without").queue is None
+
+
+def test_tags_are_one_system(store):
+    """A tag written on any module's row reads back through one helper; Second Brain keeps its own table, so its
+    tools still see what the page wrote. Spelling is normalised on the way in."""
+    store.migrate((ROOT / "app" / "modules" / "second_brain" / "schema.sql").read_text("utf-8"))
+    store.execute("INSERT INTO second_brain_items(id, kind, text, created_at, updated_at) VALUES (1, 'note', 'x', '2026-09-18', '2026-09-18')")
+    add_tags(store, "second_brain", 1, ["Thesis", " causal "])
+    add_tags(store, "email", "18f2a", ["THESIS", "tax"])
+    assert store.query("SELECT tag FROM second_brain_tags ORDER BY tag") == [{"tag": "causal"}, {"tag": "thesis"}]
+    assert tags_for(store, "second_brain", [1])[1] == ["causal", "thesis"]
+    assert tags_for(store, "email", ["18f2a"])["18f2a"] == ["tax", "thesis"]
+    assert [t["tag"] for t in all_tags(store)] == ["thesis", "causal", "tax"]
+    assert next(t for t in all_tags(store) if t["tag"] == "thesis")["modules"] == ["email", "second_brain"]
+    assert remove_tag(store, "email", "18f2a", "Tax") and not remove_tag(store, "email", "18f2a", "tax")
+    assert tags_for(store, "email", ["18f2a"])["18f2a"] == ["thesis"]
 
 
 def _action_literals(tree: ast.AST) -> list[dict]:

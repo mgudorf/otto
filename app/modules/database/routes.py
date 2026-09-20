@@ -1,10 +1,14 @@
-"""Database: every table under the module that owns it, any SQL against the store, the queries worth keeping."""
+"""Database: every table under the module that owns it, any SQL against the store, the queries worth keeping.
+
+`run` reads; SQLite's own refusal on the read-only connection is what tells the page a statement writes,
+and `write` is the confirmed path, a backup then one transaction."""
 
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request, Response
 
 from app.modules.database import query
 from app.store import Store, now_iso
@@ -12,6 +16,8 @@ from app.store import Store, now_iso
 router = APIRouter(prefix="/api/database")
 
 RESOURCE = "db"  # shared with data.backup and data.vacuum, so they never overlap a query
+REFUSED = "readonly"  # what SQLite says when a statement tries to write on the mode=ro connection
+QUERY = "query:"      # a saved query's id, so tables and saved queries share one list
 
 
 def _size_bytes(store: Store) -> int:
@@ -69,6 +75,24 @@ def table(request: Request, name: str) -> dict:
     return t
 
 
+@router.get("/export/{name}")
+def export(request: Request, name: str) -> Response:
+    """The whole table as CSV, named after the table and the moment it left."""
+    st = request.app.state
+    t = query.table(st.store, name)
+    if t is None:
+        raise HTTPException(404, "no such table")
+    body = query.csv_text(st.store, name)
+    st.store.event("database", "exported", f"{name}: {t['rows']:,} rows")
+    filename = f"{name}-{datetime.now():%Y%m%d-%H%M%S}.csv"
+    return Response(body, media_type="text/csv", headers={"content-disposition": f'attachment; filename="{filename}"'})
+
+
+@router.get("/item/{item_id}")
+def item_route(request: Request, item_id: str) -> dict:
+    return item(request.app.state.store, item_id)
+
+
 @router.post("/action/{verb}")
 async def action(request: Request, verb: str, body: dict = Body(default={})) -> dict:
     """Each action validates in the request and returns the job to run; bad input is a 400, never a failed job."""
@@ -80,13 +104,29 @@ async def action(request: Request, verb: str, body: dict = Body(default={})) -> 
 
 
 def _run(st, body: dict):
+    """The read path. A statement SQLite refuses on the read-only connection comes back as a question."""
     d, sql = st.config.database, body.get("sql") or ""
 
     async def job(ctx):
-        r = await asyncio.to_thread(query.execute, st.store, sql, d.max_rows, d.max_seconds)
-        if r.get("changed") or r.get("ddl"):
-            ctx.event("wrote", f"{r['changed']:,} rows: {' '.join(sql.split())[:120]}")
-        return r
+        r = await asyncio.to_thread(query.read, st.store, sql, d.max_rows, d.max_seconds)
+        return {"needs_confirm": True} if REFUSED in (r.get("error") or "") else r
+
+    return job
+
+
+def _write(st, body: dict):
+    """The confirmed path: a backup of the store, then the script in one transaction."""
+    d, sql = st.config.database, body.get("sql") or ""
+    if not query.statements(sql):
+        raise HTTPException(400, "sql is required")
+    dest = st.config.data.db.parent / "backups" / f"otto-{datetime.now():%Y%m%d-%H%M%S}-pre-write.db"
+
+    async def job(ctx):
+        await asyncio.to_thread(st.store.backup, dest)
+        r = await asyncio.to_thread(query.write, st.store, sql, d.max_seconds)
+        if "error" not in r:
+            ctx.event("wrote", f"{r['changes']:,} rows: {' '.join(sql.split())[:120]}")
+        return {**r, "backup": dest.name}
 
     return job
 
@@ -124,8 +164,15 @@ def _save(st, body: dict):
     return job
 
 
+def _ref(value) -> int:
+    """A saved query's id, whether it arrives bare or as the `query:<id>` the page lists it under."""
+    s = str(value or "")
+    s = s[len(QUERY):] if s.startswith(QUERY) else s
+    return int(s) if s.isdigit() else 0
+
+
 def _delete(st, body: dict):
-    row = st.store.one("SELECT id, name FROM database_queries WHERE id = ?", (int(body.get("id") or 0),))
+    row = st.store.one("SELECT id, name FROM database_queries WHERE id = ?", (_ref(body.get("id")),))
     if row is None:
         raise HTTPException(404, "no such saved query")
 
@@ -138,10 +185,44 @@ def _delete(st, body: dict):
     return job
 
 
-ACTIONS = {"run": _run, "explain": _explain, "save": _save, "delete": _delete}
+ACTIONS = {"run": _run, "write": _write, "explain": _explain, "save": _save, "delete": _delete}
 
 
 # ---- shell hooks ---------------------------------------------------------------------------
+def _table_row(t: dict) -> dict:
+    """One table as a ROW. A table is the store's own shape rather than an item, so it takes no tag at all,
+    and the owning module rides as `owner`: a tag is something the owner wrote."""
+    return {"id": t["name"], "module": "database", "kind": "table", "title": t["name"],
+            "owner": t["module"], "count": t["rows"], "tags": [], "fixed": [], "taggable": False}
+
+
+def _query_row(q: dict) -> dict:
+    """One saved query as a ROW, stamped with the moment it was last kept."""
+    return {"id": f"{QUERY}{q['id']}", "module": "database", "kind": "query", "title": q["name"],
+            "when": q["updated_at"], "sql": q["sql"], "tags": [], "fixed": []}
+
+
+def rows(store: Store, limit: int = 200) -> list[dict]:
+    """The saved queries, newest first. A table carries no moment, so it is nothing Home's Recent can order."""
+    return [_query_row(q) for q in _saved(store)][:limit]
+
+
+def item(store: Store, item_id: str) -> dict:
+    """A table with its columns, or a saved query with its text; each carries the buttons its pane offers."""
+    if item_id.startswith(QUERY):
+        ref = item_id[len(QUERY):]
+        q = store.one("SELECT * FROM database_queries WHERE id = ?", (int(ref),)) if ref.isdigit() else None
+        if q is None:
+            raise HTTPException(404, "no such saved query")
+        return {**_query_row(q),
+                "actions": [{"verb": "delete", "label": "Delete", "confirm": f'Delete "{q["name"]}"?', "removes": True}]}
+    t = query.table(store, item_id)
+    if t is None:
+        raise HTTPException(404, "no such table")
+    return {**_table_row(t), "columns": t["columns"],
+            "actions": [{"verb": "export", "label": "Export", "primary": True, "href": f"/api/database/export/{t['name']}"}]}
+
+
 def numbers(store: Store) -> dict:
     return {"value": _human(_size_bytes(store)), "label": "database"}
 
