@@ -10,6 +10,18 @@ Otto, a personification of the word "auto" is a PERSONALIZED dashboard applicati
    3. Slowly creates a catalog of data which defines who "I" am which will be leveraged for either recall, context, or creating "paragon" agents which enforce items that uniquely benefit me. 
 
 
+## UI
+
+1. **Let the functionality speak for itself. This rule keeps being broken, so hold every change to it.** If the surrounding content already makes a thing's purpose evident, it gets no title, label, caption or hint. A date is a date: never "captured 09-18-2026", "follow up 10-02-2026" or "due 09-15-2026", only the date. A row of tags gets no word "Tags" above it. A skill in the palette gets no "runs in the drawer" beside it and its group is "Skills", not "Home agent skills". Enter gets no "send", the search bar no description of what to type, the chat box no "ask about this page", a button no key beside its label. A symbol that depicts the function carries it; text next to it is clutter. What still gets a title: a module's name. Nothing whose meaning the content already shows. The `?` overlay is the one place keys are listed.
+2. **No chrome text.** A title is the module's title. No counts, no column headers, no separator lines, no content previews; a date only on a date-bound item.
+3. **Tags are neutral and one system.** No colours. Identity tags and my own tags look the same, five show and then "+N", and they align in one column.
+4. **Colour is the module's hue on a card's left border and nothing else.** The hovered module keeps its colour and the rest fade. Depth comes from canvas, plates and shadows. Rainbow is the dark palette tinted with the open module's hue, Dark is neutral, and there is no light theme.
+5. **PP Formula everywhere, one cut per text role; Geist Mono for code.** The one exception is an Education question body: a textbook serif with LaTeX rendered.
+6. **Selection is an intersection, never a path.** Tags in the search bar and tags picked on the Graph are the same set; adding one narrows. A related item from another module previews in place; nothing navigates away to show it.
+7. **The browser owns history.** Every page change is a history entry, so the mouse back and forward buttons walk pages.
+8. **Home shows what waits, or the five newest items per module.** Priority and Recent are its two modes; neither explains itself, and the search bar's tokens narrow both.
+9. **A state change is a button.** Delete, edit, forget and the like are real buttons, never italic text. A destructive button is tinted a subtle red; the × on a tag chip is not.
+
 ## Development
 
 1. **Module work goes through `/feature-flow <what to change>`.** One worktree per change (`git worktree add ../wt-<slug> -b feat/<slug>` from `main`), the module doc updated in the same commit as the code, the suite green, my approval before the merge. Nothing is implemented on `main`.
