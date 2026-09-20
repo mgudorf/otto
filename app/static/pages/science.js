@@ -152,12 +152,17 @@ function span() { const a = clamp(ed.anchor), b = head(); return [Math.min(a, b)
 // The cell list as the owner sees it: the file's cells with what is being typed over the top.
 const current = () => cellsOf().map((c, i) => ({ id: c.id, type: c.type, source: srcOf(c, i) }));
 
-// True while the pane stands on the same notebook; another file starts the editor over, but not before whatever was
-// typed into the one being left has been sent to it.
+// Whatever was typed into the notebook the pane is leaving still reaches its file, even when nothing blurred the cell.
+function flush(id) {
+  if (!ed.file || ed.file === String(id) || !ed.draft || ed.draft === ed.written) return;
+  edit('set_cell', { index: ed.draft.index, source: ed.draft.source });
+  ed.draft = null;
+}
+
+// True while the pane stands on the same notebook; another file starts the editor over.
 function same(item) {
   const id = String(item.id);
   if (ed.file === id) return true;
-  if (ed.file && ed.draft && ed.draft !== ed.written) edit('set_cell', { index: ed.draft.index, source: ed.draft.source });
   Object.assign(ed, { file: id, mode: 'command', head: 0, anchor: 0, draft: null, written: null, saving: null, past: [], future: [], pending: null, caret: null, take: false });
   painted.clear();
   return false;
@@ -462,20 +467,25 @@ function stash() {
   }
 }
 
-// ...and put back on the new ones, where the cell being typed in is also given the height of its text.
+// ...and put back on the new ones, with the cell being typed in fitted to its text. Edit mode always ends holding the
+// keyboard, since only a deliberate act enters it and a real blur leaves it; command mode takes the focus back only if
+// it had it, so a draw never steals it from the drawer.
 function focusBack() {
   const box = $('#cells');
   if (!box) return;
   const t = box.querySelector('textarea');
   if (t) grow(t);
-  if (!ed.take) return;
+  const take = ed.take;
   ed.take = false;
   if (ed.mode === 'edit' && t) {
-    t.focus({ preventScroll: true });
-    const c = ed.caret;
-    const p = c === 'end' ? [t.value.length, t.value.length] : Array.isArray(c) ? c : [Number(c) || 0, Number(c) || 0];
-    t.setSelectionRange(Math.min(p[0], t.value.length), Math.min(p[1], t.value.length));
-  } else box.focus({ preventScroll: true });
+    if (document.activeElement !== t) {
+      t.focus({ preventScroll: true });
+      const c = ed.caret;
+      const p = c === 'end' ? [t.value.length, t.value.length] : Array.isArray(c) ? c : [Number(c) || 0, Number(c) || 0];
+      t.setSelectionRange(Math.min(p[0], t.value.length), Math.min(p[1], t.value.length));
+    }
+  } else if (take) box.focus({ preventScroll: true });
+  if (!take) return;
   const cell = box.querySelector(`.cell[data-i="${head()}"]`);
   if (cell) cell.scrollIntoView({ block: 'nearest' });
 }
@@ -578,6 +588,7 @@ function statusText(i) {
 // the keyboard takes it again.
 function detail(i) {
   tune(i.id);                                 // Home and a tag page open this pane too, so it is tuned here as well
+  flush(i.id);
   const nb = i.kind === 'ipynb' && Array.isArray(i.cells);
   if (nb) {
     styleOnce();
@@ -592,7 +603,9 @@ function detail(i) {
   if (nb) actions.push(h('button', { title: 'New cell', class: 'btn ico', onclick: () => insert(head() + 1, 'code', 'edit') }, icon(I.plus)));
   const body = i.kind === 'py' && typeof i.source === 'string' ? [scriptEl(i)]
     : nb ? [h('div', { id: 'cells', tabindex: '0', onkeydown: onKey }, ...i.cells.map(cellEl))] : [];
-  requestAnimationFrame(() => {
+  // A microtask, not a frame: headless and an idle window both stall requestAnimationFrame, and where the keyboard
+  // sits cannot wait for a paint. The new cells are attached by the time it runs.
+  queueMicrotask(() => {
     const el = $('#detail');
     if (el && String(shown) === String(i.id)) el.scrollTop = scrolled;
     if (nb) focusBack();
