@@ -32,28 +32,28 @@ Fix: have the tagger's tags land in `app_tags` alongside the session's JSON, so 
 ### The typed search never reaches what a conversation says
 
 - Kind: gap
-- Where: `app/static/core.js` `applyTokens` and the search bar, against `app/modules/chat/routes.py` `left`'s `query`
-- Found: 09-20-2026, fixing the review of the ported Chat page
+- Where: `app/static/pages/chat.js` `load`, against `app/modules/chat/routes.py` `left`'s `query`
+- Found: 09-20-2026, fixing the review of the ported Chat page; narrowed 09-20-2026, sync-architecture
 - Status: open
 
-What happens: `left` takes a `query` and matches every turn's text, but no page ever sends one. Typing in the search bar re-renders the rows the shell already holds and filters them over the title and the tags alone, so a word that occurs inside a conversation but not in its title empties the list and says nothing matches, while the route would have found it.
+What happens: `left` takes a `query` and matches every turn's text. The shell now hands every page's `load` the typed text and, for a page that declares `serverQuery`, stands its own filter down and asks again a moment after the typing stops; Email, Second Brain, Newsfeed and Finance took that up. Chat's `load` takes nothing and declares no `serverQuery`, so typing still filters the rows in hand over the title and the tags alone, and a word that occurs inside a conversation but not in its title empties the list and says nothing matches, while the route would have found it.
 
 Expected: a word the owner remembers from inside a conversation finds that conversation.
 
-Fix: the shell hands the typed query to `load()` and reloads the page's data when it changes, and its own text filter stands down for a page whose route does the searching. That is one change in `core.js` for every module, not Chat's alone, which is why it is not made here.
+Fix: Chat's alone now: `load({ q })` sends `q` to `left` as `query` and the page declares `serverQuery`, the way `email.js` does.
 
 ### Only the newest page of conversations can be reached
 
 - Kind: gap
 - Where: `app/static/pages/chat.js` `load`, against `app/modules/chat/routes.py` `left`'s `page` and `more`
-- Found: 09-20-2026, fixing the review of the ported Chat page
+- Found: 09-20-2026, fixing the review of the ported Chat page; narrowed 09-20-2026, sync-architecture
 - Status: open
 
 What happens: `left` returns at most `ui.page_size` conversations and says `more` when it held some back. The page asks for the first page and reads neither, so everything older is unreachable from the page and nothing on screen shows there is more.
 
 Expected: the older conversations can be reached.
 
-Fix: the shell grows one way to ask for the next page — a button under the list, or the list asking for itself as it is scrolled — and pages pass `page` through `load()`. Every module's `left` already returns `more`, so which of the two it is, and whether the number held back is shown at all, is the owner's call rather than Chat's.
+Fix: Email, Newsfeed and Second Brain each settled it the same way since: a `More` button while the daemon says `more`, a depth the page keeps and sends as `limit` or `page`, and no count of what is held back. Chat does the same, sending `page` from `load`.
 
 ### A dropped `tagged` frame leaves the open pane's title behind
 

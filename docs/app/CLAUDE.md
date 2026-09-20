@@ -208,7 +208,7 @@ The window is the shell the owner approved as `docs/design/otto-next.html`, buil
 | Grid | `var(--navw) minmax(0,1fr) var(--chatw)` under a `var(--toph)` header row: rail 248px (56px collapsed with `[`), main, drawer 400px (`]` closes it). The drawer is a grid column at every window width, never a sheet over the page; when the window narrows the page's plates ask for less and, if it is still squeezed, main scrolls sideways rather than hide under it |
 | Grips | the gutter left of the drawer and left of the detail pane drag, with nothing drawn for them, and write `--chatw` / `--listw` to `localStorage`. The drawer is capped so main keeps room for its plates: 840px split (660 at ≤1280), 520 unsplit; the cap is re-applied on load, on resize and on every render |
 | Header | the brand, then the page's title left of the search bar and the page's own controls right of it (so a page's summary is the first row of main and its plates start level with the drawer's), then the daemon's pulse and six icon buttons: rail, point, palette, keys, theme, drawer |
-| Search bar | tokens then a bare input, with the Quick access bookmark at its end. A token is a tag, a module, an `is:` filter or free text; `Ctrl+Space` focuses it, `Ctrl+Shift+Space` clears it, `↑ ↓ ↵` take a suggestion. Tokens narrow every list, including Home in both its modes, and the tag tokens are Graph's selection |
+| Search bar | tokens then a bare input, with the Quick access bookmark at its end. A token is a tag, a module, an `is:` filter or free text; `Ctrl+Space` focuses it, `Ctrl+Shift+Space` clears it, `↑ ↓ ↵` take a suggestion. Tokens narrow every list, including Home in both its modes, and the tag tokens are Graph's selection. The typed text narrows the rows in hand over their title and tags, unless the page declares `serverQuery`, when it goes to the page's `load` instead |
 | Rail | module entries in manifest order, a thin rule, then Quick access, and Activity and Settings at the foot. No headings, no counts. A Quick access entry that is one tag's page is marked `#`, the rest `»` |
 | Main | the page's summary, then `.content`: the list, and the detail pane beside it when an item is open (`.content.split`) |
 | Drawer | the open module's agent: rounded tabs on a shaded strip, one per open session, sized to the title up to 180px and cut off flat, with a `+` tab; the transcript; a composer that is a plain box like the search bar, with what is being discussed as a token inside it and the send arrow at its edge |
@@ -228,7 +228,7 @@ The window is the shell the owner approved as `docs/design/otto-next.html`, buil
 
 | Field | What it is |
 |---|---|
-| `load()` | the page's only fetch, run on open, on every refresh and after every action; returns data and renders nothing |
+| `load({q, tokens})` | the page's only fetch, run on open, on every refresh and after every action, handed the search bar's typed text and tokens; returns data and renders nothing. A page that declares `serverQuery` searches its own table with `q`: the shell's text filter stands down for it and it is asked again 300 ms after the typing stops, and on `Esc`. The shell has no paging of its own; a page whose route says `more` draws its own `More` button and asks deeper |
 | `cols`, `colsSplit` | the row's grid template, closed and split |
 | `chips`, `seg` | the segment controls; one chip draws none |
 | `filter`, `groups` | narrowing by chip, then the cards to draw |
@@ -263,6 +263,7 @@ Every page change and every opened item is a history entry (`pushState`), so the
 | `app.js` | registers the twelve pages, the drawer and point mode, then boots |
 | `chat.js` | the drawer: tabs, transcript, composer, streaming. It owns what is inside the plate; core owns the plate |
 | `point.js` | aiming and the point popover |
+| `graph.js` | the tag map: nodes sized by what carries them, edges from co-occurrence and the owner's curated links, its selection the search bar's tag tokens; `app.js` loads it and the Graph page draws it |
 | `pages/*.js` | one per module |
 | `api.js`, `md.js` | the fetch wrappers with the in-flight count behind the loading line, and markdown with KaTeX |
 

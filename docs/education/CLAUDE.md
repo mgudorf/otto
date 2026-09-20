@@ -87,14 +87,14 @@ Fix: move the question's tags into `app_tags` — `action/tags` writes there, `t
 
 - Kind: gap
 - Where: `app/static/pages/education.js`, `app/modules/education/routes.py` `left`
-- Found: 2026-09-20, porting the page to the new shell and its review
+- Found: 2026-09-20, porting the page to the new shell and its review; narrowed 09-20-2026, sync-architecture
 - Status: open, the last part needs a decision
 
 What happens: the preview the port follows draws none of them, so the page no longer adds or retires a topic (only the tutor can), the search bar reads the title, topic, tags and part titles but no longer the definitions or the premise, and the owner's recorded feedback on a question is no longer shown beside it. The same client-side narrowing puts a floor under the history: `left` caps the completed slice at 200 and reports `more`, which the page has no use for, so a question older than the 200th completed one is reached neither by scrolling nor by typing in the omnibox — it is off the page entirely.
 
 Expected: a topic is added and retired on the Topics view, the feedback the owner gave about a question reads under it, and a search finds any completed question by a phrase in its title, its setup or its parts, however old.
 
-Fix: a `+` and a retire button on the Topics view; the feedback lines back in the pane under the parts. For the search and the ceiling, one route the page calls when the omnibox carries a query, searching every listed question server-side rather than the loaded slice — which is the owner's call, since the alternative is lifting the cap and loading the whole history into the browser.
+Fix: a `+` and a retire button on the Topics view; the feedback lines back in the pane under the parts. For the search and the ceiling, the shell now hands `load` the typed text and asks a page that declares `serverQuery` again as it changes, so `left` can take a `query` and search every listed question server-side rather than the loaded slice — whether to do that or to lift the cap and load the whole history into the browser is still the owner's call.
 
 ### The question pane stamps a date on a question no date governs
 
