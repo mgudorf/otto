@@ -87,6 +87,9 @@ def test_done_and_suggestion_actions(config):
             left = (await c.get("/api/second_brain/left?chip=Tasks")).json()
             task = left["groups"][0]["rows"][0]
             assert task["done"] is True and task["fixed"] == ["task"] and task["title"] == "call the bank"
+            # what is typed narrows the whole table through second_brain_fts, which is where the page now sends it
+            assert [r["id"] for g in (await c.get("/api/second_brain/left?query=bank")).json()["groups"] for r in g["rows"]] == [mid]
+            assert (await c.get("/api/second_brain/left?query=umbrella")).json()["groups"] == []
             assert (await c.post("/api/second_brain/action/reopen", json={"id": mid})).json() == {"id": mid}
             assert (await c.get(f"/api/second_brain/item/{mid}")).json()["done"] is False
 

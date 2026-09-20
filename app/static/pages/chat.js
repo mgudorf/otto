@@ -9,7 +9,9 @@ import { md } from '../md.js';
 // The open conversation: its turns as they stand and the reply arriving a piece at a time.
 const live = { sid: null, stop: null, turns: [], tools: {}, partial: '', busy: false, sending: false, seen: null };
 const drafts = {};   // what is half-typed, per conversation, so opening another one and coming back keeps it
+const attached = {}; // the files, already in the folder, that each conversation's next message will name
 let box = null;      // the transcript element, so a streamed piece lands without rebuilding the page
+let clips = null;    // the strip of files the next message carries, so attaching one repaints it alone
 let ta = null;       // the box on screen, so a rebuild can hand the caret to the one that replaces it
 let caret = null;    // where the caret stood when that box went, until the new one has it
 let focusOn = null;  // the conversation whose box takes the caret as soon as it is drawn
@@ -105,18 +107,64 @@ function draw() {
 // A finished turn moves the title, the tags and the folder, so the open conversation is fetched again.
 function reload() { S.item = null; refresh(); }
 
+// ---- attaching ---------------------------------------------------------------------------------
+// The one request this page makes outside api.js: a multipart body, so it carries no JSON header.
+async function upload(sid, file) {
+  const body = new FormData();
+  body.append('file', file, file.name);
+  const r = await fetch(`/api/chat/upload/${encodeURIComponent(sid)}`, { method: 'POST', body });
+  const text = await r.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = { detail: text }; }
+  if (!r.ok) throw new Error(typeof (data && data.detail) === 'string' ? data.detail : `${r.status} ${r.statusText}`);
+  return data;
+}
+
+// A file picked or dropped goes into the conversation's folder at once and then rides the next message as its name.
+// One over `chat.upload_max_mb` comes back 413 with the cap in words; the refusal reaches the owner under its own name.
+async function attach(files) {
+  const sid = live.sid;
+  const list = [...(files || [])];
+  if (!sid || !list.length) return;
+  const names = [], refused = [];
+  for (const f of list) {
+    try { names.push((await upload(sid, f)).name); }
+    catch (e) { refused.push(`${f.name}: ${e.message}`); }
+  }
+  if (names.length) attached[sid] = [...(attached[sid] || []), ...names];
+  if (refused.length) toast(refused.join(' · '));
+  if (names.length && live.sid === sid) { drawClips(); reload(); }   // the folder the pane lists just grew
+}
+
+// The × drops a file from the next message; the file itself stays in the folder the pane lists.
+function clipEl(name) {
+  const drop = () => { attached[live.sid] = (attached[live.sid] || []).filter((n) => n !== name); drawClips(); };
+  return h('span', { class: 'token' }, icon(I.clip), name, h('button', { title: 'Drop', onclick: drop }, '×'));
+}
+function paintClips(el) {
+  const names = attached[live.sid] || [];
+  el.style.cssText = `display:flex;flex-wrap:wrap;gap:4px${names.length ? ';margin-bottom:6px' : ''}`;
+  put(el, ...names.map(clipEl));
+}
+function drawClips() { if (clips && clips.isConnected) paintClips(clips); }
+
 async function send(el) {
   const text = (el.value || '').trim();
   const sid = live.sid;
   if (!text || live.busy || !sid) return;
+  const files = attached[sid] || [];
   el.value = '';
   drafts[sid] = '';
+  attached[sid] = [];
+  drawClips();
   live.busy = true;
   live.sending = true;      // until the daemon has the turn, its own `busy` is behind what this page knows
-  try { await post('/api/chat/send', { id: sid, text }); }
+  try { await post('/api/chat/send', { id: sid, text, files }); }
   catch (e) {
     toast(e.message);
     drafts[sid] = text;
+    attached[sid] = files;
+    drawClips();
     if (live.sid === sid) { live.busy = false; el.value = text; }
   } finally { if (live.sid === sid) live.sending = false; }
   draw();
@@ -140,9 +188,20 @@ function composer() {
     el.setSelectionRange(Math.min(caret[0], el.value.length), Math.min(caret[1], el.value.length));
     caret = null;
   });
-  // The list's capture box, without the inset and the rule that seat it above a list.
-  return h('div', { class: 'capture open', style: 'padding:0;border-bottom:0;background:none;margin-top:14px' }, el,
-    h('div', { class: 'crow' }, h('button', { class: 'btn primary', title: 'Send', onclick: () => send(el) }, icon(I.up))));
+  clips = h('div');
+  paintClips(clips);
+  const picker = h('input', { type: 'file', multiple: true, hidden: true, style: 'display:none', onchange: (e) => { attach(e.target.files); e.target.value = ''; } });
+  // The list's capture box, without the inset and the rule that seat it above a list; a file dropped anywhere on it attaches.
+  return h('div', {
+    class: 'capture open',
+    style: 'padding:0;border-bottom:0;background:none;margin-top:14px',
+    ondragover: (e) => e.preventDefault(),
+    ondrop: (e) => { e.preventDefault(); attach(e.dataTransfer && e.dataTransfer.files); },
+  }, clips, el,
+  h('div', { class: 'crow' },
+    h('button', { class: 'btn primary', title: 'Send', onclick: () => send(el) }, icon(I.up)),
+    h('button', { class: 'btn ico', title: 'Attach', onclick: () => picker.click() }, icon(I.clip))),
+  picker);
 }
 
 // One action the daemon offers: a link opens, anything that asks or removes goes through the confirm.
@@ -151,7 +210,7 @@ function runAction(a, item, anchor) {
   const go = async () => {
     try { await post(`/api/chat/action/${a.verb}`, { id: item.id }); }
     catch (e) { toast(e.message); return; }
-    if (a.removes) { delete drafts[item.id]; if (String(S.sel) === String(item.id)) select(null); }
+    if (a.removes) { delete drafts[item.id]; delete attached[item.id]; if (String(S.sel) === String(item.id)) select(null); }
     refresh();
   };
   if (a.confirm) confirmPop(anchor, a.confirm, go); else go();
@@ -187,7 +246,7 @@ function detail(i) {
     h('h2', null, i.title),
     i.when ? dateLine(dayLabel(i.when)) : null,
     tagLine(i),
-    files.length ? h('dl', { class: 'kv' }, h('dt', null, 'Files'), h('dd', null, ...files.map((f, n) => [
+    files.length ? h('dl', { class: 'kv' }, h('dt', { style: 'display:flex' }, icon(I.clip)), h('dd', null, ...files.map((f, n) => [
       n ? ', ' : null,
       h('a', { href: `/api/chat/file/${encodeURIComponent(i.id)}/${encodeURIComponent(f.name)}`, target: '_blank', style: 'color:var(--ink-2)' }, f.name),
     ]))) : null,

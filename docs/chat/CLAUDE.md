@@ -11,7 +11,7 @@ The owner's general conversations with Claude inside Otto: any topic, web search
 | Turns | `send` stores the owner's words and hands the CLI the text plus a trailer naming the folder and the attached paths; the turn is a `session` job on resource `session:<id>`, so conversations run concurrently and one conversation's turns, tag job, upload and delete serialize. After the first completed turn of an untitled conversation `tag_session` runs without closing; the `tagged` event carries the title and tags and Graph counts the conversation from then on. Every resumed turn carries a replay preamble of the last `replay_chars` characters of the stored transcript, used only when the CLI has lost the conversation. Events `attached`, `deleted`, `tagged` |
 | Hooks | `numbers` (conversations), `rows` (every conversation as a ROW, the one that moved last first; its tags are the tagger's on the session, then any the owner added), `context` (count, the five most recent titles, the folder rule). No `today`, `queue` or `item`: a conversation opens on its own page |
 | Agent | `builtins` `Write` and `Edit` on top of the read set; no Bash and no Otto tools. Skills `web`, `files`; placeholder `Ask anything…`. Adding a built-in later is a word in `Agent.builtins`; any Otto tool is its name in the manifest |
-| Page | One row per conversation, grouped by the day it last moved, newest first: the title, its tags, and the time of day for one that moved today. Hovering a row offers Tag and a Delete that asks first; `+` in the header opens a blank conversation and puts the cursor in it. The pane holds the conversation: title, day, tags, the files in its folder as links, then the whole transcript — the owner's turns as bubbles, Claude's through markdown, each tool call with its status — with the reply arriving a piece at a time. Under it a box sends the next message into that session, Enter sends and Shift+Enter breaks a line; Delete, the one action the item offers, sits at the end. A finished turn rebuilds the pane and the box keeps both the half-typed line and the caret in it. A stream that reconnects subscribes to a fresh queue, so the frames it missed are lost; for as long as a conversation is open, and wherever its pane was opened from, the page asks the daemon for it again on the shell's refresh interval, and that answer settles the transcript and whether a turn is running, so a dropped `idle` never leaves the box locked. The stream closes as soon as the conversation is no longer the open row, wherever the pane was opened from |
+| Page | One row per conversation, grouped by the day it last moved, newest first: the title, its tags, and the time of day for one that moved today. Hovering a row offers Tag and a Delete that asks first; `+` in the header opens a blank conversation and puts the cursor in it. The pane holds the conversation: title, day, tags, the files in its folder as links, then the whole transcript — the owner's turns as bubbles, Claude's through markdown, each tool call with its status — with the reply arriving a piece at a time. Under it a box sends the next message into that session, Enter sends and Shift+Enter breaks a line; Delete, the one action the item offers, sits at the end. Attaching lives on that box, the only place the conversation's folder is in reach: a file picked through the clip beside it, or dropped anywhere on it, uploads into the folder at once and waits above the box as a chip the next message names, its `×` taking it off that message and leaving the file in the folder; one larger than `upload_max_mb` is refused by the daemon and the refusal is said on screen under the file's own name. A finished turn rebuilds the pane and the box keeps the half-typed line, the files waiting on it and the caret in it. A stream that reconnects subscribes to a fresh queue, so the frames it missed are lost; for as long as a conversation is open, and wherever its pane was opened from, the page asks the daemon for it again on the shell's refresh interval, and that answer settles the transcript and whether a turn is running, so a dropped `idle` never leaves the box locked. The stream closes as soon as the conversation is no longer the open row, wherever the pane was opened from |
 | Departures | title, hue `#d9915b`, speech-bubble icon and rail order 1 (ties with Email; the registry loads packages alphabetically and sorts stably, so Chat sits first after Home) are Otto's; the conversation opens in the shell's detail pane, transcript and composer together, while the drawer beside it stays the page's agent. From the Summary: a chat is tagged after its first turn, not at a close it never has |
 
 ## Patches
@@ -28,19 +28,6 @@ What happens: the tagger writes a conversation's tags into `app_sessions.tags`, 
 Expected: a tag shown as the owner's can be taken off, or is drawn as an identity tag that cannot.
 
 Fix: have the tagger's tags land in `app_tags` alongside the session's JSON, so the platform's tag routes reach them.
-
-### Files can no longer be attached from the page
-
-- Kind: gap
-- Where: `app/static/pages/chat.js`, against `app/modules/chat/routes.py` `upload/{sid}` and `send`'s `files`
-- Found: 09-20-2026, porting the Chat page to the new shell
-- Status: open
-
-What happens: `upload/{sid}` and `send`'s `files` list still work, and the pane lists the folder, but the page draws no attach control and no drop target, so the only way to put a file in a conversation is to have Claude write it.
-
-Expected: a file can be handed to the conversation from the page and named to the next turn.
-
-Fix: an attach control on the pane's box, uploading through `upload/{sid}` and carrying the returned names into `send`.
 
 ### The typed search never reaches what a conversation says
 
@@ -80,3 +67,16 @@ What happens: the tagger's title and tags reach the page only as the `tagged` ev
 Expected: the heading catches up with the row.
 
 Fix: either the repair notices the answer's title differs from the one on screen and reloads the whole item, which rebuilds the pane under a half-typed message, or the pane reads the title from the row rather than from the fetched item. Which of the two depends on whether a rebuild under the cursor is acceptable.
+
+### A file attached while Claude is answering sits there until the turn ends
+
+- Kind: defect
+- Where: `app/modules/chat/routes.py` `upload/{sid}`, against `app/runner.py`
+- Found: 09-20-2026, restoring attachment to the ported page
+- Status: open
+
+What happens: the upload is an action on resource `session:<id>`, the same lock the running turn holds, so a file picked while Claude is answering waits for the whole turn before it is written. The request stays open for as long as that takes, the chip does not appear, nothing on screen says why, and one of the runner's three workers is held waiting.
+
+Expected: a file can be handed to a conversation while it is busy, or the wait is visible.
+
+Fix: the lock is there so that the turn and the upload cannot both invent a name in the folder. Either the upload takes a lock of its own on the folder rather than the session, which makes it independent of the turn, or the page draws the file as waiting until the daemon answers. The first is the daemon's call about what the session lock protects.

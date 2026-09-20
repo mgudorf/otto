@@ -1,6 +1,6 @@
 // Finance: the ledger. One card per kind, the amount on the right, the four totals on the strip.
 import { S, $, h, icon, I, hue, money, dayLabel, chk, titleCell, acts, tagAct, tagLine, card, frow, segEl, confirmPop, closePops, toast, refresh, select, renderMain } from '../core.js';
-import { get, post } from '../api.js';
+import { get, post, q } from '../api.js';
 
 // The kinds, their order and the word each one goes by are the daemon's; the page keeps no second copy.
 const kinds = () => (S.data && S.data.kinds) || [];
@@ -119,8 +119,12 @@ const page = {
   cols: '18px minmax(0,1fr) 92px 148px 156px',
   colsSplit: '18px minmax(0,1fr) 0px 0px 150px',
   chips: ['All'],   // the kinds join them once the daemon has named them
-  async load() {
-    const [left, blank] = await Promise.all([get('/api/finance/left'), get('/api/finance/blank')]);
+  serverQuery: true,   // the daemon reads an entry's note, which a row never carries, so the typed text goes to it
+  // The ledger is small: the daemon answers with every entry the words reach, so nothing is held back.
+  async load({ q: typed }) {
+    const [left, blank] = await Promise.all([
+      get(q('/api/finance/left', { query: typed || '' })),
+      get('/api/finance/blank')]);
     page.chips = ['All', ...(blank.kinds || []).map((k) => (blank.labels || {})[k] || k)];
     return { items: (left.groups || []).flatMap((g) => g.rows), ...blank };
   },

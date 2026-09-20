@@ -109,13 +109,13 @@ def _get(store: Store, message_id: str) -> dict:
 
 
 @router.get("/left")
-def left(request: Request, chip: str = "All", limit: int = ROWS) -> dict:
-    """The chip narrows the whole mailbox, never a page of it, so its rows are the newest of that chip."""
+def left(request: Request, query: str = "", chip: str = "All", limit: int = ROWS) -> dict:
+    """The chip and the typed words narrow the whole mailbox, never a page of it; `more` says rows were held back."""
     store: Store = request.app.state.store
     chip = chip if chip in CHIPS else "All"
-    where, params = _where("", chip)
+    where, params = _where(query, chip)
     total = store.scalar(f"SELECT COUNT(*) FROM email_messages m {where}", tuple(params))
-    out = rows(store, limit, chip)
+    out = rows(store, limit, chip, query)
     return {
         "groups": _group_by_day(out),
         "more": total > len(out),
@@ -239,9 +239,9 @@ def numbers(store: Store) -> dict:
     return {"value": _count(store, "INBOX", "UNREAD"), "label": "unread"}
 
 
-def rows(store: Store, limit: int = ROWS, chip: str = "All") -> list[dict]:
+def rows(store: Store, limit: int = ROWS, chip: str = "All", query: str = "") -> list[dict]:
     """The inbox as ROWs, newest first. The page's list, the cross-module lists and Home's Recent share it."""
-    where, params = _where("", chip if chip in CHIPS else "All")
+    where, params = _where(query, chip if chip in CHIPS else "All")
     records = store.query(f"{SELECT} {where} ORDER BY m.internal_date DESC LIMIT ?", (*params, max(1, limit)))
     return _rows(store, records)
 

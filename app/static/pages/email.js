@@ -1,12 +1,15 @@
 // Email: the inbox as one dense list — a dot, the star, the sender, the subject with its tags, the time, and
-// Archive, Tag and Trash where the pointer is. A chip narrows the whole mailbox, so changing one reloads the list.
+// Archive, Tag and Trash where the pointer is. A chip or a typed word narrows the whole mailbox, so either reloads.
 import { S, h, icon, I, chk, titleCell, stampCell, acts, tagAct, byDay, newest, dayLabel, dateLine, tagLine, confirmPop, toast, refresh, select } from '../core.js';
 import { get, post, q } from '../api.js';
 
 
 const CHIP = { Unread: (i) => i.unread, Flagged: (i) => i.starred, Priority: (i) => i.priority === 'high' };
+const ROWS = 200;         // one list's worth; More asks for another on top of it
 let want = null;          // the chip the list in hand, or the one still on the way, was asked for
+let deep = 1, asked = ''; // how many lists deep the list stands, and the text it was asked with
 const marked = new Set(); // messages this window has already marked read by opening them
+const more = () => { deep += 1; refresh(); };
 
 // A press on a row is what opens a message; the keyboard walks the list, and walking past a message must not write
 // to Gmail. Only a release on the row the press started on names that row, the pane that draws it spends the name,
@@ -60,16 +63,19 @@ export default {
   cols: '18px 8px 14px 184px minmax(0,1fr) 70px',
   colsSplit: '18px 8px 14px 0px minmax(0,1fr) 64px',
   chips: ['All', 'Unread', 'Flagged', 'Priority'],
+  serverQuery: true,   // email_fts searches the whole mailbox, so the typed text goes to the daemon, not to the rows in hand
 
   // The list belongs to the chip it was asked for, so a chip changed while the request was out asks again rather
-  // than leaving the wrong mailbox on screen.
-  async load() {
+  // than leaving the wrong mailbox on screen. New words are a new search: the list goes back to its first stretch.
+  async load({ q: typed }) {
+    const text = typed || '';
+    if (text !== asked) { deep = 1; asked = text; }
     let chip, d;
     do {
       chip = want = S.chip.email || 'All';
-      d = await get(q('/api/email/left', { chip }));
+      d = await get(q('/api/email/left', { chip, query: text, limit: ROWS * deep }));
     } while (chip !== (S.chip.email || 'All'));
-    return { items: d.groups.flatMap((g) => g.rows), readOnOpen: !!d.read_on_open };
+    return { items: d.groups.flatMap((g) => g.rows), more: !!d.more, readOnOpen: !!d.read_on_open };
   },
 
   // The daemon narrows the whole mailbox, so a chip it has not served yet asks for its own list.
@@ -95,7 +101,10 @@ export default {
   ],
   rowClass: (i) => (i.unread ? 'unread' : 'dim'),
 
-  tools: () => [h('button', { class: 'btn quiet', onclick: () => act('sync') }, 'Sync now')],
+  tools: (d) => [
+    d.more ? h('button', { class: 'btn quiet', onclick: more }, 'More') : null,
+    h('button', { class: 'btn quiet', onclick: () => act('sync') }, 'Sync now'),
+  ],
 
   bulk: (picked) => [
     h('button', { title: 'Archive', class: 'ico btn', onclick: () => act('archive', picked) }, icon(I.archive)),

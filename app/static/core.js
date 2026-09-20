@@ -170,7 +170,8 @@ export function applyTokens(list) {
       else if (k === 'from') list = list.filter((i) => (i.from || '').toLowerCase().includes(v));
     }
   }
-  if (S.q) { const q = S.q.toLowerCase(); list = list.filter((i) => itemText(i).includes(q)); }
+  const P = configOf(S.page);
+  if (S.q && !(P && P.serverQuery)) { const q = S.q.toLowerCase(); list = list.filter((i) => itemText(i).includes(q)); }
   return list;
 }
 export function addToken(kind, value) {
@@ -224,16 +225,22 @@ function omniPick(row) {
   addToken(row.tok.kind, row.tok.value);
   inp.focus();
 }
+let qTimer = null;
 function bindOmni() {
   const inp = $('#omniInput');
-  inp.addEventListener('input', () => { S.q = inp.value.trim(); S.cursor = -1; omniSuggest(); renderMain(); });
+  inp.addEventListener('input', () => {
+    S.q = inp.value.trim(); S.cursor = -1; omniSuggest(); renderMain();
+    // A page that searches its whole table is asked again, a moment after the typing stops rather than on every letter.
+    const P = configOf(S.page);
+    if (P && P.serverQuery) { clearTimeout(qTimer); qTimer = setTimeout(() => { if (S.q === inp.value.trim()) refresh(); }, 300); }
+  });
   inp.addEventListener('keydown', (e) => {
     const pop = $('#omniPop');
     if (!pop.hidden && omniRows.length) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); omniCursor = (omniCursor + (e.key === 'ArrowDown' ? 1 : omniRows.length - 1)) % omniRows.length; omniHighlight(); return; }
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); omniPick(omniRows[omniCursor]); return; }
     }
-    if (e.key === 'Escape') { inp.value = ''; S.q = ''; S.tokens = []; inp.blur(); pop.hidden = true; if (S.page.startsWith('tag:')) refresh(); else renderAll(); return; }
+    if (e.key === 'Escape') { inp.value = ''; S.q = ''; S.tokens = []; inp.blur(); pop.hidden = true; clearTimeout(qTimer); const P = configOf(S.page); if (S.page.startsWith('tag:') || (P && P.serverQuery)) refresh(); else renderAll(); return; }
     if (e.key === 'Backspace' && !inp.value && S.tokens.length) { S.tokens.pop(); if (S.page.startsWith('tag:')) refresh(); else renderAll(); return; }
     if (e.key === ' ' || e.key === 'Enter') {
       const words = inp.value.trim().split(/\s+/);
@@ -541,7 +548,7 @@ export async function refresh(fromTimer) {
   const P = configOf(page);
   await Promise.all([loadShell(), loadPulse(), loadTags()]);
   if (P && P.load) {
-    try { const data = await P.load(); if (S.page === page) { S.data = data; S.error = null; } }
+    try { const data = await P.load({ q: S.q, tokens: S.tokens.map((t) => ({ ...t })) }); if (S.page === page) { S.data = data; S.error = null; } }
     catch (e) { S.error = e.message; }
   } else if (S.page === page && !S.data) S.data = {};
   if (fromTimer && typing()) { renderTop(); return; }
