@@ -72,8 +72,11 @@ def test_boot_renames_an_older_database(config):
     assert store.one("SELECT task, module, resource FROM app_jobs") == {"task": "second_brain.suggest", "module": "second_brain", "resource": "second_brain"}
     assert store.scalar("SELECT module FROM app_sessions") == "second_brain" and store.scalar("SELECT page FROM feedback_items") == "second_brain"
     assert store.cursor("second_brain.suggest") == "2026-09-01T00:00:00+00:00" and store.cursor("memory.suggest") is None
-    assert store.setting("ui.start_page") == "second_brain" and store.setting("modules.second_brain.scheduled") is False
+    assert store.setting("modules.second_brain.scheduled") is False
     assert not [k for k in store.all_settings() if "memory" in k]
+    # one page means no start page: the setting is gone from the config, and the row an older database carries is
+    # left as it lies, neither reseeded nor rewritten by the module rename
+    assert not hasattr(config.ui, "start_page") and store.setting("ui.start_page") == "memory"
     # the columns named after the old name were renamed in place by the modules' setup, rows kept
     assert store.query("SELECT item_id, tag FROM second_brain_tags") == [{"item_id": 7, "tag": "sky"}]
     assert store.query("SELECT id, item_ids FROM second_brain_suggestions") == [{"id": 1, "item_ids": "[7]"}]

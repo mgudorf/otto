@@ -1,4 +1,4 @@
-"""Revision, registry, and the read-only guarantee for scheduled agent work."""
+"""Revision, registry, facets, and the read-only guarantee for scheduled agent work."""
 
 import ast
 import sys
@@ -12,7 +12,11 @@ from app.runner import JobContext
 from app.store import add_tags, all_tags, remove_tag, tags_for
 
 FORBIDDEN_IN_TASKS = {"session_turn", "oneshot", "write_tools"}
-ACTION_KEYS = {"verb", "label", "primary", "confirm", "href", "removes"}    # everything the inspector reads off an action
+BACKEND_ONLY = {"home", "graph", "feedback"}                 # the modules that list no rows, so carry no facet
+BROWSER_VERBS = {"edit", "answer", "explain", "update", "due", "query", "open", "link", "export"}   # core.js HERE: run here, never sent to the daemon
+# Offered on a row, served by no module and absent from core.js: clicking one would answer 404. Nothing is stranded;
+# a verb that lands here fails the test below.
+STRANDED: set[tuple[str, str]] = set()   # a verb no route serves and core.js does not run itself
 
 
 def test_revision_changes_with_content(tmp_path: Path):
@@ -43,6 +47,21 @@ def test_registry_loads_real_modules():
             if hook is not None:
                 assert "request" not in inspect.signature(hook).parameters, f"{m.name}: {hook.__name__} is a route, not a hook"
     assert reg.get("home").numbers is None and reg.get("home").context is not None
+
+
+def test_facets_are_the_modules_that_list_rows():
+    """A facet is the module's immutable tag: the one fixed tag its rows carry, its group on the feed and its lobe on
+    the brain. Exactly the modules that list rows have one, and no two share a facet."""
+    reg = Registry()
+    reg.load()
+    facets = {m.name: m.manifest.facet for m in reg.ordered()}
+    assert facets["second_brain"] == "entry" and facets["chat"] == "chats" and facets["system"] == "routine"
+    assert {n for n, f in facets.items() if f is None} == BACKEND_ONLY
+    named = [f for f in facets.values() if f]
+    assert len(named) == len(set(named)) == 9
+    for m in reg.ordered():
+        assert (m.manifest.facet is not None) == (m.rows is not None), f"{m.name}: a facet and rows() go together"
+    assert reg.get("second_brain").manifest.title == "Entry"
 
 
 def test_registry_skips_broken_module(tmp_path: Path, monkeypatch):
@@ -93,21 +112,25 @@ def test_tags_are_one_system(store):
     assert tags_for(store, "email", ["18f2a"])["18f2a"] == ["thesis"]
 
 
-def _action_literals(tree: ast.AST) -> list[dict]:
-    """Every {"verb": ...} dict in a routes.py, as {key: value node}: what item() offers the inspector."""
+def _verb_pairs(tree: ast.AST) -> list[tuple[str, str]]:
+    """Every [verb, "Label"] pair a routes.py writes: a two-element list of a lowercase verb and its label."""
     out = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Dict):
+        if not isinstance(node, ast.List) or len(node.elts) != 2:
             continue
-        pairs = {k.value: v for k, v in zip(node.keys, node.values) if isinstance(k, ast.Constant) and isinstance(k.value, str)}
-        if "verb" in pairs:
-            out.append(pairs)
+        if not all(isinstance(e, ast.Constant) and isinstance(e.value, str) for e in node.elts):
+            continue
+        verb, label = (e.value for e in node.elts)
+        if verb and verb.replace("_", "").isalnum() and verb.islower():
+            out.append((verb, label))
     return out
 
 
-def test_item_verbs_are_routes_the_module_serves():
-    """Home's inspector posts /api/<module>/action/<verb> with {id} and reads nothing else off an action, so a verb
-    without an href must be a served action and a misspelled key (removes, not remove) must fail here, not in the browser."""
+def test_row_verbs_are_routes_the_module_serves():
+    """A row offers [verb, "Label"] pairs and the browser posts /api/verb, which dispatches to the module's own
+    /action/<verb>. A verb the module does not serve and core.js does not run itself answers 404 when the owner
+    clicks it, so a misspelling (remove for forget) must fail here rather than in the browser."""
+    stranded: set[tuple[str, str]] = set()
     for routes_py in sorted((ROOT / "app" / "modules").glob("*/routes.py")):
         name = routes_py.parent.name
         tree = ast.parse(routes_py.read_text("utf-8"))
@@ -115,12 +138,11 @@ def test_item_verbs_are_routes_the_module_serves():
         for node in tree.body:      # the module's action table, whatever it is called
             if isinstance(node, ast.Assign) and {t.id for t in node.targets if isinstance(t, ast.Name)} & {"ACTIONS", "VERBS"}:
                 served |= {k.value for k in node.value.keys if isinstance(k, ast.Constant)}
-        for action in _action_literals(tree):
-            assert set(action) <= ACTION_KEYS, f"{name}: an action carries {sorted(set(action) - ACTION_KEYS)}"
-            verb = action["verb"]
-            if "href" in action or not isinstance(verb, ast.Constant):
-                continue
-            assert verb.value in served, f"{name}: item offers {verb.value!r}, which is no action it serves"
+        for verb, label in _verb_pairs(tree):
+            assert label[:1].isupper(), f"{name}: {verb!r} is offered as {label!r}, which is no label"
+            if verb not in served and verb not in BROWSER_VERBS:
+                stranded.add((name, verb))
+    assert stranded == STRANDED, f"verbs nothing runs changed: {sorted(stranded ^ STRANDED)}"
 
 
 def test_tasks_never_reach_interactive_claude():

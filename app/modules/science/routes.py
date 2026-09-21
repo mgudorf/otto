@@ -14,19 +14,12 @@ router = APIRouter(prefix="/api/science")
 
 KEY = "science"          # broadcast key for the events stream
 RESOURCE = "science"     # jobs that touch the root, not one kernel
-FIXED = {"ipynb": "notebook", "py": "script"}   # what a file is, as its identity tag
+FACET = "science"
+TYPE = {"ipynb": "notebook", "py": "script"}   # which renderer the page draws a file in
 
 
 def _root():
     return state.config.root
-
-
-def _live(file_id: str) -> bool:
-    return file_id in state.scripts or state.kernels.get(_root() / file_id) is not None
-
-
-def _today_row(f: dict) -> dict:
-    return {"id": f["id"], "module": "science", "text": f["name"], "stamp": f["mtime"], "live": _live(f["id"])}
 
 
 def _every(seconds: int) -> str:
@@ -38,17 +31,6 @@ def _every(seconds: int) -> str:
 
 def _schedule_text(row) -> str:
     return f"every {_every(row['every_seconds'])}" + (f" at {row['at']}" if row["at"] else "")
-
-
-def _file_row(f: dict, tags: list[str], schedule: str | None) -> dict:
-    k = state.kernels.get(_root() / f["id"])
-    return {
-        "id": f["id"], "module": "science", "title": f["id"], "when": f["mtime"],
-        "tags": tags, "fixed": [FIXED[f["ext"]]], "kind": f["ext"],
-        "kernel": k.state if k else None,
-        "running": f["id"] in state.scripts or bool(k and k.state == "busy"),
-        "schedule": schedule,
-    }
 
 
 @router.get("/left")
@@ -280,38 +262,82 @@ SCHEDULE_ACTIONS = {"schedule": _schedule, "unschedule": _unschedule}
 
 
 # ---- shell hooks ---------------------------------------------------------------------------
-def _actions(kind: str, kernel, running: bool, scheduled: bool) -> list[dict]:
-    """What the pane may do to this file. A script running now offers the interrupt in place of the run."""
-    out = [{"verb": "interrupt", "label": "Interrupt"}] if kind == "py" and running else [{"verb": "run", "label": "Run" if kind == "py" else "Run all", "primary": True}]
-    if kernel is not None:   # a restart and a shut down throw the kernel's variables away, so both ask first
-        out += [
-            {"verb": "interrupt", "label": "Interrupt"},
-            {"verb": "restart", "label": "Restart", "confirm": "Restart this kernel? Everything it holds goes."},
-            {"verb": "shutdown", "label": "Shut down", "confirm": "Shut this kernel down? Everything it holds goes."},
-        ]
-    out.append({"verb": "unschedule", "label": "Unschedule"} if scheduled else {"verb": "schedule", "label": "Schedule"})
+def _verbs(ext: str, kernel, running: bool, scheduled: bool) -> list[list[str]]:
+    """What the facet allows on this file. A script running now offers the interrupt in place of the run."""
+    out = [["interrupt", "Interrupt"]] if ext == "py" and running else [["run", "Run" if ext == "py" else "Run all"]]
+    if kernel is not None:
+        out += [["interrupt", "Interrupt"], ["restart", "Restart kernel"], ["shutdown", "Shut down kernel"]]
+    out.append(["unschedule", "Unschedule"] if scheduled else ["schedule", "Schedule"])
     return out
+
+
+def _status(ext: str, kernel: str | None, running: bool, schedule: str | None) -> str:
+    """The stamp the page carries: what the kernel or the process is doing, then the owner's schedule."""
+    now = "running" if running else ("idle" if ext == "py" else kernel or "no kernel")
+    return f"{now}, {schedule}" if schedule else now
+
+
+def _row(file_id: str, ext: str, when: str, tags: list[str], schedule: str | None) -> dict:
+    """One ROW: the file is its own title, science is its only fixed tag, the extension picks the renderer."""
+    k = state.kernels.get(_root() / file_id)
+    running = file_id in state.scripts if ext == "py" else bool(k and k.state == "busy")
+    row = {
+        "id": file_id, "module": "science", "title": file_id, "when": when,
+        "fixed": [FACET], "tags": tags, "type": TYPE[ext],
+        "status": _status(ext, k.state if k else None, running, schedule),
+        "verbs": _verbs(ext, k, running, schedule is not None),
+    }
+    if schedule:
+        row["right"] = schedule
+    return row
+
+
+OUT_TEXT = {
+    "stream": lambda o: o["text"],
+    "text": lambda o: o["text"],
+    "error": lambda o: f"{o['ename']}: {o['evalue']}",
+    "html": lambda o: o["html"],
+    "image": lambda o: "[image]",
+}
+
+
+def _cells(nb, running: dict | None) -> list[dict]:
+    """The notebook as the page reads it: a gutter label, the source, and every output flattened into one block."""
+    out = []
+    for c in notebook.cells(nb, running):
+        outputs = c["outputs"]
+        out.append({
+            "g": f"[{c['execution_count']}]" if c["execution_count"] else "",
+            "code": c["source"],
+            "out": "\n".join(OUT_TEXT[o["kind"]](o) for o in outputs),
+            "err": any(o["kind"] == "error" for o in outputs),
+            "run": c["running"],
+        })
+    return out
+
+
+def _script_cells(store: Store, path, file_id: str) -> list[dict]:
+    """A script is one cell: the file, under its newest finished run — a run still going has no output yet."""
+    last = store.one(
+        "SELECT exit_code, output FROM science_script_runs WHERE path = ? AND status != 'running' ORDER BY id DESC LIMIT 1",
+        (file_id,),
+    )
+    return [{
+        "g": "", "code": path.read_text("utf-8", "replace"), "out": (last and last["output"]) or "",
+        "err": bool(last and last["exit_code"]), "run": file_id in state.scripts,
+    }]
 
 
 def item(store: Store, file_id: str) -> dict:
     path = notebook.resolve(_root(), file_id)
-    kind = path.suffix[1:]
+    ext = path.suffix[1:]
     sched = store.one("SELECT * FROM science_schedules WHERE path = ?", (file_id,))
+    row = _row(file_id, ext, notebook.mtime_iso(path.stat().st_mtime), tags_for(store, "science", [file_id])[file_id],
+               _schedule_text(sched) if sched else None)
+    if ext == "py":
+        return {**row, "cells": _script_cells(store, path, file_id)}
     k = state.kernels.get(path)
-    running = file_id in state.scripts if kind == "py" else bool(k and k.state == "busy")
-    base = {
-        "id": file_id, "module": "science", "title": file_id, "kind": kind, "when": notebook.mtime_iso(path.stat().st_mtime),
-        "tags": tags_for(store, "science", [file_id])[file_id], "fixed": [FIXED[kind]],
-        "kernel": k.state if k else None, "running": running,
-        "schedule": _schedule_text(sched) if sched else None, "next_run": sched["next_run"] if sched else None,
-        "actions": _actions(kind, k, running, sched is not None),
-    }
-    if kind == "py":
-        # The newest finished run: a run still going has no output yet, so it would blank the pane.
-        last = store.one("SELECT started_at, finished_at, status, exit_code, output FROM science_script_runs WHERE path = ? AND status != 'running' ORDER BY id DESC LIMIT 1", (file_id,))
-        return {**base, "cells": [], "source": path.read_text("utf-8", "replace"), "last": last}
-    nb = notebook.read(path)
-    return {**base, "cells": notebook.cells(nb, k.running if k else None), "source": None, "last": None}
+    return {**row, "cells": _cells(notebook.read(path), k.running if k else None)}
 
 
 def numbers(store: Store) -> dict:
@@ -323,12 +349,12 @@ def rows(store: Store, limit: int = 200) -> list[dict]:
     files = notebook.scan(_root())[: max(1, limit)]
     tags = tags_for(store, "science", [f["id"] for f in files])
     sched = {r["path"]: _schedule_text(r) for r in store.query("SELECT path, every_seconds, at FROM science_schedules")}
-    return [_file_row(f, tags.get(f["id"]) or [], sched.get(f["id"])) for f in files]
+    return [_row(f["id"], f["ext"], f["mtime"], tags.get(f["id"]) or [], sched.get(f["id"])) for f in files]
 
 
 def today(store: Store) -> list[dict]:
     start = iso(datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0))
-    return [_today_row(f) for f in notebook.scan(_root()) if f["mtime"] >= start]
+    return [r for r in rows(store) if r["when"] >= start]
 
 
 def context(store: Store, registry) -> str:

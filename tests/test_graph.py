@@ -1,13 +1,18 @@
-"""Graph module: rebuild from the tag sources, curation overlays, the write split, and the routes."""
+"""Graph module: rebuild from the tag sources, curation overlays, the write split, and the routes.
+
+Graph and System are the two modules here that list no rows of their own, so the one page and the one agent are
+proved against them: what carries no facet stays off the feed, and what has no page still reaches Otto.
+"""
 
 import json
 
+from app.api import _otto
 from app.config import ROOT
 from app.daemon import build as build_app
 from app.modules.graph import build, tasks, tools
 from app.store import add_tags, now_iso
 from tests.conftest import run
-from tests.test_app import client_for
+from tests.test_app import client_for, settle
 
 SECOND_BRAIN_SCHEMA = (ROOT / "app" / "modules" / "second_brain" / "schema.sql").read_text("utf-8")
 GRAPH_SCHEMA = (ROOT / "app" / "modules" / "graph" / "schema.sql").read_text("utf-8")
@@ -134,10 +139,88 @@ def test_graph_routes(config):
             assert g["built_at"] == app.state.store.cursor("graph.rebuild")
             g = (await c.get("/api/graph/graph")).json()
             assert g["edges"] == [{"a": "python", "b": "sqlite", "kind": "cooccur", "weight": 1}]
-            numbers = (await c.get("/api/home/numbers")).json()
-            assert next(n for n in numbers if n["module"] == "graph")["value"] == 2
+            assert (await c.get("/api/graph/item/python")).json()["count"] == 2
             shell = (await c.get("/api/shell")).json()
-            assert next(m for m in shell["modules"] if m["name"] == "graph")["hue"] == "#C1BE75"
+            g = next(m for m in shell["modules"] if m["name"] == "graph")
+            assert g["hue"] == "#C1BE75" and g["facet"] is None   # a tag is not an item: the graph draws the brain and lists nothing
+            assert all(n["module"] != "graph" for n in (await c.get("/api/home/numbers")).json())
+            assert all(r["module"] != "graph" for r in (await c.get("/api/feed?mode=recent")).json()["items"])
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())
+
+
+def test_system_lists_its_routines(config):
+    """Every scheduled task is a routine on the feed: what it runs, when it last ran, and the switches it offers."""
+
+    async def main():
+        app = build_app(config)
+        await app.state.runner.start()
+        app.state.scheduler.sync_tasks()   # the rows the daemon writes at boot, which this module lists
+        store = app.state.store
+        async with client_for(app) as c:
+            mine = lambda d: [r for r in d["items"] if r["module"] == "system"]
+            listed = mine((await c.get("/api/feed?mode=recent")).json())
+            assert {r["id"] for r in listed} >= {"graph.rebuild", "science.reap"}
+            assert all(r["fixed"] == ["routine"] and r["type"] == "routine" and r["tags"] == [] for r in listed)
+            row = next(r for r in listed if r["id"] == "graph.rebuild")
+            assert (row["title"], row["snip"], row["right"]) == ("graph.rebuild", "every 15 m", "every 15 m")
+            assert row["when"] is None and row["late"] is False and row["paused"] is False
+            assert row["kv"] == [["Every", "every 15 m"], ["Last run", "never"], ["Last result", "nothing said"], ["Resource", "graph"]]
+            assert row["verbs"] == [["run", "Run now"], ["pause", "Pause"]]
+            assert next(r for r in listed if r["id"] == "newsfeed.run")["snip"] == "nightly"   # an LLM task runs in the window, not on its interval
+            assert mine((await c.get("/api/feed?mode=priority")).json()) == []
+
+            # only what broke waits on the owner
+            store.execute("UPDATE app_tasks SET last_run = ?, last_status = 'failed', last_result = 'boom' WHERE name = ?", (now_iso(), "graph.rebuild"))
+            waiting = mine((await c.get("/api/feed?mode=priority")).json())
+            assert [r["id"] for r in waiting] == ["graph.rebuild"] and waiting[0]["waits"] == 1
+            assert waiting[0]["late"] is True and waiting[0]["right"] == "failed" and ["Last result", "boom"] in waiting[0]["kv"]
+
+            paused = (await c.post("/api/verb", json={"module": "system", "id": "graph.rebuild", "verb": "pause"})).json()
+            assert paused == {"ok": True, "said": "disabled graph.rebuild", "removes": False}
+            off = next(r for r in mine((await c.get("/api/feed?mode=recent")).json()) if r["id"] == "graph.rebuild")
+            assert off["paused"] is True and off["right"] == "failed" and off["verbs"][1] == ["resume", "Resume"]
+            assert (await c.post("/api/verb", json={"module": "system", "id": "graph.rebuild", "verb": "resume"})).json()["said"] == "enabled graph.rebuild"
+
+            # Run now hands the task to the runner as the clock would, so the run writes its own result back
+            assert (await c.post("/api/verb", json={"module": "system", "id": "graph.rebuild", "verb": "run"})).json()["said"] == "run"
+            await settle(app)
+            t = store.one("SELECT last_status, last_result FROM app_tasks WHERE name = ?", ("graph.rebuild",))
+            assert t["last_status"] == "done" and t["last_result"] == "0 nodes, 0 edges"
+            assert (await c.post("/api/verb", json={"module": "system", "id": "nope", "verb": "run"})).status_code == 404
+            assert (await c.post("/api/verb", json={"module": "system", "id": "graph.rebuild", "verb": "nonsense"})).status_code == 404
+        await app.state.runner.drain(1)
+        store.close()
+
+    run(main())
+
+
+def test_otto_is_every_agent_at_once(config):
+    """One agent behind the drawer: its tools, skills and prompt are the union of the enabled modules', and a module
+    switched off takes its own out of the union."""
+
+    async def main():
+        app = build_app(config)
+        await app.state.runner.start()
+        async with client_for(app) as c:
+            agents = [m for m in app.state.registry.ordered() if m.manifest.agent]
+            otto = _otto(app.state)
+            assert set(otto.manifest.agent.read_tools) == {t for m in agents for t in m.manifest.agent.read_tools}
+            assert set(otto.manifest.agent.write_tools) == {t for m in agents for t in m.manifest.agent.write_tools}
+            assert {"graph_nodes", "graph_link"} <= set(otto.manifest.agent.read_tools) | set(otto.manifest.agent.write_tools)
+            assert all(m.prompt in otto.prompt for m in agents if m.prompt)
+
+            s = (await c.get("/api/session/otto")).json()
+            assert s["sessions"] == [] and s["agent"]["cmd"] == "claude · otto"
+            assert s["agent"]["skills"] == list(otto.manifest.agent.skills) and "link" in s["agent"]["skills"]
+            assert s["context_label"] == ", ".join(m.manifest.title for m in agents)   # what is open, not a count
+
+            assert (await c.put("/api/settings", json={"modules.newsfeed.enabled": False})).status_code == 200
+            assert "newsfeed_search" not in _otto(app.state).manifest.agent.read_tools
+            assert "Newsfeed" not in (await c.get("/api/session/otto")).json()["context_label"]
+            assert (await c.get("/api/session/system")).status_code == 404   # no agent of its own, and none is invented
         await app.state.runner.drain(1)
         app.state.store.close()
 

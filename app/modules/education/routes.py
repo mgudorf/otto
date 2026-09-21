@@ -4,6 +4,7 @@ graded and discussed. The owner completes a quiz once every part is scored. Page
 from __future__ import annotations
 
 import json
+import re
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
@@ -14,11 +15,12 @@ from app.modules.education.questions import (
     parts_of, question, status_of, tags_of, topic_rows,
 )
 from app.runner import JobFailed
-from app.store import Store, now_iso, tag_key, tags_for
+from app.store import Store, now_iso, parse, tag_key, tags_for
 
 router = APIRouter(prefix="/api/education")
 
 MODULE = "education"
+FACET = "education"
 RESOURCE = "education"                                         # page actions
 RESOURCE_LLM = "education.llm"                                 # the generate run: serializes with itself, never with page actions
 ROW_LIMIT = 200                                                # the completed history one list carries; the client narrows it
@@ -37,56 +39,68 @@ def _part_facts(store: Store, ids: list[int]) -> dict[int, dict]:
     return {r["question_id"]: r for r in rows}
 
 
-def _owner_tags(q: dict, shared: list[str]) -> list[str]:
-    """The owner's tags: the question's own list first, then any the shell wrote to app_tags."""
-    own = [t for t in (tag_key(t) for t in tags_of(q)) if t]
-    return own + [t for t in shared if t not in own]
+def _when(ts: str) -> str:
+    """A ROW's `when`: the owner's wall clock, so one feed of every module's rows is in one time."""
+    return parse(ts).astimezone().strftime("%Y-%m-%dT%H:%M")
+
+
+def _row_tags(q: dict, shared: list[str]) -> list[str]:
+    """The topic and its facet lead, then the question's own tags and any the shell wrote to app_tags."""
+    out = [tag_key(q["topic"])] + ([tag_key(q["topic_tag"])] if q["topic_tag"] else [])
+    for t in [tag_key(t) for t in tags_of(q)] + shared:
+        if t and t not in out:
+            out.append(t)
+    return out
+
+
+def _verbs(q: dict) -> list[list[str]]:
+    """Complete once every part is graded, delete while the quiz is open; a completed quiz offers nothing."""
+    if status_of(q) != "active":
+        return []
+    ready = q["parts"] and q["graded_parts"] == q["parts"]
+    return ([["complete", "Complete quiz"]] if ready else []) + [["delete", "Delete"]]
 
 
 def _row(q: dict, tags: list[str], facts: dict | None) -> dict:
-    """One ROW. `pct` fills the bar while the question is open, `score` replaces it once the quiz is complete."""
+    """One ROW. `pct` fills the bar while the question is open, and reads 100 once the quiz is complete."""
     done = q["completed_at"] is not None
     answered = (facts or {}).get("answered") or 0
-    fixed = [tag_key(q["topic"])] + ([tag_key(q["topic_tag"])] if q["topic_tag"] else [])
     return {
-        "id": q["id"], "module": MODULE, "title": q["title"], "when": q["completed_at"] or q["created_at"],
-        "fixed": fixed, "tags": [t for t in tags if t not in fixed], "snippet": (facts or {}).get("titles") or "",
-        "topic": q["topic"], "difficulty": q["difficulty"], "status": status_of(q), "score": q["score"],
+        "id": q["id"], "module": MODULE, "title": q["title"], "when": _when(q["completed_at"] or q["created_at"]),
+        "fixed": [FACET], "tags": tags, "type": "question", "snip": (facts or {}).get("titles") or "",
+        "topic": q["topic"], "difficulty": q["difficulty"], "status": status_of(q), "score": q["score"], "done": done,
         "pct": 100 if done else (round(100 * answered / q["parts"]) if q["parts"] else 0),
+        "verbs": _verbs(q),
     }
 
 
 def _rows(store: Store, qs: list[dict]) -> list[dict]:
     ids = [q["id"] for q in qs]
     shared, facts = tags_for(store, MODULE, ids), _part_facts(store, ids)
-    return [_row(q, _owner_tags(q, shared.get(q["id"], [])), facts.get(q["id"])) for q in qs]
+    return [_row(q, _row_tags(q, shared.get(q["id"], [])), facts.get(q["id"])) for q in qs]
+
+
+def _defs(markdown: str | None) -> list[str]:
+    """The definitions block as the page's entries: one per bold name, the shape generate.md asks for."""
+    return [d.strip() for d in re.split(r"\n(?=\*\*)", (markdown or "").strip()) if d.strip()]
 
 
 def detail(store: Store, question_id: int) -> dict | None:
-    """The item inspector's shape. `text` is self-contained for Home's generic inspector; the page renders definitions,
-    premise and prompts as markdown. Rubrics and the tutor's notes never leave the server this way."""
+    """The ROW plus the question itself: the definitions, the premise and every part's ask, as markdown the page
+    renders. Rubrics and the tutor's notes never leave the server this way."""
     q = question(store, question_id)
     if q is None:
         return None
-    st = status_of(q)
     parts = [
-        {"n": p["n"], "label": label(p["n"]), "title": part_title(p), "text": p["text"], "answer": p["answer"], "answered_at": p["answered_at"],
-         "verdict": p["verdict"], "score": p["score"], "graded_at": p["graded_at"]}
+        {"n": p["n"], "label": label(p["n"]), "title": part_title(p), "ask": p["text"], "answer": p["answer"],
+         "answered_at": p["answered_at"], "verdict": p["verdict"], "score": p["score"], "graded_at": p["graded_at"]}
         for p in parts_of(store, q["id"])
     ]
-    actions = []
-    if st == "active":
-        if parts and all(p["score"] is not None for p in parts):
-            actions.append({"verb": "complete", "label": "Complete quiz", "primary": True})
-        actions.append({"verb": "delete", "label": "Delete", "confirm": f'Delete "{q["title"]}"?', "removes": True})
-    kind = f"{q['topic']} · d{q['difficulty']}" + (f" · {q['score']}" if st == "completed" else "")
-    setup = (f"{q['definitions']}\n\n" if q["definitions"] else "") + q["premise"]
-    text = f"{q['title']}\n\n{setup}\n\n" + "\n".join(f"({p['label']}) {p['title']}: {p['text']}" for p in parts)
     return {
-        **_rows(store, [q])[0], "kind": kind, "text": text,
-        "definitions": q["definitions"], "premise": q["premise"], "topic_id": q["topic_id"],
+        **_rows(store, [q])[0],
+        "defs": _defs(q["definitions"]), "premise": q["premise"], "topic_id": q["topic_id"],
         "source": q["source"], "created_at": q["created_at"], "completed_at": q["completed_at"],
-        "parts": parts, "feedback": feedback_of(store, q["id"]), "actions": actions,
+        "parts": parts, "feedback": feedback_of(store, q["id"]),
     }
 
 
@@ -308,8 +322,13 @@ def numbers(store: Store) -> dict:
     return {"value": due_count(store), "label": "due"}
 
 
-def today(store: Store) -> list[dict]:
+def queue(store: Store) -> list[dict]:
+    """Every question still open waits on the owner to answer it."""
     return _rows(store, due_queue(store))
+
+
+def today(store: Store) -> list[dict]:
+    return queue(store)
 
 
 def rows(store: Store, limit: int = ROW_LIMIT) -> list[dict]:

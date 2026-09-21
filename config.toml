@@ -1,6 +1,6 @@
 # Boot values. Changing anything here requires a daemon restart (relaunch `python -m app`).
-# Live settings (start page, refresh, time format, rows per page, module toggles)
-# are seeded from [ui] on first start and edited from the Settings page afterwards.
+# Live settings (refresh, time format, rows per page, module toggles)
+# are seeded from [ui] on first start and edited from the app afterwards.
 
 [server]
 host = "127.0.0.1"
@@ -68,7 +68,6 @@ items_per_run = 3           # entries a search may add per nightly run when the 
 max_turns = 12             # per filing run: list docs, read a few, reply
 
 [ui]
-start_page = "home"
 refresh_seconds = 30
 time_format = "24h"
 page_size = 40

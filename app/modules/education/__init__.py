@@ -14,6 +14,7 @@ MANIFEST = Manifest(
     hue="#86AAE3",
     icon='<path d="M2 8l8-4 8 4-8 4-8-4Z"></path><path d="M6 10v4c0 1.2 2 2 4 2s4-.8 4-2v-4"></path><path d="M18 8v5"></path>',
     order=2,
+    facet="education",
     schedules=(Schedule(task="generate", every="24h", resource="education", llm=True),),
     agent=Agent(
         placeholder="Ask the tutor…",

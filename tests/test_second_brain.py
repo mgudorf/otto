@@ -1,10 +1,11 @@
-"""Second Brain module: the suggest task offline, the task-only actions, and the read / write tool split."""
+"""Second Brain module: the suggest task offline, the task-only actions, the Entry facet its rows carry, and the read / write tool split."""
 
 import dataclasses
 
 from app.config import ROOT, SecondBrain
 from app.daemon import build
 from app.modules.second_brain import MANIFEST
+from app.modules.second_brain.routes import rows as rows_hook
 from app.modules.second_brain.tasks import suggest
 from app.modules.second_brain.tools import register
 from app.runner import JobFailed, Runner
@@ -80,13 +81,16 @@ def test_done_and_suggestion_actions(config):
         async with client_for(app) as c:
             mid = (await c.post("/api/second_brain/action/capture", json={"kind": "task", "text": "call the bank"})).json()["id"]
             item = (await c.get(f"/api/second_brain/item/{mid}")).json()
-            assert item["actions"][0] == {"verb": "done", "label": "Done", "primary": True}
-            assert (await c.post("/api/second_brain/action/done", json={"id": mid})).json() == {"id": mid}
+            # the facet is the row's only fixed tag; what the item is becomes its type and a tag to narrow on
+            assert item["fixed"] == ["entry"] and item["type"] == "task" and item["tags"] == ["task"]
+            assert item["verbs"] == [["done", "Done"], ["forget", "Forget"]] and item["done"] is False
+            assert (await c.post("/api/verb", json={"module": "second_brain", "id": mid, "verb": "done"})).json() == {
+                "ok": True, "said": "completed call the bank", "removes": False}
             item = (await c.get(f"/api/second_brain/item/{mid}")).json()
-            assert item["done"] is True and [a["verb"] for a in item["actions"]] == ["reopen", "forget"]
+            assert item["done"] is True and item["verbs"] == [["reopen", "Reopen"], ["forget", "Forget"]]
             left = (await c.get("/api/second_brain/left?chip=Tasks")).json()
             task = left["groups"][0]["rows"][0]
-            assert task["done"] is True and task["fixed"] == ["task"] and task["title"] == "call the bank"
+            assert task["done"] is True and task["fixed"] == ["entry"] and task["type"] == "task" and task["title"] == "call the bank"
             # what is typed narrows the whole table through second_brain_fts, which is where the page now sends it
             assert [r["id"] for g in (await c.get("/api/second_brain/left?query=bank")).json()["groups"] for r in g["rows"]] == [mid]
             assert (await c.get("/api/second_brain/left?query=umbrella")).json()["groups"] == []
@@ -98,20 +102,26 @@ def test_done_and_suggestion_actions(config):
                 "INSERT INTO second_brain_suggestions(text, item_ids, created_at) VALUES (?, ?, ?)", ("call them today", f"[{mid}]", now_iso())
             ).lastrowid
             row = f"s{sid}"
-            assert (await c.get("/api/second_brain/blank")).json()["suggestions"][0]["id"] == row
-            assert [r["id"] for g in (await c.get("/api/home/left")).json()["groups"] if g["label"] == "Review" for r in g["rows"]] == [row]
+            other = store.execute(
+                "INSERT INTO second_brain_suggestions(text, item_ids, created_at) VALUES (?, ?, ?)", ("call them tomorrow", "[]", now_iso())
+            ).lastrowid
+            assert [s["id"] for s in (await c.get("/api/second_brain/blank")).json()["suggestions"]] == [f"s{other}", row]
+            # Priority is every module's queue: a suggestion waits on the owner, and the feed ranks what waits
+            waiting = [r for r in (await c.get("/api/feed?mode=priority")).json()["items"] if r["module"] == "second_brain"]
+            assert [r["id"] for r in waiting] == [f"s{other}", row] and [r["waits"] for r in waiting] == [1, 2]
             sug = (await c.get(f"/api/second_brain/item/{row}")).json()
-            assert sug["kind"] == "suggestion" and [a["verb"] for a in sug["actions"]] == ["accept", "dismiss"]
-            assert all(a["removes"] for a in sug["actions"])
-            r = await c.post("/api/second_brain/action/accept", json={"id": row})
-            assert r.json() == {"id": row, "status": "accepted"}
+            assert sug["type"] == "suggestion" and sug["fixed"] == ["entry"] and sug["taggable"] is False
+            assert sug["verbs"] == [["accept", "Accept"], ["dismiss", "Dismiss"]]
+            r = await c.post("/api/verb", json={"module": "second_brain", "id": row, "verb": "accept"})
+            assert r.json() == {"ok": True, "said": f"accepted suggestion {sid}", "removes": False}
+            assert (await c.post("/api/verb", json={"module": "second_brain", "id": f"s{other}", "verb": "dismiss"})).json()["removes"] is True
             assert (await c.get("/api/second_brain/blank")).json()["suggestions"] == []
-            assert [a["verb"] for a in (await c.get(f"/api/second_brain/item/{row}")).json()["actions"]] == []
-            assert all(g["label"] != "Review" for g in (await c.get("/api/home/left")).json()["groups"])
+            assert (await c.get(f"/api/second_brain/item/{row}")).json()["verbs"] == []
+            assert [r for r in (await c.get("/api/feed?mode=priority")).json()["items"] if r["module"] == "second_brain"] == []
             assert (await c.post("/api/second_brain/action/dismiss", json={"id": mid})).status_code == 404     # an item is not a suggestion
             assert (await c.get("/api/second_brain/item/nope")).status_code == 404
             verbs = [e["verb"] for e in (await c.get("/api/events?module=second_brain")).json()["events"]]
-            assert verbs[:3] == ["accepted", "reopened", "completed"]
+            assert verbs[:4] == ["dismissed", "accepted", "reopened", "completed"]
             missing = await c.post("/api/second_brain/action/done", json={"id": mid + 999})
             assert missing.status_code == 404, missing.text
             for bad in ({}, {"id": "abc"}):   # a malformed id is a 400, not a 500
@@ -142,3 +152,18 @@ def test_second_brain_tool_split(store, config):
     assert read.names == set(agent.read_tools)
     assert full.names == set(agent.read_tools) | set(agent.write_tools)
     assert not set(agent.read_tools) & set(agent.write_tools)
+
+
+def test_entry_is_the_facet_every_kind_carries(store, config):
+    """Entry is the module's one immutable tag: every kind of capture is a row of it, its kind the row's type and a tag
+    to narrow on rather than a second fixed tag."""
+    store.migrate(SECOND_BRAIN_SCHEMA)
+    assert (MANIFEST.facet, MANIFEST.title) == ("entry", "Entry")
+    for kind, text in (("note", "a note"), ("link", "https://example.com/x what it was"), ("task", "call the bank")):
+        capture(store, kind, text)
+    listed = rows_hook(store, 10)
+    assert [(r["type"], r["fixed"], r["tags"]) for r in listed] == [
+        ("task", ["entry"], ["task"]), ("link", ["entry"], ["link"]), ("note", ["entry"], ["note"])]
+    assert next(r for r in listed if r["type"] == "link")["href"] == "https://example.com/x"
+    assert [r["verbs"] for r in listed] == [
+        [["done", "Done"], ["forget", "Forget"]], [["open", "Open"], ["forget", "Forget"]], [["forget", "Forget"]]]

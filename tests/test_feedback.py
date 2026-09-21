@@ -1,10 +1,14 @@
-"""The feedback queue the workflows read: pending rows per module, clearing without deleting, the Patches entries that concern a module."""
+"""The feedback queue the workflows read: pending rows per module, clearing without deleting, the Patches entries that
+concern a module, and Feedback's own place in the app: it takes what point mode files and lists nothing back."""
 
 import dataclasses
 import re
 
 from app.config import ROOT
-from app.modules.feedback import queue
+from app.daemon import build
+from app.modules.feedback import MANIFEST, queue
+from tests.conftest import run
+from tests.test_app import client_for
 
 SCHEMA = (ROOT / "app" / "modules" / "feedback" / "schema.sql").read_text("utf-8")
 ENTRY = "### {title}\n\n- Kind: bug\n- Where: {where}\n- Found: 2026-09-12, test\n- Status: open\n\nWhat happens: x.\n\nExpected: y.\n\nFix: z.\n\n"
@@ -44,3 +48,29 @@ def test_feedback_queue(store, config, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "1 pending" in out and "bodies" in out and "0 open" in out
     assert queue.main(["clear", "email"], cfg) == 0 and queue.pending(store, ["email"]) == []
+
+
+# Nine modules list rows, one facet each; the three that do not are backend only. The facet is what groups a row on
+# the feed, colours it and places its tags on the brain, so this map is the whole of the module roster.
+FACETS = {
+    "home": None, "chat": "chats", "email": "email", "education": "education", "second_brain": "entry",
+    "science": "science", "finance": "finance", "newsfeed": "newsfeed", "graph": None, "database": "database",
+    "feedback": None, "system": "routine",
+}
+
+
+def test_modules_carry_their_facet(config):
+    assert MANIFEST.facet is None   # Feedback holds what point mode files; nothing of it belongs on the feed
+
+    async def main():
+        app = build(config)
+        async with client_for(app) as c:
+            modules = (await c.get("/api/shell")).json()["modules"]
+            assert {m["name"]: m["facet"] for m in modules} == FACETS
+            assert next(m["title"] for m in modules if m["name"] == "second_brain") == "Entry"
+            listed = {m.name for m in app.state.registry.ordered() if m.rows}
+            assert listed == {name for name, facet in FACETS.items() if facet}   # a facet and a rows hook are the same claim
+            assert all(r["module"] != "feedback" for r in (await c.get("/api/feed?mode=recent")).json()["items"])
+        app.state.store.close()
+
+    run(main())

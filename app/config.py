@@ -107,7 +107,6 @@ class Feedback:
 
 @dataclass(frozen=True)
 class Ui:
-    start_page: str
     refresh_seconds: int
     time_format: str
     page_size: int

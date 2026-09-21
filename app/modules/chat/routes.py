@@ -21,8 +21,11 @@ from app.store import Store, iso, now_iso, parse, tag_key, tags_for
 router = APIRouter(prefix="/api/chat")
 
 MODULE = "chat"
+FACET = "chats"
+TYPE = "conversation"
+ROW_VERBS = [["reopen", "Reopen"], ["delete", "Delete"]]   # not VERBS: that name is the action table's
+EXCERPT = 4          # turns of the tail the page shows; the whole transcript is at /api/session/chat/<id>
 NEW_TITLE = "(new)"
-DELETE = {"verb": "delete", "label": "Delete", "confirm": "Delete this conversation?", "removes": True}
 LAST_TS = "COALESCE((SELECT MAX(ts) FROM app_session_turns t WHERE t.session_id = s.id), s.opened_at) AS last_ts"
 
 
@@ -44,7 +47,8 @@ def _folder(config, sid: str) -> Path:
 
 
 def _get(store: Store, sid: str) -> dict:
-    row = store.one("SELECT * FROM app_sessions WHERE id = ? AND module = ?", (sid, MODULE))
+    # Every conversation is a conversation, whichever agent held it: the one drawer opens sessions under its own name.
+    row = store.one("SELECT * FROM app_sessions WHERE id = ?", (sid,))
     if row is None:
         raise HTTPException(404, "no such conversation")
     return row
@@ -82,7 +86,8 @@ def _rows(store: Store, rows: list[dict]) -> list[dict]:
     """The ROW every list speaks: the title it shows, the day it last moved, its tags. Needs `last_ts` on each row."""
     tags = _tags(store, rows)
     return [
-        {"id": r["id"], "module": MODULE, "title": _title(store, r), "when": _when(r["last_ts"]), "tags": tags[r["id"]], "fixed": []}
+        {"id": r["id"], "module": MODULE, "title": _title(store, r), "when": _when(r["last_ts"]),
+         "fixed": [FACET], "tags": tags[r["id"]], "type": TYPE, "verbs": ROW_VERBS}
         for r in rows
     ]
 
@@ -112,6 +117,12 @@ def _replay(store: Store, sid: str, chars: int) -> str:
     lines = [f"{t['role']}: {t['text']}" for t in turns(store, sid) if t["role"] in ("user", "model") and t["text"]]
     tail = "\n".join(lines)[-chars:]
     return f"Earlier in this conversation, from Otto's record (the CLI's own transcript is gone):\n{tail}\n\nThe owner continues:\n\n"
+
+
+def _excerpt(store: Store, sid: str) -> list[list[str]]:
+    """The tail of what was said, as [role, text]: enough to see where the conversation stands before reopening it."""
+    said = [[t["role"], t["text"]] for t in turns(store, sid) if t["role"] in ("user", "model") and t["text"]]
+    return said[-EXCERPT:]
 
 
 def _unique(path: Path) -> Path:
@@ -146,8 +157,7 @@ def left(request: Request, query: str = "", page: int = 0) -> dict:
             groups.append({"label": label, "count": 0, "rows": []})
         groups[-1]["rows"].append(r)
         groups[-1]["count"] += 1
-    # Every conversation offers the same one verb, so the list says it once: a button on a row asks what the pane's asks.
-    return {"groups": groups, "more": total > limit, "actions": [DELETE]}
+    return {"groups": groups, "more": total > limit}
 
 
 @router.get("/item/{sid}")
@@ -156,10 +166,7 @@ def item_route(request: Request, sid: str) -> dict:
     row = _get(st.store, sid)
     last = st.store.scalar("SELECT MAX(ts) FROM app_session_turns WHERE session_id = ?", (sid,)) or row["opened_at"]
     [out] = _rows(st.store, [{**row, "last_ts": last}])
-    return {
-        **out, "busy": sid in st.session_busy, "turns": turns(st.store, sid),
-        "files": _files(_folder(st.config, sid)), "actions": [DELETE],
-    }
+    return {**out, "busy": sid in st.session_busy, "turns": _excerpt(st.store, sid), "files": _files(_folder(st.config, sid))}
 
 
 @router.post("/new")
@@ -229,7 +236,15 @@ async def _delete(request: Request, body: dict) -> dict:
     return await st.runner.run_action("chat.delete", MODULE, f"session:{sid}", run)
 
 
-ACTIONS = {"delete": _delete}
+async def _reopen(request: Request, body: dict) -> dict:
+    """A closed conversation comes back as an open one; its turns were never removed."""
+    st = request.app.state
+    sid = _get(st.store, str(body.get("id", "")))["id"]
+    st.store.execute("UPDATE app_sessions SET closed_at = NULL WHERE id = ?", (sid,))
+    return {"id": sid, "removes": True}
+
+
+ACTIONS = {"delete": _delete, "reopen": _reopen}
 
 
 @router.post("/upload/{sid}")
@@ -281,9 +296,9 @@ async def events(request: Request, sid: str):
 def rows(store: Store, limit: int = 200) -> list[dict]:
     """Every conversation as a ROW, the one that moved last first."""
     found = store.query(
-        f"SELECT s.id, s.title, s.tags, s.opened_at, {LAST_TS} FROM app_sessions s WHERE s.module = ?"
+        f"SELECT s.id, s.title, s.tags, s.opened_at, {LAST_TS} FROM app_sessions s"
         " ORDER BY last_ts DESC, s.rowid DESC LIMIT ?",
-        (MODULE, limit),
+        (limit,),
     )
     return _rows(store, found)
 

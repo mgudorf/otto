@@ -1,4 +1,5 @@
-"""Email module: the read/write client split, sync against a fake Gmail, actions through the app, and the body sanitizer."""
+"""Email module: the read/write client split, sync against a fake Gmail, actions through the app, the rows it puts on the feed,
+and the body sanitizer."""
 
 import ast
 import base64
@@ -249,9 +250,10 @@ def test_email_actions(email_config, fake):
             left = (await c.get("/api/email/left?chip=Flagged")).json()
             assert [r["id"] for r in left["groups"][0]["rows"]] == ["m3"] and left["more"] is False
             row = left["groups"][0]["rows"][0]
-            # the page seats the sender and the subject in cells of their own, so the row never joins them
-            assert (row["from"], row["title"]) == ("Cy", "Contract draft") and row["priority"] is None
-            assert row["unread"] is True and row["starred"] is True and left["read_on_open"] is True
+            # the sender is the clause after the subject and the Gmail snippet the gist under it; the facet is the one fixed tag
+            assert (row["title"], row["snip"], row["summary"]) == ("Contract draft", "Cy", "please sign the contract")
+            assert row["fixed"] == ["email"] and row["type"] == "email" and row["href"].endswith("m3")
+            assert row["unread"] is True and row["dim"] is False and row["starred"] is True and left["read_on_open"] is True
             # a chip narrows the whole mailbox in the daemon, never a page of results in the browser
             unread = (await c.get("/api/email/left?chip=Unread")).json()
             assert [r["id"] for g in unread["groups"] for r in g["rows"]] == ["m3", "m2"]
@@ -272,12 +274,21 @@ def test_email_actions(email_config, fake):
             assert (await c.post("/api/email/action/trash", json={"filter": {"query": "nothing-here", "chip": "All"}})).status_code == 400
 
             item = (await c.get("/api/email/item/m3")).json()
-            assert item["text"] == "Contract draft\n\nplease sign the contract" and item["starred"] is True
-            assert (item["title"], item["from"], item["module"]) == ("Contract draft", "Cy", "email")
-            assert item["body"] == "please sign the contract" and item["attachments"] == []
-            assert item["html"] == '<p>please <b>sign</b> the contract here<span class="url" title="https://docs.example/c"></span></p>'
+            # the reader is the ROW plus who it is from and the body as html; the page renders the pairs as they come
+            assert item["starred"] is True and (item["title"], item["snip"], item["module"]) == ("Contract draft", "Cy", "email")
+            assert item["kv"] == [["From", "Cy <cy@example.com>"]]
+            assert item["body"] == '<p>please <b>sign</b> the contract here<span class="url" title="https://docs.example/c"></span></p>'
             assert app.state.store.scalar("SELECT COUNT(*) FROM email_bodies") == 1
-            assert [a["verb"] for a in item["actions"]] == ["archive", "read", "unstar", "open", "trash"]
+            assert [v for v, _ in item["verbs"]] == ["archive", "read", "unstar", "open", "trash"]
+            # what triage made of it, and what it carried, join the same pairs
+            app.state.store.execute(
+                "INSERT INTO email_triage(message_id, priority, reason, ts, source) VALUES ('m3', 'high', 'Contract needs a signature.', ?, 'session')",
+                (iso(now()),),
+            )
+            assert (await c.get("/api/email/item/m3")).json()["kv"][1] == ["Priority", "high, Contract needs a signature."]
+            # a message out of the inbox offers neither archive nor trash, and one that carried no html reads as its text
+            gone = (await c.get("/api/email/item/m1")).json()
+            assert [v for v, _ in gone["verbs"]] == ["unread", "star", "open"] and gone["body"] == "<p>hello there</p>"
             assert (await c.post("/api/email/action/read", json={"ids": ["m3"]})).json() == {"count": 1}
             assert (await c.get("/api/email/item/m3")).json()["unread"] is False
 
@@ -290,6 +301,38 @@ def test_email_actions(email_config, fake):
             ev = (await c.get("/api/events?module=email")).json()
             assert [e["verb"] for e in ev["events"]][:3] == ["marked read", "trashed", "archived"]
             assert ev["events"][1]["text"] == "1 messages matching 'lunch' · All"
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())
+
+
+def test_email_reaches_the_feed(email_config, fake):
+    """The mailbox joins the one feed: Recent carries every message as a row of the email facet, the tags and words in
+    the search bar narrow it, a verb runs through the one front door, and the consent notice is what Email puts in Priority."""
+
+    async def main():
+        app = build(email_config)
+        await app.state.runner.start()
+        async with client_for(app) as c:
+            await app.state.runner.submit("email.sync", "email", "gmail", "scheduled", sync).done
+            mail = [r for r in (await c.get("/api/feed?mode=recent")).json()["items"] if r["module"] == "email"]
+            assert [r["id"] for r in mail] == ["m3", "m2", "m1"] and all(r["fixed"] == ["email"] for r in mail)
+            add_tags(app.state.store, "email", "m3", ["Contract"])
+            assert [r["id"] for r in (await c.get("/api/feed?mode=recent&tags=email,contract")).json()["items"]] == ["m3"]
+            assert [r["id"] for r in (await c.get("/api/feed?mode=recent&q=lunch")).json()["items"]] == ["m2"]
+            assert [r["id"] for r in (await c.get("/api/feed?mode=recent&q=ann")).json()["items"]] == ["m1"]   # the sender is the row's snip
+            assert (await c.get("/api/feed?mode=priority")).json()["items"] == []
+            r = await c.post("/api/verb", json={"module": "email", "id": "m1", "verb": "star"})
+            assert r.json() == {"ok": True, "said": "starred Invoice ready", "removes": False}
+            assert fake.modified[-1] == {"ids": ["m1"], "addLabelIds": ["STARRED"], "removeLabelIds": []}
+            assert (await c.get("/api/feed?mode=recent&q=invoice")).json()["items"][0]["starred"] is True
+            # re-consent is the owner's to run, so it waits on them in Priority, ranked like anything else that waits
+            token = email_config.email.token_file
+            data = json.loads(token.read_text())
+            data["refresh_expires_at"] = iso(now() + timedelta(hours=6))
+            token.write_text(json.dumps(data))
+            assert [(r["id"], r["module"], r["waits"]) for r in (await c.get("/api/feed?mode=priority")).json()["items"]] == [("consent", "email", 1)]
         await app.state.runner.drain(1)
         app.state.store.close()
 
@@ -476,7 +519,10 @@ def test_email_consent_warning(store, email_config):
             assert rows == [], "outside consent_warn_days"
         else:
             assert len(rows) == 1 and expected in rows[0]["title"] and rows[0]["module"] == "email"
-            assert "app.modules.email.gmail consent" in rows[0]["title"] and rows[0]["fixed"] == ["notice"]
+            assert "app.modules.email.gmail consent" in rows[0]["title"] and rows[0]["fixed"] == ["email"]
+            # nothing of the owner's stands behind it: it is a decision with a date, no tags and no verb
+            assert rows[0]["type"] == "decision" and rows[0]["taggable"] is False and rows[0]["verbs"] == []
+            assert rows[0]["due"] == rows[0]["when"][:10]
 
 
 def test_email_body_drops_what_carries_nothing():

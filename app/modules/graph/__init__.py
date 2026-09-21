@@ -1,3 +1,5 @@
+"""Graph: the tag map the brain is drawn from. It carries no facet, so it lists no rows of its own."""
+
 from __future__ import annotations
 
 import sqlite3

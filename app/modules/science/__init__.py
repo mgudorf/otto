@@ -9,6 +9,7 @@ MANIFEST = Manifest(
     hue="#7FC0C4",
     icon='<path d="M8 3v6l-4.5 7.5A1 1 0 0 0 4.4 18h11.2a1 1 0 0 0 .9-1.5L12 9V3"></path><path d="M6.5 3h7"></path><path d="M6 13h8"></path>',
     order=4,
+    facet="science",
     schedules=(Schedule(task="reap", every="5m", resource="science"), Schedule(task="due", every="5m")),
     agent=Agent(
         placeholder="Ask about the notebook…",

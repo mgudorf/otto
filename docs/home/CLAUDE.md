@@ -5,9 +5,15 @@
 
 ## Built
 
-`GET /api/home/numbers` (one number per module with a `numbers` hook), `GET /api/home/left` and `GET /api/home/recent`. Both row routes read every module that is not switched off, page or not, in rail order: `/left` puts a `Review` group per module with a `queue` hook first, every waiting row and no cut (an empty queue yields no group), then each module's `today` rows, five per module; `/recent` asks each module with a `rows` hook for the five rows Recent draws and no more, newest first, leaving out any row that carries no time, because "newest" says nothing about a row that has none and Home invents no date. Every group carries `waiting`, true only for a queue group, and each row reaches the page carrying its group's mark, so one module can yield both and Priority sorts them by the mark rather than by the word `Review`. Every row either route returns is a ROW — `id`, `module`, `title`, `when`, `tags`, `fixed` and whatever else its module put on it — so a module still naming its words `text` and its time `stamp` reads the same here; a waiting row also carries the verbs its own module's `item` offers, where a module answering "no such row" offers none and any other failure is written to the daemon's log rather than passing for a row with nothing to decide. Groups and numbers carry `page`; a number navigates only when it is true. Three modules queue: Newsfeed's open entries and Second Brain's open suggestions, each waiting under `Review` however old it is, and Email's one consent row while its refresh token is near expiry or dead, which names the command to run. Home owns no items, so it has no `rows` hook of its own. The Home agent has no tools; its Current state block carries the same numbers, today rows and `Review: N waiting` lines.
+Home carries no facet, so it lists no rows of its own and takes no place on the brain. It serves the feed every other module fills.
 
-The page has two modes on one segment control, kept across visits. Priority is what waits: the rows whose group is marked `waiting` and nothing that merely arrived today, each with the verbs its module offered on it and the date it is bound to, and never cut. Recent is each module's five newest, which is all the route returns, so the search bar narrows those five and an older item is found on its tag's page instead; a Recent row carries the time it landed, or its date once the day has passed. The search bar's tags and filters narrow both. Either way the rows fall into one card per module in rail order, the module's hue on the card's left border and its icon beside its name. A row opens beside the list in the owning module's own detail shape once that module has answered for it; until then, and where the module cannot answer at all, it opens as its title, date, tags and the buttons its `item` route offers — a primary verb in the hue, one that confirms or removes tinted red and asking through the confirm popup first, an `href` opening a tab, a verb marked `removes` closing the pane because its row is gone. The counts strip sits in the header: each module's icon, its number and its word, and clicking one opens that module.
+| Piece | Current state |
+|---|---|
+| Feed | `GET /api/feed?mode=priority\|recent&tags=&q=&limit=` answers `{"items": [ROW, …]}` from every enabled module that carries a facet. `priority` is each module's `queue`, sorted by the `waits` its module set, a row left unranked behind every ranked one, then renumbered 1..n so the rank the feed groups by is the one inside a facet. `recent` is each module's `rows(store, limit)`, newest first, an undated row last. `tags` keeps a row only when it carries every named tag across `fixed` and `tags`; `q` is a case-insensitive substring over the title and the snip. A mode that is neither word is a 400 |
+| Numbers | `GET /api/home/numbers`: one entry per enabled faceted module with a `numbers` hook, each carrying the module's facet, hue and icon beside its value and word |
+| Hooks | `context` only, which is the one agent's Current state block: every faceted module's number, how many rows it has today and their titles, then `Review: N waiting` and one line per queued row with the module and id that own it. No `rows`, `queue`, `numbers` or `item`: Home owns no items |
+| Agent | Home brings no tools. Its `agent.md` is one share of the single Otto prompt, and its `context` is what fills that prompt's Current state block |
+| Queues | Five modules queue: Newsfeed's open entries, Second Brain's open suggestions and Education's due questions, each waiting however old it is, Email's one consent row while its refresh token is near expiry or dead, and System's failed tasks |
 
 ## Nightly Process
 
@@ -26,6 +32,32 @@ Newsfeed runs every search the agent recorded, each on its own nights, one budge
 
 ## Patches
 
+### Nothing reads the counts
+
+- Kind: gap
+- Where: `app/modules/home/routes.py` (`numbers_route`), `app/static/core.js` (`loadShell`, `load`)
+- Found: 09-21-2026, the one-page change
+- Status: open
+
+What happens: `GET /api/home/numbers` still answers, and no file under `app/static/` asks for it. The brand menu was to show what each facet holds; it shows the modules and not their numbers, so every module's `numbers` hook is computed for nobody.
+
+Expected: the one number a module reports is shown somewhere, or the hook goes.
+
+Fix: have the brand menu read `/api/home/numbers` beside the facets it already lists, or drop the route and the `numbers` hook from the contract. The first is the smaller change and keeps the owner's one sanctioned counts strip.
+
+### Home's agent prompt still speaks as one module's agent
+
+- Kind: defect
+- Where: `app/modules/home/agent.md`, `app/api.py` (`_otto`)
+- Found: 09-21-2026, the one-page change
+- Status: open
+
+What happens: `_otto` joins every enabled module's `agent.md` into one prompt. Home's share opens "You are the Home agent", states "You have no tools; everything you know is in that block", and tells the owner to open a module when something needs that module's own agent. Otto holds every module's tools, and there are no modules to open.
+
+Expected: Home's share of the prompt describes the day at a glance and nothing else, so it does not contradict the eight shares beside it.
+
+Fix: cut the sentence that claims no tools and the one that sends the owner to another module, and drop the "You are the Home agent" opening. The same opening sits at the top of every other module's `agent.md`, so the ruling on how the shares are introduced belongs with `_otto` in `docs/app/CLAUDE.md`.
+
 ### The Gmail consent row cannot be opened
 
 - Kind: bug
@@ -33,7 +65,7 @@ Newsfeed runs every search the agent recorded, each on its own nights, one budge
 - Found: 09-20-2026, porting Home onto the shell
 - Status: open
 
-What happens: Email's queue puts a row with the id `consent` on Home whenever the refresh token is near expiry or dead. It is not a message, so `item(store, "consent")` looks it up in `email_messages`, finds nothing and answers 404. Home shows the row and offers it no verbs, and clicking it puts `no such message` in the header instead of opening anything.
+What happens: Email's queue puts a row with the id `consent` on the feed whenever the refresh token is near expiry or dead. It is not a message, so `item(store, "consent")` looks it up in `email_messages`, finds nothing and answers 404. The browser swallows that failure, so the row opens as its title alone with no verbs and no way to see the command to run.
 
 Expected: the row opens like any other, showing the command to run, or it is not presented as something to open.
 
@@ -42,77 +74,12 @@ Fix: have Email's `item` answer the `consent` id itself with the same words the 
 ### A row is found by its id alone, so two modules can collide
 
 - Kind: bug
-- Where: `app/static/core.js` (`selection`, `loadItem`, `rowEl`'s `sel` class, `S.picked`), seen through `app/static/pages/home.js`
+- Where: `app/static/core.js` (`itemOf`, `select`, `removeItem`, `pid`, `S.open`, `S.picked`)
 - Found: 09-20-2026, porting Home onto the shell
 - Status: open
 
-What happens: Home and the tag page list rows from every module at once, but the shell keys a row by `id` and nothing else. Item ids are only unique inside a module, so Second Brain item 5 and Finance entry 5 are the same row to the shell: opening one can fetch the other's detail, both draw as selected, and a tag meant for one can land on both.
+What happens: the feed lists rows from every module at once. `load` keys the merge on `module` and `id` together, but the selection does not: `itemOf` finds the first row whose `id` matches, `pid` is the bare id, and `removeItem` deletes by id. Item ids are only unique inside a module, so Second Brain item 5 and Finance entry 5 are the same row to the browser: opening one can draw the other, both show as selected, and a tag meant for one can land on both.
 
 Expected: a row is identified by its module and its id together, so two modules' rows never stand in for each other.
 
-Fix: key the shell's selection and picked set on `module` and `id` — `select` takes both, `selection` and `loadItem` match on both, and `rowEl` writes both onto the element.
-
-### Priority still pays for the rows it does not draw
-
-- Kind: defect
-- Where: `app/modules/home/routes.py` (`left_route`), `tests/test_app.py`, `tests/test_education.py`, `tests/test_finance.py`, `tests/test_science.py`
-- Found: 09-20-2026, the port review
-- Status: open
-
-What happens: `/left` returns each module's `today` rows beside the `Review` groups, and the page draws only the `Review` rows, because what merely arrived today is what Recent already shows. The today rows are still read from every module on each 30-second refresh and sent to a browser that discards them.
-
-Expected: the route returns what waits and nothing else, so Priority costs one queue read per module.
-
-Fix: drop the today groups from `left_route`. They cannot go on their own: `tests/test_app.py` asserts a `Second Brain` group and a `more` count on `/left`, and Education, Finance and Science each assert their today group's count there. The route, those four test files and this doc move in one change, which is the integrator's rather than one module's.
-
-### Graph's tags reach Recent as items
-
-- Kind: defect
-- Where: `app/modules/graph/routes.py` (`rows`), `app/modules/__init__.py` (the `rows` contract), `app/modules/home/routes.py` (`recent_route`)
-- Found: 09-20-2026, the port review
-- Status: open
-
-What happens: Recent reads every module's `rows`, and Graph's rows are tags. Home draws a Graph card of the five most recently seen tag names. Database's table names dropped out once Recent began requiring a time on a row, but a tag carries `last_seen` and still passes.
-
-Expected: Recent is each module's newest items. A tag is how items are found, not one of them.
-
-Fix: the contract gives a module no way to say its rows are structure rather than items, and Home must not carry a list of module names. Add that distinction to the hook — a flag on the row, or a second hook — and Recent reads only item rows while `/api/items` and the tag page keep reading everything.
-
-### Education's due questions are not in what waits
-
-- Kind: gap
-- Where: `app/modules/education/routes.py` (`today`, and the `queue` it does not define)
-- Found: 09-20-2026, the port review
-- Status: open
-
-What happens: Education has no `queue` hook, so the questions it has due reach Home through `today`, which Priority no longer draws. A question waiting to be answered now shows on Home only as the number beside Education in the counts strip.
-
-Expected: a due question waits on the owner exactly as an open suggestion does, so it belongs under Review with the rest.
-
-Fix: Education exposes its due queue as `queue(store)`, the same rows `today` already returns, and Home lists them with no further change.
-
-### Home keeps a second copy of the page registry
-
-- Kind: defect
-- Where: `app/static/core.js` (`PAGES`, `registerPages`), `app/static/pages/home.js` (`owners`)
-- Found: 09-20-2026, the port review
-- Status: open
-
-What happens: to open a row in its own module's pane, Home re-imports `./<module>.js` and keeps the configs in a map of its own, although `app.js` has already handed every one of them to core through `registerPages`. `docs/graph/CLAUDE.md` files the same workaround on Graph.
-
-Expected: a page that needs another page's config asks core for it.
-
-Fix: core exports a reader for its registry; Home and Graph then drop their maps and their dynamic imports. One change in core closes both.
-
-### A waiting row's verbs cost one module call per row on every refresh
-
-- Kind: defect
-- Where: `app/modules/home/routes.py` (`_actions`), `app/modules/newsfeed/routes.py`, `app/modules/second_brain/routes.py`, `app/modules/email/routes.py` (each `queue`)
-- Found: 09-20-2026, the port review
-- Status: open
-
-What happens: a queue row arrives with no verbs on it, so Home asks the owning module's `item` about each one, on every `/left`, which is every 30 seconds while Home is open. Home's own requirement expects a 21-entry review backlog, and Email's `item` reads a message body besides.
-
-Expected: Home reads each queue once and asks nothing further.
-
-Fix: each `queue` puts the row's verbs on the row, the way its `item` already builds them. `_waiting` prefers `r["actions"]` and calls `item` only when they are missing, so nothing in Home changes.
+Fix: key the selection and the picked set the way `load` already keys the merge — `S.open` holds `module/id`, `itemOf` and `pid` match on both, and `select` takes the row rather than its id.

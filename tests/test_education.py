@@ -1,5 +1,5 @@
 """Education: the question format, a generated question, answers handed to the tutor's session and graded through its tool,
-completing and deleting a quiz, tags, the nightly task, the v1 to v2 migration."""
+completing and deleting a quiz, the Priority feed an unanswered one waits on, tags, the nightly task, the v1 to v2 migration."""
 
 import json
 import sqlite3
@@ -93,17 +93,22 @@ def test_education_end_to_end(config):
             # one group carrying both slices as ROWs: the chips narrow it in the browser
             assert left["groups"][0]["label"] == "" and left["more"] is False and row["id"] == qid
             assert row["title"] == "Why is the sky blue?" and row["status"] == "active" and row["pct"] == 0 and row["score"] is None
-            assert row["topic"] == "Physics" and row["fixed"] == ["physics", "rayleigh scattering"] and row["tags"] == []
-            assert row["when"] and row["snippet"] == "Pinned output · Low temperature · Smallest gradient · Fourth"
+            # the facet is the row's one fixed tag; the topic and the question's own tag lead what the search bar narrows on
+            assert row["topic"] == "Physics" and row["fixed"] == ["education"] and row["type"] == "question"
+            assert row["tags"] == ["physics", "rayleigh scattering"]
+            assert row["when"] and row["snip"] == "Pinned output · Low temperature · Smallest gradient · Fourth"
             n = next(x for x in (await c.get("/api/home/numbers")).json() if x["module"] == "education")
             assert n["value"] == 1 and n["label"] == "due"
-            home = (await c.get("/api/home/left")).json()
-            assert next(g for g in home["groups"] if g["module"] == "education")["count"] == 1
+            # an unanswered question waits on the owner, so Priority is where it shows, ranked by how long it has waited
+            queued = (await c.get("/api/feed?mode=priority")).json()["items"]
+            assert [(x["id"], x["module"], x["waits"]) for x in queued] == [(qid, "education", 1)]
             item = (await c.get(f"/api/education/item/{qid}")).json()
-            assert [a["verb"] for a in item["actions"]] == ["delete"] and [p["label"] for p in item["parts"]] == ["a", "b", "c", "d"]
+            assert item["verbs"] == [["delete", "Delete"]] and [p["label"] for p in item["parts"]] == ["a", "b", "c", "d"]
             assert [p["title"] for p in item["parts"]] == ["Pinned output", "Low temperature", "Smallest gradient", "Fourth"]
-            assert item["definitions"] == DEFS and item["premise"] == "Sunlight is a mix of colours." and item["kind"] == f"Physics · d{start_d}" and item["tags"] == []
-            assert item["text"].startswith("Why is the sky blue?") and "rubric" not in json.dumps(item) and "note" not in json.dumps(item)
+            # the page renders the definitions one entry at a time, then the premise and each part's ask
+            assert item["defs"] == [DEFS] and item["premise"] == "Sunlight is a mix of colours."
+            assert (item["topic"], item["difficulty"]) == ("Physics", start_d) and item["tags"] == ["physics", "rayleigh scattering"]
+            assert item["parts"][0]["ask"] == PARTS[0]["prompt"] and "rubric" not in json.dumps(item) and "note" not in json.dumps(item)
             # opening a question on the page makes it the tutor's context
             ctx = registry.get("education").context(store, registry)
             assert f'Open on the page: Q{qid} "Why is the sky blue?"' in ctx and DEFS in ctx and "(a) Pinned output:" in ctx and "not answered" in ctx
@@ -147,7 +152,7 @@ def test_education_end_to_end(config):
             out = grade(store, qid, 1, 100, "right")
             assert out == {"question_id": qid, "part": 1, "verdict": "correct", "score": 100, "remaining": 3}
             item = (await c.get(f"/api/education/item/{qid}")).json()
-            assert item["parts"][0]["score"] == 100 and item["parts"][0]["verdict"] == "correct" and [a["verb"] for a in item["actions"]] == ["delete"]
+            assert item["parts"][0]["score"] == 100 and item["parts"][0]["verdict"] == "correct" and item["verbs"] == [["delete", "Delete"]]
             ctx = registry.get("education").context(store, registry)
             assert "graded: correct 100/100 — right" in ctx and PARTS[0]["rubric"] in ctx and PARTS[1]["rubric"] not in ctx
             # a graded part takes a new answer: the brief carries the earlier grade and the turn resumes the session
@@ -176,14 +181,14 @@ def test_education_end_to_end(config):
             assert q["completed_at"] is None and q["score"] == 95
             assert store.scalar("SELECT difficulty FROM education_topics WHERE id = ?", (tid,)) == start_d
             item = (await c.get(f"/api/education/item/{qid}")).json()
-            assert [a["verb"] for a in item["actions"]] == ["complete", "delete"] and item["actions"][0]["primary"]
+            assert item["verbs"] == [["complete", "Complete quiz"], ["delete", "Delete"]]   # the order is the order the owner sees
             r = await c.post("/api/education/action/complete", json={"id": qid})
             assert r.status_code == 200 and r.json() == {"id": qid, "score": 95, "topic_difficulty": start_d + 1}
             assert store.scalar("SELECT difficulty FROM education_topics WHERE id = ?", (tid,)) == start_d + 1
             assert (await c.post("/api/education/action/complete", json={"id": qid})).status_code == 409
             assert (await c.post("/api/education/action/answer", json={"id": qid, "n": 1, "answer": "late"})).status_code == 409
             item = (await c.get(f"/api/education/item/{qid}")).json()
-            assert item["status"] == "completed" and item["actions"] == [] and item["kind"] == f"Physics · d{start_d} · 95"
+            assert item["status"] == "completed" and item["verbs"] == [] and item["score"] == 95 and item["pct"] == 100
             # a revision after completion recomputes the mean and never moves the difficulty again
             assert grade(store, qid, 4, 60, "revised")["question_score"] == 88
             assert store.scalar("SELECT difficulty FROM education_topics WHERE id = ?", (tid,)) == start_d + 1
@@ -197,23 +202,25 @@ def test_education_end_to_end(config):
             assert (t["completed"], t["asked"], t["average"], t["recent"]) == (1, 2, 88, [88])
             assert next(x for x in (await c.get("/api/home/numbers")).json() if x["module"] == "education")["value"] == 1
             # what the search bar narrows on rides with the row: the title, the topic and the part titles
-            assert "sky" in listed[qid]["title"].lower() and "Smallest gradient" in listed[qid]["snippet"] and listed[qid]["topic"] == "Physics"
+            assert "sky" in listed[qid]["title"].lower() and "Smallest gradient" in listed[qid]["snip"] and listed[qid]["topic"] == "Physics"
             # tags, on a completed question too: trimmed, unique, and on the row
             r = await c.post("/api/education/action/tags", json={"id": qid, "tags": [" hard ", "hard", "", "bootstrap"]})
             assert r.status_code == 200 and r.json()["tags"] == ["hard", "bootstrap"]
-            assert (await c.get(f"/api/education/item/{qid}")).json()["tags"] == ["hard", "bootstrap"]
+            tags = ["physics", "rayleigh scattering", "hard", "bootstrap"]
+            assert (await c.get(f"/api/education/item/{qid}")).json()["tags"] == tags
             listed = {x["id"]: x for g in (await c.get("/api/education/left")).json()["groups"] for x in g["rows"]}
-            assert listed[qid]["tags"] == ["hard", "bootstrap"]
+            assert listed[qid]["tags"] == tags
             # the rows hook puts the same ROWs on the cross-module routes, where the topic is a tag like any other
             cross = {x["id"]: x for x in (await c.get("/api/items")).json()["items"] if x["module"] == "education"}
-            assert set(cross) == {qid, gid} and cross[qid]["tags"] == ["hard", "bootstrap"]
+            assert set(cross) == {qid, gid} and cross[qid]["tags"] == tags
             assert {x["id"] for x in (await c.get("/api/items?tags=physics")).json()["items"]} == {qid, gid}
             assert (await c.post("/api/education/action/tags", json={"id": qid, "tags": "x"})).status_code == 400
             # delete: an active question leaves both slices and every count, and is kept whole so it can never be asked again
             store.execute("INSERT INTO education_feedback(ts, topic_id, question_id, text) VALUES (?, ?, ?, ?)", (now_iso(), tid, gid, "too easy"))
             assert (await c.post("/api/education/action/delete", json={"id": qid})).status_code == 409       # a completed one stays
-            assert [a["removes"] for a in (await c.get(f"/api/education/item/{gid}")).json()["actions"]] == [True]
-            assert (await c.post("/api/education/action/delete", json={"id": gid})).status_code == 200
+            assert (await c.get(f"/api/education/item/{gid}")).json()["verbs"] == [["delete", "Delete"]]
+            assert (await c.post("/api/verb", json={"module": "education", "id": gid, "verb": "delete"})).json() == {
+                "ok": True, "said": "deleted Why softmax saturates", "removes": True}
             assert [x["id"] for g in (await c.get("/api/education/left")).json()["groups"] for x in g["rows"]] == [qid]
             assert (await c.get(f"/api/education/item/{gid}")).status_code == 404
             assert next(x for x in (await c.get("/api/home/numbers")).json() if x["module"] == "education")["value"] == 0
@@ -385,9 +392,10 @@ def test_setup_migrates_v1(config):
         app = build(config)
         async with client_for(app) as c:
             item = (await c.get("/api/education/item/1")).json()
-            assert item["kind"] == "Physics · d5 · 80" and item["status"] == "completed" and item["definitions"] is None and item["tags"] == []
+            assert (item["status"], item["score"], item["topic"], item["difficulty"]) == ("completed", 80, "Physics", 5)
+            assert item["defs"] == [] and item["tags"] == ["physics", "tag"] and item["fixed"] == ["education"]
             assert item["parts"] == [{
-                "n": 1, "label": "a", "title": "Explain why the sky is blue…", "text": "Explain why the sky is blue and not violet at noon",
+                "n": 1, "label": "a", "title": "Explain why the sky is blue…", "ask": "Explain why the sky is blue and not violet at noon",
                 "answer": "a", "answered_at": "2026-09-09T01:00:00+00:00", "verdict": "partial", "score": 80, "graded_at": "2026-09-09T02:00:00+00:00",
             }]
             rows = [r for g in (await c.get("/api/education/left")).json()["groups"] for r in g["rows"]]
