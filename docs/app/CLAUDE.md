@@ -446,3 +446,55 @@ What happens: `docs/design/` is the stated source for hues, icons and each page'
 Expected: the artboard is the app, since the owner reads it as the app and not as an import.
 
 Fix: the approved one-page design replaces the import in `docs/design/`, and the repo's `CLAUDE.md` line describing it as "each page's LEFT and MIDDLE shape" follows it.
+
+### Open in Gmail, and every link the page opens, lands in a browser that is not mine
+
+- Kind: defect
+- Where: `app/__main__.py` (`open_window`); the openers are `app/static/core.js` (`away`) and the email reader's body links
+- Found: 09-21-2026, the owner pressing Open in Gmail
+- Status: open, owner decision
+
+What happens: the window is Chrome in app mode on its own profile (`app/.chrome-profile/`, `--user-data-dir`), which is a second browser with its own cookies, sign-ins, extensions and history. `Open in Gmail`, a link's `Open`, Database's `Export` and every link inside an email body are opened by the page itself with `window.open`, and a page can only open into its own profile, so they land in that second browser. Nothing about it goes through the daemon. Gmail opens on the right account only because it was signed into that profile once, and it looks like another machine because, to Chrome and to Google, it is one.
+
+Expected: a link opens in the Chrome I already use, as a new tab in the window I am working in, with Gmail signed in and carrying all its state. Reusing the one tab that already shows Gmail is not something Chrome or Gmail offers without an extension; a new tab in that window is the available target.
+
+Fix: drop `--user-data-dir` from `open_window`, and with it `--no-first-run`, `--no-default-browser-check` and `--disable-sync`, which exist only to quiet a fresh profile and would switch sync off in the real one. The app window then belongs to the default profile: Chrome hands it to the running instance and everything the page opens lands in the main browser, body links included; the change checks that the taskbar button still carries the Otto icon. The alternative keeps the profile and routes `open`, `link` and `export` through the daemon, which starts Chrome with the url and no profile flag; it is more code, leaves email body links in the second browser, and is only worth it if the isolated profile is wanted for its own sake. `app/.chrome-profile/` is dead either way and can be deleted.
+
+### An agent's tag is one word
+
+- Kind: roadmap
+- Where: `app/store.py` (beside `tag_key`); the agent tag paths `app/api.py` `tag_session` (its prompt), `app/modules/newsfeed/tasks.py` `clean_tags` and the nightly prompt, `app/modules/newsfeed/tools.py` `newsfeed_tag` and `newsfeed_search_add`, `app/modules/newsfeed/agent.md`, `app/modules/feedback/routes.py` (the filing prompt) and `app/modules/feedback/agent.md`, `app/modules/second_brain/tools.py` `second_brain_add` and `second_brain_tag`
+- Found: 09-21-2026, the owner seeing `#probability and statistics` and `#estimation and inference` on a row
+- Status: open
+
+What happens: no path an agent writes a tag through holds it to one word. The session tagger asks for "topic identifiers", the newsfeed nightly for "one to three short lowercase words" (readable as one three-word tag), Feedback for "identifiers", and Second Brain's tools take whatever list they are given; `tag_key` only trims and lowercases. Every store today holds single words, so the rule has held by luck, and the row the owner saw is Education's (its own entry).
+
+Expected: a tag an agent gives is one word: letters and digits, no space and no hyphen, so the rule cannot be dodged by joining words. Any number of tags may be given. The owner's own tags through `/api/tags/add` are not in scope.
+
+Fix: one helper next to `tag_key` that lowercases, keeps only a tag that is a single run of letters and digits, and drops repeats; every path above passes its tags through it. A tool answers with an error naming the offending tag, so the agent retries with words; a one-shot (session tagger, newsfeed nightly, feedback filing) drops what fails, since nothing retries it. Each prompt and `agent.md` line says "one word each, as many as fit". One test per path gives a two-word tag and expects it refused or dropped.
+
+### Every skill in the palette is a name no session knows
+
+- Kind: bug
+- Where: `Agent(skills=…)` in the `__init__.py` of chat, database, education, email, finance, graph, home, newsfeed, science and second_brain; `app/static/shell.js` (`SKILLS`, the palette's Skills group); `app/claude.py` (`_args`, `--setting-sources ""`); the `POST /api/session/<module>/send` row of this doc
+- Found: 09-21-2026, the owner running `/today` in the drawer
+- Status: open, needs a decision
+
+What happens: the palette offers 34 skills, and each one sends `/<name> ` to the CLI as the turn. None of them is defined anywhere: they are the artboard's decorative chips, carried into the manifests, and no skill file backs any of them. The CLI also runs with `--setting-sources ""`, so it would not load a skill file if one existed. It answers `Unknown command: /today`, and every other name fails the same way: `today`, `where-to-look`, `recall`, `tag`, `add`, `suggest`, `searches`, `question-gen`, `quiz`, `explain`, `plan`, `triage`, `summarize`, `flag`, `nl-to-sql`, `explain-plan`, `schema`, `neighbors`, `link`, `merge`, `prune`, `totals`, `monthly`, `history`, `web`, `files`, `inspect-cell`, `run`, `explain-output`, `refactor`. `SKILLS` lists them per module, so `/recall`, `/tag`, `/add` and `/files` show twice. This doc's `send` row says Claude Code skills work from the drawer; no skill of the owner's can, for the same reason.
+
+Expected: a skill in the palette does what its name says.
+
+Fix: the owner's call between two shapes. Either each kept name becomes a prompt file its module ships, and `session_send` swaps a leading `/<name>` for that text before the turn, so the CLI stays sandboxed and needs no setting source; a name without a file is dropped. Or the `skills` field, the palette's Skills group and the `send` row's claim go, and the drawer takes plain sentences only. Either way the palette lists a name once.
+
+### The one agent is told it is ten agents
+
+- Kind: defect
+- Where: `app/api.py` (`_otto`, the joined prompt), every `app/modules/*/agent.md`, `app/modules/home/agent.md` in particular
+- Found: 09-21-2026, tracing why `/today` failed
+- Status: open
+
+What happens: `_otto` joins every enabled module's `agent.md` under `agent_base.md`, so the drawer's single session is told "You are the Otto agent", then "You are the Home agent… You have no tools", "When something needs a module's own agent… say which module to open; do not pretend to do it", then "You are the Database agent", "You are the Email agent" and so on. Home's lines date from a pane per module. The drawer session has every module's tools, so they contradict what it can do.
+
+Expected: one agent with one identity; each module's share says what the module holds and its rules, not who the agent is.
+
+Fix: each `agent.md` opens with what its module is ("Email is a mirror of…") instead of "You are the X agent"; `agent_base.md`'s `{module}` line already names the agent for a module's own session (Chat, Education's pane). Home's "no tools" and "say which module to open" lines go.
