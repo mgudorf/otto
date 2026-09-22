@@ -103,16 +103,9 @@ def test_database_run_explain_save(config):
             assert (await c.post("/api/database/action/write", json={"sql": "  "})).status_code == 400
             r = (await c.post("/api/database/action/explain", json={"sql": "select * from second_brain_items where id = 1;"})).json()
             assert r["lines"] and "second_brain_items" in r["lines"][0]
-            # LEFT: the tables under their modules, app first then rail order; shadow tables and sqlite_* stay hidden
-            left = (await c.get("/api/database/left")).json()
-            names = [m["name"] for m in left["modules"]]
-            assert names[0] == "app" and names.index("email") < names.index("second_brain") < names.index("database") and "other" not in names
-            modules = {m["name"]: m for m in left["modules"]}
-            brain = {t["name"]: t["rows"] for t in modules["second_brain"]["tables"]}
-            assert brain == {"second_brain_fts": 2, "second_brain_items": 2, "second_brain_suggestions": 0, "second_brain_tags": 0} and modules["second_brain"]["rows"] == 4
-            tables = {t["name"] for m in left["modules"] for t in m["tables"]}
-            assert "second_brain_fts_data" not in tables and "sqlite_sequence" not in tables
-            assert all(t["name"].startswith(f"{m['name']}_") for m in left["modules"] for t in m["tables"])
+            # the tables the store holds: shadow tables of virtual tables and sqlite_* stay hidden
+            tables = {t["name"] for t in query.schema(app.state.store)}
+            assert "second_brain_fts_data" not in tables and "sqlite_sequence" not in tables and {"second_brain_fts", "second_brain_items"} <= tables
             # one table's schema
             t = (await c.get("/api/database/table/second_brain_items")).json()
             assert t["module"] == "second_brain" and t["rows"] == 2 and t["sql"].startswith("CREATE TABLE") and "second_brain_items" in t["sql"]
@@ -124,8 +117,6 @@ def test_database_run_explain_save(config):
             assert (await c.get("/api/database/table/nope")).status_code == 404
             # saved queries
             qid = (await c.post("/api/database/action/save", json={"name": "recent", "sql": "select * from second_brain_items"})).json()["id"]
-            saved = (await c.get("/api/database/left")).json()["saved"]
-            assert len(saved) == 1 and saved[0]["name"] == "recent" and saved[0]["id"] == qid and saved[0]["sql"].startswith("select")
             assert (await c.post("/api/database/action/save", json={"name": "recent", "sql": "select id from second_brain_items"})).json()["id"] == qid
             assert (await c.post("/api/database/action/save", json={"name": "", "sql": "x"})).status_code != 200
             saved_item = (await c.get(f"/api/database/item/query:{qid}")).json()
@@ -140,7 +131,6 @@ def test_database_run_explain_save(config):
             assert {r["id"] for r in kept[1:]} == tables and all(r["when"] is None and r["type"] == "table" for r in kept[1:])
             # the page sends back the id it was listed under, prefix and all
             assert (await c.post("/api/database/action/delete", json={"id": f"query:{qid}"})).status_code == 200
-            assert (await c.get("/api/database/left")).json()["saved"] == []
             blank = (await c.get("/api/database/blank")).json()
             assert blank["db"] == "otto.db" and blank["size_bytes"] > 0 and blank["tables"] == len(tables)
             db = next(n for n in (await c.get("/api/home/numbers")).json() if n["module"] == "database")
@@ -169,8 +159,8 @@ def test_database_run_explain_save(config):
             assert next(e["text"] for e in (await c.get("/api/events?module=database")).json()["events"] if e["verb"] == "exported").startswith("second_brain_items: 2 rows")
             # a table no schema owns shows under `other`, last
             assert (await c.post("/api/database/action/write", json={"sql": "create table scratch(x)"})).json()["changes"] == 0
-            left = (await c.get("/api/database/left")).json()
-            assert left["modules"][-1] == {"name": "other", "rows": 0, "tables": [{"name": "scratch", "module": "other", "rows": 0}]}
+            ctx = app.state.registry.get("database").context(app.state.store, app.state.registry)
+            assert "\nother:\n  scratch (0): x\nSaved queries: none" in ctx
             assert (await c.get("/api/database/table/scratch")).json()["module"] == "other"
         await app.state.runner.drain(1)
         app.state.store.close()

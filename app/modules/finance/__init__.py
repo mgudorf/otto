@@ -12,7 +12,6 @@ MANIFEST = Manifest(
     schedules=(),
     agent=Agent(
         placeholder="Ask about money…",
-        skills=("totals", "monthly", "history"),
         read_tools=("finance_list", "finance_get", "finance_totals"),
         write_tools=(),
     ),

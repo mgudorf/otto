@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 
 from fastapi import APIRouter, Body, HTTPException, Request
@@ -13,7 +12,6 @@ from app.store import Store, now_iso, parse, tags_for
 router = APIRouter(prefix="/api/second_brain")
 
 KINDS = ("note", "link", "quote", "fact", "task")
-CHIPS = {"All": None, "Tasks": "task"}   # the kinds stay in the table for the agent; the page names only tasks
 SUGGESTION = "s"                                   # a suggestion's row id, "s12"; an item carries the bare integer
 RESOURCE = "second_brain"
 MODULE = "second_brain"
@@ -40,21 +38,6 @@ def _row(r: dict, tags: list[str]) -> dict:
 def _rows(store: Store, rs: list[dict]) -> list[dict]:
     tags = tags_for(store, MODULE, [r["id"] for r in rs])
     return [_row(r, tags[r["id"]]) for r in rs]
-
-
-def _day_label(when: str) -> str:
-    return f"{when[5:7]}-{when[8:10]}-{when[:4]}"
-
-
-def _group_by_day(store: Store, rs: list[dict]) -> list[dict]:
-    groups: list[dict] = []
-    for row in _rows(store, rs):
-        label = _day_label(row["when"])
-        if not groups or groups[-1]["label"] != label:
-            groups.append({"label": label, "count": 0, "rows": []})
-        groups[-1]["rows"].append(row)
-        groups[-1]["count"] += 1
-    return groups
 
 
 def _fts(query: str) -> str:
@@ -100,30 +83,6 @@ def _suggestion_row(r: dict) -> dict:
     """A suggestion as a ROW: no row of the owner's stands behind it, so `taggable` false keeps every tagging path off it."""
     return {"id": f"{SUGGESTION}{r['id']}", "module": MODULE, "title": r["text"], "when": _when(r["created_at"]),
             "fixed": [FACET], "tags": [], "type": "suggestion", "taggable": False, "verbs": _suggestion_verbs(r)}
-
-
-@router.get("/left")
-def left(request: Request, query: str = "", chip: str = "All", page: int = 0) -> dict:
-    store: Store = request.app.state.store
-    size = int(store.setting("ui.page_size"))
-    limit = size * (page + 1)
-    kind = CHIPS.get(chip)
-    where, params = [], []
-    if kind:
-        where.append("m.kind = ?")
-        params.append(kind)
-    if query.strip():
-        where.append("m.id IN (SELECT rowid FROM second_brain_fts WHERE second_brain_fts MATCH ?)")
-        params.append(_fts(query))
-    sql_where = ("WHERE " + " AND ".join(where)) if where else ""
-    total = store.scalar(f"SELECT COUNT(*) FROM second_brain_items m {sql_where}", tuple(params))
-    found = store.query(f"SELECT m.* FROM second_brain_items m {sql_where} ORDER BY m.created_at DESC LIMIT ?", (*params, limit))
-    return {
-        "groups": _group_by_day(store, found),
-        "chips": list(CHIPS),
-        "chip": chip if chip in CHIPS else "All",
-        "more": total > limit,
-    }
 
 
 @router.get("/blank")
@@ -293,7 +252,7 @@ def today(store: Store) -> list[dict]:
 
 
 def rows(store: Store, limit: int = 200) -> list[dict]:
-    """Every captured item as a ROW, newest first: what the tag intersection and Home's Recent read."""
+    """Every captured item as a ROW, newest first: what the feed's Recent reads."""
     return _rows(store, store.query("SELECT * FROM second_brain_items ORDER BY created_at DESC, id DESC LIMIT ?", (limit,)))
 
 

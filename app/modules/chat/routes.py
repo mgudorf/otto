@@ -38,10 +38,6 @@ def _when(ts: str) -> str:
     return parse(ts).astimezone().strftime("%Y-%m-%dT%H:%M")
 
 
-def _day_label(when: str) -> str:
-    return f"{when[5:7]}-{when[8:10]}-{when[:4]}"
-
-
 def _folder(config, sid: str) -> Path:
     return config.data.workspace / MODULE / sid
 
@@ -103,15 +99,6 @@ def _files(folder: Path) -> list[dict]:
     return sorted(out, key=lambda f: f["modified"], reverse=True)
 
 
-def _search(query: str) -> tuple[list[str], list[str]]:
-    """One LIKE per word over the title and every turn's text, all words required."""
-    where, params = [], []
-    for term in query.split():
-        where.append("(COALESCE(s.title, '') LIKE ? OR EXISTS (SELECT 1 FROM app_session_turns u WHERE u.session_id = s.id AND u.text LIKE ?))")
-        params += [f"%{term}%", f"%{term}%"]
-    return where, params
-
-
 def _replay(store: Store, sid: str, chars: int) -> str:
     """Otto's record of the conversation, cut to its tail, for a CLI that has lost the transcript."""
     lines = [f"{t['role']}: {t['text']}" for t in turns(store, sid) if t["role"] in ("user", "model") and t["text"]]
@@ -135,31 +122,6 @@ def _unique(path: Path) -> Path:
 
 
 # ---- routes --------------------------------------------------------------------------------
-@router.get("/left")
-def left(request: Request, query: str = "", page: int = 0) -> dict:
-    store: Store = request.app.state.store
-    size = int(store.setting("ui.page_size"))
-    limit = size * (page + 1)
-    where, params = _search(query)
-    sql_where = "WHERE s.module = ?" + "".join(f" AND {w}" for w in where)
-    params = [MODULE, *params]
-    total = store.scalar(f"SELECT COUNT(*) FROM app_sessions s {sql_where}", tuple(params))
-    found = store.query(
-        f"""SELECT s.id, s.title, s.tags, s.opened_at, {LAST_TS},
-                   COALESCE((SELECT MAX(id) FROM app_session_turns t WHERE t.session_id = s.id), 0) AS last_turn
-              FROM app_sessions s {sql_where} ORDER BY last_ts DESC, last_turn DESC, s.rowid DESC LIMIT ?""",
-        (*params, limit),
-    )
-    groups: list[dict] = []
-    for r in _rows(store, found):
-        label = _day_label(r["when"])
-        if not groups or groups[-1]["label"] != label:
-            groups.append({"label": label, "count": 0, "rows": []})
-        groups[-1]["rows"].append(r)
-        groups[-1]["count"] += 1
-    return {"groups": groups, "more": total > limit}
-
-
 @router.get("/item/{sid}")
 def item_route(request: Request, sid: str) -> dict:
     st = request.app.state
@@ -240,6 +202,7 @@ async def _reopen(request: Request, body: dict) -> dict:
     """A closed conversation comes back as an open one; its turns were never removed."""
     st = request.app.state
     sid = _get(st.store, str(body.get("id", "")))["id"]
+    st.session_closing.discard(sid)   # a reopen inside the tagging window cancels the queued close
     st.store.execute("UPDATE app_sessions SET closed_at = NULL WHERE id = ?", (sid,))
     return {"id": sid, "removes": True}
 

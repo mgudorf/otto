@@ -44,10 +44,9 @@ def test_science_tree_and_reads(sci):
         app = build(sci)
         await app.state.runner.start()
         async with client_for(app) as c:
-            left = (await c.get("/api/science/left")).json()
-            assert {g["label"]: sorted(r["id"] for r in g["rows"]) for g in left["groups"]} == {"": ["analysis.ipynb", "etl.py"], "sub/": ["sub/deep.py"]}
-            assert left["more"] is False and all(g["count"] == len(g["rows"]) for g in left["groups"])
-            row = next(r for g in left["groups"] for r in g["rows"] if r["id"] == "analysis.ipynb")
+            listed = routes.rows(app.state.store)
+            assert sorted(r["id"] for r in listed) == ["analysis.ipynb", "etl.py", "sub/deep.py"]
+            row = next(r for r in listed if r["id"] == "analysis.ipynb")
             assert row["title"] == "analysis.ipynb" and row["type"] == "notebook" and row["tags"] == [] and row["when"]
             assert row["fixed"] == ["science"]   # the facet, never the extension: what a file is picks its renderer instead
             assert row["status"] == "no kernel" and "right" not in row
@@ -185,9 +184,7 @@ def test_science_edits_write_valid_notebooks(sci):
             assert (await post("new", {"path": "../fresh", "kind": "py"})).status_code == 400
             assert (await post("new", {"path": "", "kind": "py"})).status_code == 400
             assert (await post("new", {"path": "x", "kind": "txt"})).status_code == 400
-            left = (await c.get("/api/science/left")).json()
-            assert sorted(r["id"] for g in left["groups"] for r in g["rows"]) == ["analysis.ipynb", "etl.py", "fresh.ipynb", "sub/deep.py", "sub/notes.py"]
-            assert {g["label"] for g in left["groups"]} == {"", "sub/"}   # an empty folder has no rows, so no group
+            assert sorted(r["id"] for r in routes.rows(app.state.store)) == ["analysis.ipynb", "etl.py", "fresh.ipynb", "sub/deep.py", "sub/notes.py"]
             assert [e["verb"] for e in (await c.get("/api/events?module=science")).json()["events"]] == ["created", "created", "created", "deleted"]
         for name in ("analysis.ipynb", "fresh.ipynb"):
             nb = nbformat.read(str(root / name), as_version=4)

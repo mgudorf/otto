@@ -27,21 +27,15 @@ def test_finance_end_to_end(config):
             assert (await cap({"kind": "budget", "name": "Food", "amount": "400", "cadence": "monthly"})).status_code == 200
             assert (await cap({"kind": "recurring", "name": "Bad", "amount": "ten", "cadence": "monthly"})).status_code == 400
             assert (await cap({"kind": "recurring", "name": "NoCadence", "amount": "1"})).status_code == 400
-            left = (await c.get("/api/finance/left")).json()
-            assert [g["label"] for g in left["groups"]] == ["Accounts", "Recurring", "Holdings", "Budgets"]
-            checking = left["groups"][0]["rows"][0]
+            ledger = lambda: {r["title"]: r for r in app.state.registry.get("finance").rows(app.state.store, 200)}
+            checking = ledger()["Checking"]
             assert (checking["title"], checking["amount"], checking["snip"], checking["dim"]) == ("Checking", "$1,250.50", None, False)
             assert checking["fixed"] == ["finance"] and checking["tags"] == ["account"]   # finance is fixed; the kind narrows as a plain tag, never written into the title
             assert checking["type"] == "ledger" and [v for v, _ in checking["verbs"]] == ["update", "end", "forget"]
-            domain = left["groups"][1]["rows"][0]
+            domain = ledger()["Domain"]
             assert (domain["title"], domain["amount"], domain["snip"], domain["due"]) == ("Domain", "$120.00", "yearly", None)
-            # the rows hook is what the cross-module routes read: one holding, found by the kind it carries
-            assert [(r["title"], r["amount"]) for r in (await c.get("/api/items?tags=holding")).json()["items"]] == [("VTI", "$3,000.00")]
-            # what is typed reaches the note, which no row carries, and a wildcard in it is a letter like any other
-            titles = lambda d: [r["title"] for g in d["groups"] for r in g["rows"]]
-            assert titles((await c.get("/api/finance/left?query=shares")).json()) == ["VTI"]
-            assert titles((await c.get("/api/finance/left?query=domain")).json()) == ["Domain"]
-            assert (await c.get("/api/finance/left?query=%25")).json()["groups"] == []
+            # the rows hook is what the feed reads: one holding, found by the kind it carries
+            assert [(r["title"], r["amount"]) for r in (await c.get("/api/feed?mode=recent&tags=holding")).json()["items"]] == [("VTI", "$3,000.00")]
             blank = (await c.get("/api/finance/blank")).json()
             assert blank["totals"] == {"accounts": 125050, "holdings": 300000, "monthly_recurring": 1000, "monthly_budget": 40000}
             assert (await c.post("/api/finance/action/update", json={"id": acct, "amount": "1300"})).json()["amount"] == 130000
@@ -50,7 +44,7 @@ def test_finance_end_to_end(config):
             assert (item["title"], item["amount"], item["note"]) == ("Checking", "$1,300.00", None)
             assert item["kv"] == [] and [v for v, _ in item["verbs"]] == ["update", "end", "forget"]
             assert (await c.post("/api/finance/action/end", json={"id": acct})).status_code == 200
-            ended = (await c.get("/api/finance/left")).json()["groups"][0]["rows"][0]
+            ended = ledger()["Checking"]
             assert ended["dim"] is True and ended["title"] == "Checking"
             assert (await c.get("/api/finance/blank")).json()["totals"]["accounts"] == 0
             numbers = (await c.get("/api/home/numbers")).json()
@@ -149,10 +143,10 @@ def test_finance_due_dates(config):
             assert "due" not in [v for v, _ in (await c.get(f"/api/finance/item/{acct}")).json()["verbs"]]
             assert (await c.get(f"/api/finance/item/{acct}")).json()["due"] is None   # a date is ignored off a recurring entry
 
-            rows = next(g for g in (await c.get("/api/finance/left")).json()["groups"] if g["label"] == "Recurring")["rows"]
-            assert [r["title"] for r in rows] == ["Rent", "Gym", "Domain"]   # soonest first, undated last; by name it would be Domain, Gym, Rent
-            assert (rows[0]["amount"], rows[0]["snip"], rows[0]["due"]) == ("$1,800.00", "monthly", today.isoformat())
-            assert (rows[2]["amount"], rows[2]["snip"], rows[2]["due"]) == ("$120.00", "yearly", None)
+            rows = {r["title"]: r for r in app.state.registry.get("finance").rows(app.state.store, 200) if "recurring" in r["tags"]}
+            assert set(rows) == {"Rent", "Gym", "Domain"}
+            assert (rows["Rent"]["amount"], rows["Rent"]["snip"], rows["Rent"]["due"]) == ("$1,800.00", "monthly", today.isoformat())
+            assert (rows["Domain"]["amount"], rows["Domain"]["snip"], rows["Domain"]["due"]) == ("$120.00", "yearly", None)
 
             assert (await c.post("/api/finance/action/due", json={"id": acct, "due_on": today.isoformat()})).status_code == 400
             assert (await c.post("/api/finance/action/due", json={"id": domain, "due_on": "nope"})).status_code == 400

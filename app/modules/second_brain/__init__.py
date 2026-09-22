@@ -14,7 +14,6 @@ MANIFEST = Manifest(
     schedules=(Schedule(task="suggest", every="24h", resource="second_brain", llm=True),),
     agent=Agent(
         placeholder="Ask your second brain…",
-        skills=("recall", "tag", "add", "suggest"),
         read_tools=("second_brain_search", "second_brain_get", "second_brain_tags", "second_brain_suggestions"),
         write_tools=("second_brain_add", "second_brain_tag", "second_brain_suggest"),
     ),

@@ -105,18 +105,6 @@ def _rows(store: Store, records: list[dict]) -> list[dict]:
     return [_row(r, tags[r["id"]]) for r in records]
 
 
-def _group_by_day(listed: list[dict]) -> list[dict]:
-    groups: list[dict] = []
-    for r in listed:
-        y, m, d = r["when"][:10].split("-")
-        label = f"{m}-{d}-{y}"
-        if not groups or groups[-1]["label"] != label:
-            groups.append({"label": label, "count": 0, "rows": []})
-        groups[-1]["rows"].append(r)
-        groups[-1]["count"] += 1
-    return groups
-
-
 def _count(store: Store, *labels: str) -> int:
     return store.scalar(f"SELECT COUNT(*) FROM email_messages m WHERE {' AND '.join([HAS] * len(labels))}", labels)
 
@@ -126,21 +114,6 @@ def _get(store: Store, message_id: str) -> dict:
     if row is None:
         raise HTTPException(404, "no such message")
     return row
-
-
-@router.get("/left")
-def left(request: Request, query: str = "", chip: str = "All", limit: int = ROWS) -> dict:
-    """The chip and the typed words narrow the whole mailbox, never a page of it; `more` says rows were held back."""
-    store: Store = request.app.state.store
-    chip = chip if chip in CHIPS else "All"
-    where, params = _where(query, chip)
-    total = store.scalar(f"SELECT COUNT(*) FROM email_messages m {where}", tuple(params))
-    out = rows(store, limit, chip, query)
-    return {
-        "groups": _group_by_day(out),
-        "more": total > len(out),
-        "read_on_open": bool(CONFIG.email.read_on_open) if CONFIG else False,
-    }
 
 
 @router.get("/item/{message_id}")
@@ -256,7 +229,7 @@ def numbers(store: Store) -> dict:
 
 
 def rows(store: Store, limit: int = ROWS, chip: str = "All", query: str = "") -> list[dict]:
-    """The inbox as ROWs, newest first. The page's list, the cross-module lists and Home's Recent share it."""
+    """The inbox as ROWs, newest first; the feed, the bulk actions and email_search share its narrowing."""
     where, params = _where(query, chip if chip in CHIPS else "All")
     records = store.query(f"{SELECT} {where} ORDER BY m.internal_date DESC LIMIT ?", (*params, max(1, limit)))
     return _rows(store, records)

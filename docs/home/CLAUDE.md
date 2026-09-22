@@ -9,7 +9,7 @@ Home carries no facet, so it lists no rows of its own and takes no place on the 
 
 | Piece | Current state |
 |---|---|
-| Feed | `GET /api/feed?mode=priority\|recent&tags=&q=&limit=` answers `{"items": [ROW, …]}` from every enabled module that carries a facet. `priority` is each module's `queue`, sorted by the `waits` its module set, a row left unranked behind every ranked one, then renumbered 1..n so the rank the feed groups by is the one inside a facet. `recent` is each module's `rows(store, limit)`, newest first, an undated row last. `tags` keeps a row only when it carries every named tag across `fixed` and `tags`; `q` is a case-insensitive substring over the title and the snip. A mode that is neither word is a 400 |
+| Feed | `GET /api/feed?mode=priority\|recent&tags=&q=&limit=` answers `{"items": [ROW, …], "rev": <the daemon's revision>}` from every enabled module that carries a facet. `priority` is each module's `queue`, sorted by the `waits` its module set, a row left unranked behind every ranked one, then renumbered 1..n so the rank the feed groups by is the one inside a facet. `recent` is each module's `rows(store, limit)`, newest first, an undated row last. `tags` keeps a row only when it carries every named tag across `fixed` and `tags`; `q` is a case-insensitive substring over the title and the snip. A mode that is neither word is a 400 |
 | Numbers | `GET /api/home/numbers`: one entry per enabled faceted module with a `numbers` hook, each carrying the module's facet, hue and icon beside its value and word |
 | Hooks | `context` only, which is the one agent's Current state block: every faceted module's number, how many rows it has today and their titles, then `Review: N waiting` and one line per queued row with the module and id that own it. No `rows`, `queue`, `numbers` or `item`: Home owns no items |
 | Agent | Home brings no tools. Its `agent.md` is one share of the single Otto prompt, and its `context` is what fills that prompt's Current state block |
@@ -44,19 +44,6 @@ What happens: `GET /api/home/numbers` still answers, and no file under `app/stat
 Expected: the one number a module reports is shown somewhere, or the hook goes.
 
 Fix: have the brand menu read `/api/home/numbers` beside the facets it already lists, or drop the route and the `numbers` hook from the contract. The first is the smaller change and keeps the owner's one sanctioned counts strip.
-
-### Home's agent prompt still speaks as one module's agent
-
-- Kind: defect
-- Where: `app/modules/home/agent.md`, `app/api.py` (`_otto`)
-- Found: 09-21-2026, the one-page change
-- Status: open
-
-What happens: `_otto` joins every enabled module's `agent.md` into one prompt. Home's share opens "You are the Home agent", states "You have no tools; everything you know is in that block", and tells the owner to open a module when something needs that module's own agent. Otto holds every module's tools, and there are no modules to open.
-
-Expected: Home's share of the prompt describes the day at a glance and nothing else, so it does not contradict the eight shares beside it.
-
-Fix: cut the sentence that claims no tools and the one that sends the owner to another module, and drop the "You are the Home agent" opening. The same opening sits at the top of every other module's `agent.md`, so the ruling on how the shares are introduced belongs with `_otto` in `docs/app/CLAUDE.md`.
 
 ### The Gmail consent row cannot be opened
 

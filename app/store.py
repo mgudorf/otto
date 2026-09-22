@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -145,6 +146,21 @@ SECOND_BRAIN = "second_brain"
 def tag_key(tag: str) -> str:
     """One spelling per tag: `GRADient descent` and `gradient DESCENT` are the same tag."""
     return str(tag).strip().lower()
+
+
+WORD = re.compile(r"[a-z0-9]+")
+
+
+def word_tags(values) -> tuple[list[str], list[str]]:
+    """What an agent may write as tags: one word each, letters and digits, lowercased, no repeats -> (kept, refused)."""
+    kept, refused = [], []
+    for v in values if isinstance(values, (list, tuple)) else []:
+        tag = tag_key(v)[:40]
+        if not WORD.fullmatch(tag):
+            refused.append(tag)
+        elif tag not in kept:
+            kept.append(tag)
+    return kept, refused
 
 
 def tags_for(store: Store, module: str, ids) -> dict:

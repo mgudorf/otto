@@ -247,27 +247,23 @@ def test_email_actions(email_config, fake):
         await app.state.runner.start()
         async with client_for(app) as c:
             await app.state.runner.submit("email.sync", "email", "gmail", "scheduled", sync).done
-            left = (await c.get("/api/email/left?chip=Flagged")).json()
-            assert [r["id"] for r in left["groups"][0]["rows"]] == ["m3"] and left["more"] is False
-            row = left["groups"][0]["rows"][0]
+            flagged = email_rows(app.state.store, 200, "Flagged")
+            assert [r["id"] for r in flagged] == ["m3"]
+            row = flagged[0]
             # the sender is the clause after the subject and the Gmail snippet the gist under it; the facet is the one fixed tag
             assert (row["title"], row["snip"], row["summary"]) == ("Contract draft", "Cy", "please sign the contract")
             assert row["fixed"] == ["email"] and row["type"] == "email" and row["href"].endswith("m3")
-            assert row["unread"] is True and row["dim"] is False and row["starred"] is True and left["read_on_open"] is True
-            # a chip narrows the whole mailbox in the daemon, never a page of results in the browser
-            unread = (await c.get("/api/email/left?chip=Unread")).json()
-            assert [r["id"] for g in unread["groups"] for r in g["rows"]] == ["m3", "m2"]
-            assert (await c.get("/api/email/left?chip=Priority")).json()["groups"] == []
-            # what is typed narrows the whole mailbox through email_fts too, never the rows the page happens to hold
-            found = (await c.get("/api/email/left?query=lunch")).json()
-            assert [r["id"] for g in found["groups"] for r in g["rows"]] == ["m2"] and found["more"] is False
-            assert (await c.get("/api/email/left?query=lunch&chip=Flagged")).json()["groups"] == []
-            assert (await c.get("/api/email/left?limit=1")).json()["more"] is True   # a list cut short says so
+            assert row["unread"] is True and row["dim"] is False and row["starred"] is True
+            # a chip narrows the whole mailbox, and so do the typed words, through email_fts
+            assert [r["id"] for r in email_rows(app.state.store, 200, "Unread")] == ["m3", "m2"]
+            assert email_rows(app.state.store, 200, "Priority") == []
+            assert [r["id"] for r in email_rows(app.state.store, 200, "All", "lunch")] == ["m2"]
+            assert email_rows(app.state.store, 200, "Flagged", "lunch") == [] and len(email_rows(app.state.store, 1)) == 1
 
             r = await c.post("/api/email/action/archive", json={"ids": ["m1"]})
             assert r.status_code == 200 and r.json() == {"count": 1}, r.text
             assert fake.modified[-1] == {"ids": ["m1"], "addLabelIds": [], "removeLabelIds": ["INBOX"]}
-            assert "m1" not in [x["id"] for g in (await c.get("/api/email/left")).json()["groups"] for x in g["rows"]]
+            assert "m1" not in [x["id"] for x in email_rows(app.state.store, 200)]
 
             r = await c.post("/api/email/action/trash", json={"filter": {"query": "lunch", "chip": "All"}})
             assert r.json() == {"count": 1} and fake.modified[-1] == {"ids": ["m2"], "addLabelIds": ["TRASH"], "removeLabelIds": ["INBOX"]}
@@ -493,7 +489,7 @@ def test_email_manual_sync(email_config, fake):
             r = await c.post("/api/email/action/sync")
             assert r.status_code == 200 and "backfilled 3" in r.json()["result"], r.text
             synced = app.state.store.cursor("email.synced_at")
-            listed = [r["id"] for g in (await c.get("/api/email/left")).json()["groups"] for r in g["rows"]]
+            listed = [r["id"] for r in email_rows(app.state.store, 200)]
             assert synced and listed == ["m3", "m2", "m1"]
             job = (await c.get("/api/jobs")).json()[0]
             assert job["task"] == "email.sync" and job["resource"] == "gmail" and job["kind"] == "action"

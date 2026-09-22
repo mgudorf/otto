@@ -8,6 +8,5 @@ MANIFEST = Manifest(
     order=0,
     agent=Agent(
         placeholder="Ask about today…",
-        skills=("today", "where-to-look"),
     ),
 )

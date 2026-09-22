@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 
 from app.api import event_stream
 from app.modules.science import notebook, runs, state
-from app.store import Store, iso, now_iso, parse, tags_for
+from app.store import Store, iso, now_iso, tags_for
 
 router = APIRouter(prefix="/api/science")
 
@@ -31,15 +31,6 @@ def _every(seconds: int) -> str:
 
 def _schedule_text(row) -> str:
     return f"every {_every(row['every_seconds'])}" + (f" at {row['at']}" if row["at"] else "")
-
-
-@router.get("/left")
-def left(request: Request) -> dict:
-    """Every file as a ROW, under the folder it sits in."""
-    groups: dict[str, list[dict]] = {}
-    for r in rows(request.app.state.store):
-        groups.setdefault(r["title"].rpartition("/")[0], []).append(r)
-    return {"groups": [{"label": f"{d}/" if d else "", "count": len(rs), "rows": rs} for d, rs in groups.items()], "more": False}
 
 
 @router.get("/blank")

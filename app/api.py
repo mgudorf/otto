@@ -15,7 +15,7 @@ from fastapi.responses import StreamingResponse
 
 from app.claude import ClaudeError
 from app.modules import Agent, Manifest, Module
-from app.store import Store, add_tags, all_tags, now_iso, remove_tag, tag_key, tags_for
+from app.store import Store, add_tags, all_tags, now_iso, remove_tag, tag_key, tags_for, word_tags
 
 router = APIRouter()
 
@@ -90,7 +90,7 @@ def shell(request: Request) -> dict:
             "order": m.manifest.order, "facet": m.manifest.facet, "enabled": settings.get(f"modules.{m.name}.enabled", True) is not False,
             "scheduled": settings.get(f"modules.{m.name}.scheduled", True) is not False, "tasks": len(m.manifest.schedules),
             "model": settings.get(f"modules.{m.name}.model") or "default", "effort": settings.get(f"modules.{m.name}.effort") or "default",
-            "agent": {"placeholder": a.placeholder, "skills": list(a.skills)} if a else None, "error": None,
+            "agent": {"placeholder": a.placeholder} if a else None, "error": None,
         })
     for name, err in st.registry.errors.items():
         modules.append({
@@ -111,37 +111,13 @@ def shell(request: Request) -> dict:
     }
 
 
-# ---- tags and items ---------------------------------------------------------------------------
-# One tag set across every module, so picking a tag narrows the whole app rather than one page. A module joins by
-# defining rows(store, limit); one that does not is simply absent here.
-ROW_LIMIT = 200
-
-
-def _listing(request: Request) -> list:
-    """Every enabled module that can list its rows, in facet order."""
-    store: Store = request.app.state.store
-    return [m for m in request.app.state.registry.ordered() if m.rows and store.setting(f"modules.{m.name}.enabled") is not False]
+# ---- tags -----------------------------------------------------------------------------------------
+# One tag set across every module, so picking a tag narrows the whole app rather than one page.
 
 
 @router.get("/api/tags")
 def tags(request: Request) -> list[dict]:
     return all_tags(request.app.state.store)
-
-
-@router.get("/api/items")
-def items(request: Request, tags: str = "", limit: int = ROW_LIMIT) -> dict:
-    """Rows from every module carrying all the named tags, newest first; with no tags, every module's rows."""
-    st = request.app.state
-    want = {t for t in (tag_key(t) for t in tags.split(",")) if t}
-    cap = max(1, min(limit, 1000))
-    out = []
-    for m in _listing(request):
-        for row in m.rows(st.store, cap):
-            carried = {tag_key(t) for t in [*(row.get("fixed") or []), *(row.get("tags") or [])]}
-            if want <= carried:
-                out.append(row)
-    out.sort(key=lambda r: r.get("when") or "", reverse=True)
-    return {"items": out}
 
 
 def _tagged(request: Request, body: dict) -> tuple[str, str]:
@@ -375,10 +351,10 @@ def _union(agents: list, field: str) -> tuple[str, ...]:
 
 
 def _otto(st) -> Module:
-    """The one agent: every enabled module's tools, skills and prompt behind a single session module."""
+    """The one agent: every enabled module's tools and prompt behind a single session module."""
     mods = _agents(st)
     a = [m.manifest.agent for m in mods]
-    agent = Agent(placeholder="", skills=_union(a, "skills"), read_tools=_union(a, "read_tools"),
+    agent = Agent(placeholder="", read_tools=_union(a, "read_tools"),
                   write_tools=_union(a, "write_tools"), builtins=_union(a, "builtins"))
     home = st.registry.modules.get("home")
     return Module(
@@ -454,7 +430,7 @@ def session(request: Request, module: str) -> dict:
     return {
         "sessions": [{"id": r["id"], "label": _label(st.store, r), "opened_at": r["opened_at"], "busy": r["id"] in st.session_busy} for r in _open(st.store, module)],
         "context_label": _context_label(st, mod),
-        "agent": {"cmd": f"claude · {module}", "placeholder": a.placeholder, "skills": list(a.skills)},
+        "agent": {"cmd": f"claude · {module}", "placeholder": a.placeholder},
     }
 
 
@@ -475,6 +451,7 @@ def session_reopen(request: Request, module: str, sid: str) -> dict:
     row = store.one("SELECT * FROM app_sessions WHERE module = ? AND id = ?", (module, sid))
     if row is None:
         raise HTTPException(404, "no session with that id")
+    st.session_closing.discard(sid)   # inside the tagging window the close is cancelled: the tab stays and is only tagged
     if row["closed_at"]:
         store.execute("UPDATE app_sessions SET closed_at = NULL WHERE id = ?", (sid,))
         store.event(module, "reopened", f"session: {_label(store, row)}", ref=sid)
@@ -511,6 +488,7 @@ async def session_send(request: Request, module: str, body: dict = Body(...)) ->
     if text == "/clear":
         if sess is None:
             return {"cleared": False}
+        st.session_closing.add(sess["id"])
         tag_session(st, mod, sess["id"], _key(module, sess["id"]), close=True)
         st.broadcast.publish(_key(module, sess["id"]), {"role": "system", "text": "session cleared", "ts": now_iso()})
         return {"cleared": True}
@@ -605,22 +583,24 @@ def tag_session(st, mod, sid: str, key: str, close: bool):
             transcript = "\n".join(f"{t['role']}: {t['text']}" for t in rows if t["role"] in ("user", "model") and t["text"])[:6000]
             prompt = (
                 'Below is a conversation. Reply with only JSON of the form {"title": <at most 8 words>, '
-                '"tags": [<3 to 6 lowercase topic identifiers>]}.\n\n' + transcript
+                '"tags": [<its topics, one word each, letters and digits only, as many as fit>]}.\n\n' + transcript
             )
             try:
                 raw = await st.claude.oneshot(ctx, mod, prompt)
                 data = json.loads(raw[raw.find("{"): raw.rfind("}") + 1])
                 title = str(data.get("title") or title)[:80]
-                tags = [str(t)[:40] for t in data.get("tags", [])][:8]
+                tags = word_tags(data.get("tags", []))[0][:8]   # a one-shot drops what is not one word; nothing retries it
             except Exception as e:
                 ctx.log(f"tagging failed, keeping fallback title: {e!r}")
         title = store.scalar("SELECT title FROM app_sessions WHERE id = ?", (sid,)) or title   # a rename outranks the tagger
+        closing = close and sid in st.session_closing                                        # a reopen since the /clear keeps the tab
+        st.session_closing.discard(sid)
         with ctx.commit() as conn:
-            if close:
+            if closing:
                 conn.execute("UPDATE app_sessions SET closed_at = ?, title = ?, tags = ? WHERE id = ?", (now_iso(), title, json.dumps(tags), sid))
             else:
                 conn.execute("UPDATE app_sessions SET title = ?, tags = ? WHERE id = ?", (title, json.dumps(tags), sid))
-        ctx.event("closed" if close else "tagged", f"session: {title}" + (f" [{', '.join(tags)}]" if tags else ""), ref=sid)
+        ctx.event("closed" if closing else "tagged", f"session: {title}" + (f" [{', '.join(tags)}]" if tags else ""), ref=sid)
         st.broadcast.publish(key, {"role": "tagged", "title": title, "tags": tags, "ts": now_iso()})
         return title
 

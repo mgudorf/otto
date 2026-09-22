@@ -52,7 +52,7 @@ def test_newsfeed_end_to_end(config):
         async with client_for(app) as c:
             shell = (await c.get("/api/shell")).json()
             feed = next(m for m in shell["modules"] if m["name"] == "newsfeed")
-            assert feed["hue"] == "#D79EBB" and feed["agent"]["skills"] == ["recall", "searches", "add", "tag"]
+            assert feed["hue"] == "#D79EBB"
             assert {m["name"] for m in shell["modules"]}.isdisjoint({"business", "social", "web_search"})
             assert (await c.get("/api/newsfeed/blank")).json()["searches"] == []
 
@@ -61,22 +61,16 @@ def test_newsfeed_end_to_end(config):
             b = _entry(store, sid, "Board game night", "https://e.example/1", starts_at=f"{_day(3)}T19:00")
             store.execute("INSERT INTO newsfeed_tags(kind, ref, tag) VALUES ('item', ?, 'game')", (b,))
 
-            left = (await c.get("/api/newsfeed/left")).json()
-            assert left["chip"] == "All" and left["chips"] == ["All", "Open", "Accepted"]
-            assert [r["id"] for g in left["groups"] for r in g["rows"]] == [a, b]
-            rows = {r["id"]: r for g in left["groups"] for r in g["rows"]}
+            listed = app.state.registry.get("newsfeed").rows(store, 200)
+            assert [r["id"] for r in listed] == [a, b]
+            rows = {r["id"]: r for r in listed}
             assert rows[a]["title"] == "Acme is hiring" and rows[a]["type"] == "article" and rows[a]["dim"] is False
             assert rows[a]["snip"] == "jobs" and len(rows[a]["when"]) == 16                      # the search it came from, and the day found in the owner's clock
             assert rows[a]["kv"] == [["Search", "jobs, every 1 d"], ["Link", "acme.example"]]
             assert ["Happens", _md(3)] in rows[b]["kv"]
             assert rows[b]["fixed"] == ["newsfeed"] and rows[b]["tags"] == ["game"]   # newsfeed is the only fixed tag; what a run wrote narrows as a plain one
             assert (await c.post("/api/tags/add", json={"module": "newsfeed", "id": a, "tags": ["Remote"]})).json()["tags"] == ["remote"]
-            assert [r["id"] for r in (await c.get("/api/items?tags=remote")).json()["items"]] == [a]   # the owner's tags, through the rows hook
-            assert (await c.get("/api/newsfeed/left?query=game")).json()["groups"] != []      # a tag is searchable
-            assert (await c.get("/api/newsfeed/left?query=acme")).json()["groups"] != []
-            assert (await c.get("/api/newsfeed/left?query=%25")).json()["groups"] == []   # a wildcard is a letter like any other
-            assert (await c.get("/api/newsfeed/left?limit=1")).json()["more"] is True     # a list cut short says so
-            assert (await c.get("/api/newsfeed/left?chip=Accepted")).json()["groups"] == []
+            assert [r["id"] for r in (await c.get("/api/feed?mode=recent&tags=remote")).json()["items"]] == [a]   # the owner's tags, through the rows hook
 
             item = (await c.get(f"/api/newsfeed/item/{a}")).json()
             assert item["type"] == "article" and item["snip"] == "jobs"
@@ -102,7 +96,7 @@ def test_newsfeed_end_to_end(config):
             assert [v for v, _ in decided["verbs"]] == ["link"] and decided["dim"] is True
             assert (await c.post("/api/newsfeed/action/dismiss", json={"id": b})).json()["status"] == "dismissed"
             # Dismissed: off every chip and off Home; still in the table so no run proposes it again.
-            assert [r["id"] for g in (await c.get("/api/newsfeed/left")).json()["groups"] for r in g["rows"]] == [a]
+            assert [r["id"] for r in app.state.registry.get("newsfeed").rows(store, 200)] == [a]
             assert (await c.get("/api/feed?mode=priority")).json()["items"] == []
             assert store.scalar("SELECT COUNT(*) FROM newsfeed_items") == 2
 
@@ -194,9 +188,12 @@ def test_agent_creates_searches_and_tags(feed_store, config):
     assert full.tools["newsfeed_tag"](str(eid), ["Remote"])["tags"] == ["remote"]
     assert full.tools["newsfeed_tag"]("s1", ["career"])["tags"] == ["ai", "career", "work"]
     assert "error" in full.tools["newsfeed_tag"]("s9", ["x"]) and "error" in full.tools["newsfeed_tag"]("nope", ["x"])
+    assert "two words" in full.tools["newsfeed_tag"](str(eid), ["two words"])["error"]   # a tag is one word; the tool says which was not
+    assert "two words" in full.tools["newsfeed_search_add"]("phrase", "x", tags=["two words"])["error"]
     assert read.tools["newsfeed_get"]("s1")["tags"] == ["ai", "career", "work"] and read.tools["newsfeed_get"](str(eid))["tags"] == ["remote"]
-    assert [r["id"] for r in read.tools["newsfeed_search"]("remote")] == [eid]
-    assert read.tools["newsfeed_search"]("nothing") == []
+    assert [r["id"] for r in read.tools["newsfeed_search"]("remote")] == [eid]   # a tag is searchable
+    assert [r["id"] for r in read.tools["newsfeed_search"]("acme")] == [eid]
+    assert read.tools["newsfeed_search"]("nothing") == [] and read.tools["newsfeed_search"]("%") == []   # a wildcard is a letter like any other
 
 
 class FakeCtx:
@@ -240,7 +237,7 @@ def test_run_inserts_capped_dated_tagged_and_idempotent(feed_store, config):
     sid = _search(feed_store, "events", tags=("social",), cap=3)
     later = _search(feed_store, "later", next_run=_day(2))
     items = [
-        {"text": f"thing {i}", "url": f"https://x.example/{i}", "summary": "matters", "date": _day(i + 1), "time": "19:00" if i else "", "tags": ["Art", "woodstock"]}
+        {"text": f"thing {i}", "url": f"https://x.example/{i}", "summary": "matters", "date": _day(i + 1), "time": "19:00" if i else "", "tags": ["Art", "woodstock", "two words"]}
         for i in range(4)
     ]
     items.insert(1, dict(items[0]))                                    # duplicate url

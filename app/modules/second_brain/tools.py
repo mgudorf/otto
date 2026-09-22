@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from app.modules.second_brain.routes import KINDS, _fts, _tags
-from app.store import Store, now_iso
+from app.store import Store, now_iso, word_tags
 
 
 def register(read, full, store: Store, config) -> None:
@@ -43,20 +43,24 @@ def register(read, full, store: Store, config) -> None:
             return {"error": f"kind must be one of {', '.join(KINDS)}"}
         if not text.strip():
             return {"error": "empty text"}
+        kept, refused = word_tags(tags or [])
+        if refused:
+            return {"error": f"a tag is one word, letters and digits only: {refused[0]!r}"}
         ts = now_iso()
         with store.tx() as conn:
             cur = conn.execute("INSERT INTO second_brain_items(kind, text, created_at, updated_at) VALUES (?, ?, ?, ?)", (kind, text.strip(), ts, ts))
-            for t in tags or []:
-                if t.strip():
-                    conn.execute("INSERT OR IGNORE INTO second_brain_tags(item_id, tag) VALUES (?, ?)", (cur.lastrowid, t.strip()))
+            for t in kept:
+                conn.execute("INSERT OR IGNORE INTO second_brain_tags(item_id, tag) VALUES (?, ?)", (cur.lastrowid, t))
         store.event("second_brain", "captured", f"{kind} (agent): {text.strip()[:120]}", ref=str(cur.lastrowid))
         return {"id": cur.lastrowid}
 
     def second_brain_tag(id: int, tags: list[str]) -> dict:
-        """Add tags to an item."""
+        """Add tags to an item: one word each, as many as fit."""
         if store.one("SELECT id FROM second_brain_items WHERE id = ?", (id,)) is None:
             return {"error": f"no item {id}"}
-        clean = [t.strip() for t in tags if t.strip()]
+        clean, refused = word_tags(tags)
+        if refused:
+            return {"error": f"a tag is one word, letters and digits only: {refused[0]!r}"}
         with store.tx() as conn:
             for t in clean:
                 conn.execute("INSERT OR IGNORE INTO second_brain_tags(item_id, tag) VALUES (?, ?)", (id, t))

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from app.modules.newsfeed.routes import SEARCH, _ref, _search, searches, tags_of
-from app.modules.newsfeed.tasks import clean_tags, local_today
-from app.store import Store, now_iso
+from app.modules.newsfeed.tasks import local_today
+from app.store import Store, now_iso, word_tags
 
 COLUMNS = "id, search_id, text, url, summary, starts_at, follow_up_at, follows, found_at, status, decided_at"
 
@@ -45,6 +45,9 @@ def register(read, full, store: Store, config) -> None:
             return {"error": "name and prompt are required"}
         if store.one("SELECT id FROM newsfeed_searches WHERE name = ?", (name,)):
             return {"error": f"a search named {name!r} exists"}
+        kept, refused = word_tags(tags or [])
+        if refused:
+            return {"error": f"a tag is one word, letters and digits only: {refused[0]!r}"}
         every_days = max(1, int(every_days))
         cap = max(1, int(cap)) if cap else config.newsfeed.items_per_run
         with store.tx() as conn:
@@ -52,13 +55,13 @@ def register(read, full, store: Store, config) -> None:
                 "INSERT INTO newsfeed_searches(name, prompt, every_days, cap, created_at, next_run) VALUES (?, ?, ?, ?, ?, ?)",
                 (name, prompt, every_days, cap, now_iso(), local_today()),
             )
-            for t in clean_tags(tags):
+            for t in kept:
                 conn.execute("INSERT OR IGNORE INTO newsfeed_tags(kind, ref, tag) VALUES ('search', ?, ?)", (cur.lastrowid, t))
         store.event("newsfeed", "search added", f"(agent) {name}: {prompt[:100]}", ref=f"{SEARCH}{cur.lastrowid}")
         return {"id": f"{SEARCH}{cur.lastrowid}", "name": name, "every_days": every_days, "cap": cap, "tags": tags_of(store, "search", cur.lastrowid)}
 
     def newsfeed_tag(id: str, tags: list[str]) -> dict:
-        """Add tags to an entry (integer id) or a search (s12). Lowercase words; existing tags stay."""
+        """Add tags to an entry (integer id) or a search (s12). One word each, as many as fit; existing tags stay."""
         try:
             kind, ref = _ref(id)
         except Exception:
@@ -67,7 +70,9 @@ def register(read, full, store: Store, config) -> None:
         r = store.one(f"SELECT * FROM {table} WHERE id = ?", (ref,))
         if r is None:
             return {"error": f"no {kind} {id}"}
-        clean = clean_tags(tags)
+        clean, refused = word_tags(tags)
+        if refused:
+            return {"error": f"a tag is one word, letters and digits only: {refused[0]!r}"}
         if not clean:
             return {"error": "no tags"}
         with store.tx() as conn:

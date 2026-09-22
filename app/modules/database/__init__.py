@@ -9,7 +9,6 @@ MANIFEST = Manifest(
     facet="database",
     agent=Agent(
         placeholder="Describe a query…",
-        skills=("nl-to-sql", "explain-plan", "schema"),
         read_tools=("db_schema", "db_query", "db_explain"),
         write_tools=("db_save_query",),
     ),

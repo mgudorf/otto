@@ -35,25 +35,6 @@ def _match(query: str) -> tuple[str, tuple]:
     return "WHERE tag LIKE ? ESCAPE '\\'", (f"%{needle}%",)
 
 
-def _page(store: Store, query: str, page: int) -> tuple[list[dict], int, int]:
-    """Nodes matching the substring, largest first, up to ui.page_size * (page + 1)."""
-    size = int(store.setting("ui.page_size"))
-    limit = size * (page + 1)
-    where, params = _match(query)
-    total = store.scalar(f"SELECT COUNT(*) FROM graph_nodes {where}", params)
-    rows = store.query(f"SELECT {NODE_COLUMNS} FROM graph_nodes {where} ORDER BY count DESC, tag LIMIT ?", (*params, limit))
-    return rows, total, limit
-
-
-@router.get("/left")
-def left(request: Request, query: str = "", page: int = 0) -> dict:
-    rows, total, limit = _page(request.app.state.store, query, page)
-    return {
-        "groups": [{"label": "tags", "count": total, "rows": [_row(r) for r in rows]}],
-        "more": total > limit,
-    }
-
-
 @router.get("/graph")
 def graph(request: Request, query: str = "") -> dict:
     """Every node the query matches and the edges between them: the map is a map of every tag."""

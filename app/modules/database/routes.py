@@ -52,15 +52,6 @@ def _modules(tables: list[dict], registry) -> list[dict]:
     return out
 
 
-@router.get("/left")
-def left(request: Request) -> dict:
-    st = request.app.state
-    return {
-        "modules": _modules(query.tables(st.store), st.registry),
-        "saved": [{"id": q["id"], "name": q["name"], "sql": q["sql"], "updated_at": q["updated_at"]} for q in _saved(st.store)],
-    }
-
-
 @router.get("/blank")
 def blank(request: Request) -> dict:
     store: Store = request.app.state.store

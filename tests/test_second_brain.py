@@ -88,12 +88,8 @@ def test_done_and_suggestion_actions(config):
                 "ok": True, "said": "completed call the bank", "removes": False}
             item = (await c.get(f"/api/second_brain/item/{mid}")).json()
             assert item["done"] is True and item["verbs"] == [["reopen", "Reopen"], ["forget", "Forget"]]
-            left = (await c.get("/api/second_brain/left?chip=Tasks")).json()
-            task = left["groups"][0]["rows"][0]
+            task = next(r for r in rows_hook(app.state.store, 200) if r["id"] == mid)
             assert task["done"] is True and task["fixed"] == ["entry"] and task["type"] == "task" and task["title"] == "call the bank"
-            # what is typed narrows the whole table through second_brain_fts, which is where the page now sends it
-            assert [r["id"] for g in (await c.get("/api/second_brain/left?query=bank")).json()["groups"] for r in g["rows"]] == [mid]
-            assert (await c.get("/api/second_brain/left?query=umbrella")).json()["groups"] == []
             assert (await c.post("/api/second_brain/action/reopen", json={"id": mid})).json() == {"id": mid}
             assert (await c.get(f"/api/second_brain/item/{mid}")).json()["done"] is False
 
@@ -135,10 +131,12 @@ def test_done_and_suggestion_actions(config):
 class RecordingServer:
     def __init__(self):
         self.names = set()
+        self.tools = {}
 
     def tool(self):
         def deco(fn):
             self.names.add(fn.__name__)
+            self.tools[fn.__name__] = fn
             return fn
 
         return deco
@@ -152,6 +150,11 @@ def test_second_brain_tool_split(store, config):
     assert read.names == set(agent.read_tools)
     assert full.names == set(agent.read_tools) | set(agent.write_tools)
     assert not set(agent.read_tools) & set(agent.write_tools)
+    # a tag an agent writes is one word; the tool refuses the list and names what was not
+    assert "two words" in full.tools["second_brain_add"]("note", "x", tags=["two words"])["error"]
+    mid = full.tools["second_brain_add"]("note", "x", tags=["One", "one"])["id"]
+    assert "two words" in full.tools["second_brain_tag"](mid, ["fine", "two words"])["error"]
+    assert full.tools["second_brain_tag"](mid, ["Fine"])["tags"] == ["fine", "one"]
 
 
 def test_entry_is_the_facet_every_kind_carries(store, config):

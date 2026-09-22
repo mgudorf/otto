@@ -70,7 +70,7 @@ def test_education_end_to_end(config):
         async with client_for(app) as c:
             shell = (await c.get("/api/shell")).json()
             edu = next(m for m in shell["modules"] if m["name"] == "education")
-            assert edu["hue"] == "#86AAE3" and edu["order"] == 2 and edu["agent"]["skills"] == ["question-gen", "quiz", "explain", "plan"]
+            assert edu["hue"] == "#86AAE3" and edu["order"] == 2
             r = await c.post("/api/education/action/add_topic", json={"name": "Physics", "description": ""})
             assert r.status_code == 200, r.text
             tid = r.json()["id"]
@@ -88,10 +88,8 @@ def test_education_end_to_end(config):
                 PARTS + [{"title": "Fourth", "prompt": "d", "rubric": "r"}], "nightly", False,
             )["id"]
             assert "error" in add_question(store, tid, "Why is the sky blue?", "again", DEFS, "s", PARTS, "nightly", False)
-            left = (await c.get("/api/education/left")).json()
-            row = left["groups"][0]["rows"][0]
-            # one group carrying both slices as ROWs: the chips narrow it in the browser
-            assert left["groups"][0]["label"] == "" and left["more"] is False and row["id"] == qid
+            row = app.state.registry.get("education").rows(store, 200)[0]
+            assert row["id"] == qid
             assert row["title"] == "Why is the sky blue?" and row["status"] == "active" and row["pct"] == 0 and row["score"] is None
             # the facet is the row's one fixed tag; the topic and the question's own tag lead what the search bar narrows on
             assert row["topic"] == "Physics" and row["fixed"] == ["education"] and row["type"] == "question"
@@ -192,10 +190,9 @@ def test_education_end_to_end(config):
             # a revision after completion recomputes the mean and never moves the difficulty again
             assert grade(store, qid, 4, 60, "revised")["question_score"] == 88
             assert store.scalar("SELECT difficulty FROM education_topics WHERE id = ?", (tid,)) == start_d + 1
-            # LEFT: one group, the queue first and the completed history behind it, each row carrying its own score
-            left = (await c.get("/api/education/left")).json()
-            listed = {x["id"]: x for g in left["groups"] for x in g["rows"]}
-            assert [x["id"] for g in left["groups"] for x in g["rows"]] == [gid, qid] and left["more"] is False
+            # the rows: every question still held, each carrying its own score
+            listed = {x["id"]: x for x in app.state.registry.get("education").rows(store, 200)}
+            assert set(listed) == {gid, qid}
             assert listed[qid]["status"] == "completed" and listed[qid]["score"] == 88 and listed[qid]["pct"] == 100
             assert listed[gid]["status"] == "active" and listed[gid]["score"] is None
             t = (await c.get("/api/education/blank")).json()["topics"][0]
@@ -208,12 +205,12 @@ def test_education_end_to_end(config):
             assert r.status_code == 200 and r.json()["tags"] == ["hard", "bootstrap"]
             tags = ["physics", "rayleigh scattering", "hard", "bootstrap"]
             assert (await c.get(f"/api/education/item/{qid}")).json()["tags"] == tags
-            listed = {x["id"]: x for g in (await c.get("/api/education/left")).json()["groups"] for x in g["rows"]}
+            listed = {x["id"]: x for x in app.state.registry.get("education").rows(store, 200)}
             assert listed[qid]["tags"] == tags
-            # the rows hook puts the same ROWs on the cross-module routes, where the topic is a tag like any other
-            cross = {x["id"]: x for x in (await c.get("/api/items")).json()["items"] if x["module"] == "education"}
+            # the rows hook puts the same ROWs on the feed, where the topic is a tag like any other
+            cross = {x["id"]: x for x in (await c.get("/api/feed?mode=recent")).json()["items"] if x["module"] == "education"}
             assert set(cross) == {qid, gid} and cross[qid]["tags"] == tags
-            assert {x["id"] for x in (await c.get("/api/items?tags=physics")).json()["items"]} == {qid, gid}
+            assert {x["id"] for x in (await c.get("/api/feed?mode=recent&tags=physics")).json()["items"]} == {qid, gid}
             assert (await c.post("/api/education/action/tags", json={"id": qid, "tags": "x"})).status_code == 400
             # delete: an active question leaves both slices and every count, and is kept whole so it can never be asked again
             store.execute("INSERT INTO education_feedback(ts, topic_id, question_id, text) VALUES (?, ?, ?, ?)", (now_iso(), tid, gid, "too easy"))
@@ -221,7 +218,7 @@ def test_education_end_to_end(config):
             assert (await c.get(f"/api/education/item/{gid}")).json()["verbs"] == [["delete", "Delete"]]
             assert (await c.post("/api/verb", json={"module": "education", "id": gid, "verb": "delete"})).json() == {
                 "ok": True, "said": "deleted Why softmax saturates", "removes": True}
-            assert [x["id"] for g in (await c.get("/api/education/left")).json()["groups"] for x in g["rows"]] == [qid]
+            assert [x["id"] for x in app.state.registry.get("education").rows(store, 200)] == [qid]
             assert (await c.get(f"/api/education/item/{gid}")).status_code == 404
             assert next(x for x in (await c.get("/api/home/numbers")).json() if x["module"] == "education")["value"] == 0
             t = (await c.get("/api/education/blank")).json()["topics"][0]
@@ -398,8 +395,8 @@ def test_setup_migrates_v1(config):
                 "n": 1, "label": "a", "title": "Explain why the sky is blue…", "ask": "Explain why the sky is blue and not violet at noon",
                 "answer": "a", "answered_at": "2026-09-09T01:00:00+00:00", "verdict": "partial", "score": 80, "graded_at": "2026-09-09T02:00:00+00:00",
             }]
-            rows = [r for g in (await c.get("/api/education/left")).json()["groups"] for r in g["rows"]]
-            assert [r["id"] for r in rows] == [3, 1] and rows[1]["score"] == 80 and rows[1]["status"] == "completed"
+            rows = {r["id"]: r for r in app.state.registry.get("education").rows(app.state.store, 200)}
+            assert set(rows) == {3, 1} and rows[1]["score"] == 80 and rows[1]["status"] == "completed"
         app.state.store.close()
 
     run(main())

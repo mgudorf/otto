@@ -3,7 +3,7 @@
 // the reply arrives over a stream. Ending a conversation tags it and files it under the chats facet, where it becomes a
 // row like any other.
 import { S, ITEMS, $, h, put, icon, I, toast, modOf, hue, select, renderChat, registerDrawer, parts, call, load } from './core.js';
-import { leaveComposer, openPalette } from './shell.js';
+import { leaveComposer } from './shell.js';
 import { get, post, sse } from './api.js';
 import { md } from './md.js';
 
@@ -117,7 +117,6 @@ function onKey(e) {
   if (e.key === 'ArrowUp' && !e.target.value.slice(0, e.target.selectionStart).includes('\n')) { e.preventDefault(); e.target.blur(); leaveComposer(); return; }
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!e.target.value.trim()) { e.target.blur(); return; } send(); }
   if (e.key === 'Escape') e.target.blur();
-  if (e.key === '/' && !e.target.value) { e.preventDefault(); openPalette('/'); }
 }
 // The + comes first, then the open sessions: a new chat is always the first thing in the strip.
 function tabStrip() {

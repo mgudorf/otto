@@ -52,7 +52,7 @@ def feed_route(request: Request, mode: str = "priority", tags: str = "", q: str 
         items = [_row(m, r) for m in mods if m.rows for r in m.rows(st.store, cap)]
         items = [r for r in items if _keeps(r, want, needle)]
         items.sort(key=lambda r: (bool(r.get("when")), r.get("when") or ""), reverse=True)
-    return {"items": items}
+    return {"items": items, "rev": st.rev}
 
 
 @router.get("/api/home/numbers")

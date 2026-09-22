@@ -18,7 +18,6 @@ MANIFEST = Manifest(
     schedules=(Schedule(task="generate", every="24h", resource="education", llm=True),),
     agent=Agent(
         placeholder="Ask the tutor…",
-        skills=("question-gen", "quiz", "explain", "plan"),
         read_tools=("education_topics", "education_questions", "education_question", "education_feedback"),
         write_tools=("education_add_topic", "education_add_question", "education_grade", "education_record_feedback"),
     ),

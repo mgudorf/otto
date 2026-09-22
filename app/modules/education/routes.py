@@ -105,18 +105,6 @@ def detail(store: Store, question_id: int) -> dict | None:
 
 
 # ---- routes -------------------------------------------------------------------------------------
-@router.get("/left")
-def left(request: Request) -> dict:
-    """Every question the page holds, the queue first and the completed history behind it; the chips and the search
-    bar narrow it in the browser, so one group carries both slices."""
-    store: Store = request.app.state.store
-    active = store.query(f"{SELECT} WHERE {LISTED} AND {ACTIVE} ORDER BY q.started_at IS NULL, q.created_at")
-    done = store.query(f"{SELECT} WHERE {LISTED} AND NOT ({ACTIVE}) ORDER BY q.completed_at DESC LIMIT ?", (ROW_LIMIT,))
-    total = store.scalar(f"SELECT COUNT(*) FROM education_questions q WHERE {LISTED} AND NOT ({ACTIVE})")
-    rows = _rows(store, active + done)
-    return {"groups": [{"label": "", "count": len(rows), "rows": rows}] if rows else [], "more": total > len(done)}
-
-
 @router.get("/blank")
 def blank(request: Request) -> dict:
     store: Store = request.app.state.store

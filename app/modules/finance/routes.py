@@ -130,30 +130,6 @@ def _rows(store: Store, entries: list[dict], today: date) -> list[dict]:
     return [_row(r, today, tags[r["id"]]) for r in entries]
 
 
-def _group_by_kind(store: Store, entries: list[dict], today: date) -> list[dict]:
-    """Recurring reads as what is due soonest; undated entries follow, ended ones stay last everywhere."""
-    by_kind: dict[str, list[dict]] = {k: [] for k in KINDS}
-    for r in entries:
-        by_kind[r["kind"]].append(r)
-    by_kind["recurring"].sort(key=lambda r: (bool(r["ended_at"]), next_due(r, today) or "9999", r["name"]))
-    groups = {k: {"label": LABELS[k], "count": len(v), "rows": _rows(store, v, today)} for k, v in by_kind.items()}
-    return [g for g in groups.values() if g["rows"]]
-
-
-def _like(term: str) -> str:
-    """A typed word as a needle: % , _ and the escape itself stand for themselves."""
-    return "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-
-
-def _search(query: str) -> tuple[list[str], list[str]]:
-    """One LIKE per word over name and note, all words required."""
-    where, params = [], []
-    for term in query.split():
-        where.append("(name LIKE ? ESCAPE '\\' OR COALESCE(note, '') LIKE ? ESCAPE '\\')")
-        params += [_like(term)] * 2
-    return where, params
-
-
 def _get(store: Store, entry_id: int) -> dict:
     row = store.one("SELECT * FROM finance_entries WHERE id = ?", (entry_id,))
     if row is None:
@@ -173,16 +149,6 @@ def totals(store: Store) -> dict:
         "monthly_recurring": sum(monthly(r) for r in active if r["kind"] == "recurring"),
         "monthly_budget": sum(monthly(r) for r in active if r["kind"] == "budget"),
     }
-
-
-@router.get("/left")
-def left(request: Request, query: str = "") -> dict:
-    """Every entry the typed words reach, grouped by kind. The ledger is small, so nothing is ever held back."""
-    store: Store = request.app.state.store
-    where, params = _search(query)
-    sql_where = ("WHERE " + " AND ".join(where)) if where else ""
-    entries = store.query(f"SELECT * FROM finance_entries {sql_where} ORDER BY ended_at IS NOT NULL, name", tuple(params))
-    return {"groups": _group_by_kind(store, entries, date.today()), "more": False}
 
 
 @router.get("/blank")
@@ -323,7 +289,7 @@ def today(store: Store) -> list[dict]:
 
 
 def rows(store: Store, limit: int = 200) -> list[dict]:
-    """Every entry, most recently touched first: what the tag page, Home's Recent and the Graph read."""
+    """Every entry, most recently touched first: what the feed's Recent reads."""
     entries = store.query("SELECT * FROM finance_entries ORDER BY updated_at DESC, id DESC LIMIT ?", (max(1, limit),))
     return _rows(store, entries, date.today())
 
