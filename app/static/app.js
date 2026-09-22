@@ -3,5 +3,6 @@ import { boot } from './shell.js';
 import './brain.js';
 import './drawer.js';
 import './point.js';
+import './sql.js';
 
 boot();

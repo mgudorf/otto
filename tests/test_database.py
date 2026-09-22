@@ -147,7 +147,7 @@ def test_database_run_explain_save(config):
             assert row["fixed"] == ["database"] and row["tags"] == ["table"] and row["taggable"] is False
             assert [name for name, _, _ in row["cols"]] == ["id", "kind", "text", "created_at", "updated_at", "done_at"]
             assert row["cols"][0] == ["id", "INTEGER", "primary key"] and row["cols"][1][2] == "not null"
-            assert row["verbs"] == [["query", "Query"], ["export", "Export"]]
+            assert row["verbs"] == [["export", "Export"]]   # opening the row is the query: the page is the editor
             assert (await c.get("/api/database/item/second_brain_fts_data")).status_code == 404
             # the whole table as CSV, named after the table and the moment
             csv = await c.get("/api/database/export/second_brain_items")
@@ -181,6 +181,7 @@ def test_database_feed_rows(config):
             mine = [r for r in items if r["module"] == "database"]
             assert mine[0]["id"] == f"query:{qid}" and mine[0]["type"] == "query"
             assert len(mine) > 1 and all(r["type"] == "table" for r in mine[1:])
+            assert mine[0]["sql"] == "select 1" and all(r["cols"] for r in mine[1:])   # the summary under a row is drawn from the feed row itself
             assert all(r["fixed"] == ["database"] for r in mine)
             dated = [i for i, r in enumerate(items) if r["when"]]
             assert min(i for i, r in enumerate(items) if r["when"] is None) > max(dated)   # an undated row sits behind every dated one

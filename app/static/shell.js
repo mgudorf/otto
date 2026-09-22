@@ -160,7 +160,7 @@ const KEYS = [
   ['Display Mode Toggle', '['], ['Agent Panel Toggle', ']'], ['Command Palette', '/'], ['Point Mode', 'o'],
   ['Search', 'Ctrl+Space'], ['Clear Search', 'Ctrl+Shift+Space'], ['Next Suggestion', '↓'], ['Previous Suggestion', '↑'], ['Pick Suggestion', '↵'],
   ['New Session', 'c'], ['Reopen Session', 'C'], ['Select Session', '↵'], ['Rename Session', 'F2'], ['Close Session', 'Del'],
-  ['Send', '↵'], ['New Line', 'Shift+↵'], ['Back', 'Alt+←'], ['Forward', 'Alt+→'], ['Shortcuts', '?'],
+  ['Send', '↵'], ['New Line', 'Shift+↵'], ['Run Query', 'Ctrl+↵'], ['Back', 'Alt+←'], ['Forward', 'Alt+→'], ['Shortcuts', '?'],
 ];
 export function openHelp() {
   put($('#helpBox'), h('h3', null, 'Keyboard, everywhere'), h('div', { class: 'grid' }, ...KEYS.map(([l, k]) => h('div', null, l, h('span', null, h('kbd', null, k))))));

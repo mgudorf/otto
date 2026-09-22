@@ -93,13 +93,14 @@ export function tagList(i, { max = 4, lg = false } = {}) {
 }
 
 // ---- the parts that register --------------------------------------------------------------------------
-let drawer = null, pointer = null, brain = null, shell = null;
+let drawer = null, pointer = null, brain = null, shell = null, sql = null;
 export const call = (obj, name, ...args) => (obj && typeof obj[name] === 'function' ? obj[name](...args) : undefined);
 export function registerDrawer(impl) { drawer = impl; }
 export function registerPoint(impl) { pointer = impl; }
 export function registerBrain(impl) { brain = impl; }
 export function registerShell(impl) { shell = impl; }
-export const parts = () => ({ drawer, pointer, brain, shell });
+export function registerSql(impl) { sql = impl; }
+export const parts = () => ({ drawer, pointer, brain, shell, sql });
 export function openDrawer() { if (S.chat !== 'open') { S.chat = 'open'; renderTop(); renderChat(); } }
 export function toggleChat() { S.chat = S.chat === 'open' ? 'closed' : 'open'; renderTop(); renderChat(); }
 // Brain mode is the brain on the left of the cards; Inspect mode is the page on the right of them. `[` swaps them.
@@ -322,7 +323,6 @@ const HERE = {
   explain: () => { sendToAgent('Explain the part I am on without giving the answer.'); return null; },
   update: () => { askAgent('update the amount to '); return null; },
   due: () => { askAgent('set the date to '); return null; },
-  query: (i) => { askAgent(`query ${i.title}: `); return null; },
 };
 // `anchor` is where a confirmation opens; `value` is what a verb that takes one was given.
 export async function doVerb(item, verb, anchor, { force = false, value } = {}) {
@@ -347,7 +347,7 @@ export async function doVerb(item, verb, anchor, { force = false, value } = {}) 
 
 // ---- popovers: tags and confirmations --------------------------------------------------------------------------
 export function closePops() { const p = $('#tagPop'); if (p) p.remove(); }
-function place(pop, anchor, w = 280) {
+export function place(pop, anchor, w = 280) {
   if (!pop.isConnected) document.body.append(pop);
   const r = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : { left: innerWidth / 2 - w / 2, top: innerHeight / 2 - 40, bottom: innerHeight / 2 - 40 };
   const hgt = pop.offsetHeight;
@@ -478,13 +478,18 @@ function editorEl(i) {
   ta.addEventListener('blur', () => { if (S.edit === i.id) commitEdit(i, ta.value); });
   return h('div', { class: 'editor' }, ta);
 }
-// What slides out under the open row: its tags, its summary (an agent will write these), and the items it is linked to.
+// A table's columns, each with its type and what it promises.
+const colsEl = (i) => h('div', { class: 'cols' }, ...(i.cols || []).flatMap(([n, t, c]) => [h('span', null, n), h('span', { class: 'ty' }, t), h('span', null, c)]));
+// What slides out under the open row: its tags, its summary (an agent will write these), a table's schema or a saved
+// query's SQL, and the items it is linked to.
 let revealed = null;
 function revealEl(i) {
   const first = revealed !== String(i.id);
   const body = [];
   if (tagsOf(i).length) body.push(h('div', { class: 'tagline' }, ...tagList(i, { max: 5, lg: true })));
   if (i.summary) body.push(h('div', { class: 'gist' }, i.summary));
+  if (i.type === 'table') body.push(colsEl(i));
+  else if (i.type === 'query' && i.sql) body.push(h('pre', { class: 'sqltext' }, i.sql));
   body.push(relatedEl(i));
   const wrap = h('div', { class: `reveal${first ? '' : ' open'}` }, h('div', { class: 'summary', 'data-id': i.id }, ...body));
   if (first) { revealed = String(i.id); requestAnimationFrame(() => requestAnimationFrame(() => wrap.classList.add('open'))); }
@@ -528,8 +533,7 @@ export function contentEl(i) {
       for (const c of i.cells || []) body.push(h('div', { class: 'cell' }, h('span', { class: `g${c.run ? ' run' : ''}` }, c.g), h('div', null, h('pre', { html: c.code }), c.out ? h('div', { class: `out${c.err ? ' err' : ''}` }, c.out) : null)));
       break;
     case 'conversation': body.push(h('div', { class: 'excerpt' }, ...(i.turns || []).map(([role, text]) => h('div', { class: `turn ${role}` }, role === 'model' ? h('p', null, text) : text)))); break;
-    case 'table': body.push(h('div', { class: 'cols' }, ...(i.cols || []).flatMap(([n, t, c]) => [h('span', null, n), h('span', { class: 'ty' }, t), h('span', null, c)]))); break;
-    case 'query': body.push(h('div', { class: 'cell' }, h('span', { class: 'g' }, ''), h('pre', null, i.sql || ''))); break;
+    case 'table': case 'query': body.push(call(sql, 'editor', i)); break;   // the schema is in the summary under the row; the page is the editor
     default: if (!editing) body.push(i.body ? proseEl(i.body) : h('div', { class: 'prose' }, h('p', null, i.title)));
   }
   return body;

@@ -201,7 +201,7 @@ def _table_row(t: dict) -> dict:
             "tags": ["table"], "taggable": False, "type": "table", "right": f"{t['rows']:,} rows",
             "cols": [[c["name"], c["type"], _comment(c)] for c in t["columns"]],
             "href": "/api/database/export/" + t["name"],   # the url Export needs; a [verb, label] pair carries none
-            "verbs": [["query", "Query"], ["export", "Export"]]}
+            "verbs": [["export", "Export"]]}   # opening the row is the query: the page is the editor, seeded with a SELECT
 
 
 def _query_row(store: Store, q: dict) -> dict:
@@ -210,7 +210,7 @@ def _query_row(store: Store, q: dict) -> dict:
     return {"id": row_id, "module": "database", "title": q["name"], "when": _when(q["updated_at"]),
             "fixed": [FACET], "tags": sorted({"query", *tags_for(store, "database", [row_id])[row_id]}),
             "type": "query", "snip": "saved", "sql": q["sql"],
-            "verbs": [["delete", "Delete"]]}   # Load waits on the query console returning to the page
+            "verbs": [["delete", "Delete"]]}   # opening the row loads it: its SQL fills the editor on the page
 
 
 def rows(store: Store, limit: int = 200) -> list[dict]:
