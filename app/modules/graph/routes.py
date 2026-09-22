@@ -1,4 +1,6 @@
-"""Graph: a view over the tags written elsewhere. Reads only; curation goes through the agent's tools."""
+"""Graph: a view over the tags written elsewhere. Reads only; curation goes through the agent's tools.
+
+A tag is not an item, so nothing here lists rows: the brain is drawn from /api/graph."""
 
 from __future__ import annotations
 
@@ -81,13 +83,6 @@ def item_route(request: Request, tag: str) -> dict:
 def item(store: Store, tag: str) -> dict | None:
     r = store.one(f"SELECT {NODE_COLUMNS} FROM graph_nodes WHERE tag = ?", (tag_key(tag),))
     return _item(r, tags_for(store, "graph", [r["tag"]])[r["tag"]]) if r else None
-
-
-def rows(store: Store, limit: int = 200) -> list[dict]:
-    """Every tag as a row, so a tag is found through the cross-module search like anything else."""
-    found = store.query(f"SELECT {NODE_COLUMNS} FROM graph_nodes ORDER BY last_seen DESC, tag LIMIT ?", (limit,))
-    tags = tags_for(store, "graph", [r["tag"] for r in found])
-    return [_item(r, tags[r["tag"]]) for r in found]
 
 
 def numbers(store: Store) -> dict:

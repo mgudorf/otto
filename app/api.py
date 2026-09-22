@@ -14,6 +14,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.claude import ClaudeError
+from app.modules import Agent, Manifest, Module
 from app.store import Store, add_tags, all_tags, now_iso, remove_tag, tag_key, tags_for
 
 router = APIRouter()
@@ -78,7 +79,7 @@ async def _restart(app) -> None:
 # ---- shell -----------------------------------------------------------------------------------
 @router.get("/api/shell")
 def shell(request: Request) -> dict:
-    """Every module, page or not: the rail and the `shown` toggle filter on `page`; hue and icon resolve for all."""
+    """Every module: `facet` is the immutable tag its rows carry and the lobe it owns on the brain, None for a backend one."""
     st = request.app.state
     settings = st.store.all_settings()
     modules = []
@@ -86,14 +87,14 @@ def shell(request: Request) -> dict:
         a = m.manifest.agent
         modules.append({
             "name": m.name, "title": m.manifest.title, "hue": m.manifest.hue, "icon": m.manifest.icon,
-            "order": m.manifest.order, "page": m.manifest.page, "enabled": settings.get(f"modules.{m.name}.enabled", True) is not False,
+            "order": m.manifest.order, "facet": m.manifest.facet, "enabled": settings.get(f"modules.{m.name}.enabled", True) is not False,
             "scheduled": settings.get(f"modules.{m.name}.scheduled", True) is not False, "tasks": len(m.manifest.schedules),
             "model": settings.get(f"modules.{m.name}.model") or "default", "effort": settings.get(f"modules.{m.name}.effort") or "default",
             "agent": {"placeholder": a.placeholder, "skills": list(a.skills)} if a else None, "error": None,
         })
     for name, err in st.registry.errors.items():
         modules.append({
-            "name": name, "title": name, "hue": "#5f636c", "icon": "", "order": 98, "page": True, "enabled": False,
+            "name": name, "title": name, "hue": "#5f636c", "icon": "", "order": 98, "facet": None, "enabled": False,
             "scheduled": False, "tasks": 0, "model": "default", "effort": "default", "agent": None, "error": err.strip().splitlines()[-1][:300],
         })
     c = st.config
@@ -117,7 +118,7 @@ ROW_LIMIT = 200
 
 
 def _listing(request: Request) -> list:
-    """Every enabled module that can list its rows, in rail order."""
+    """Every enabled module that can list its rows, in facet order."""
     store: Store = request.app.state.store
     return [m for m in request.app.state.registry.ordered() if m.rows and store.setting(f"modules.{m.name}.enabled") is not False]
 
@@ -174,6 +175,34 @@ def tags_remove(request: Request, body: dict = Body(...)) -> dict:
     return {"module": module, "id": item_id, "tags": tags_for(store, module, [item_id])[item_id]}
 
 
+# ---- verbs ------------------------------------------------------------------------------------
+# One front door so the browser has a single call. The modules keep their own action routes; this finds the one the
+# named module offers and runs it, and reports what the module itself said about it.
+REMOVES = {"trash", "dismiss", "forget", "delete", "archive", "later", "end"}
+
+
+def _action(request: Request, module: str):
+    mod = request.app.state.registry.modules.get(module)
+    if mod is None or mod.router is None:
+        raise HTTPException(404, "no such module")
+    for route in mod.router.routes:
+        if route.path == f"/api/{module}/action/{{verb}}":
+            return route.endpoint
+    raise HTTPException(404, "module takes no verbs")
+
+
+@router.post("/api/verb")
+async def verb(request: Request, body: dict = Body(...)) -> dict:
+    """Run one verb on one row. `said` is the sentence the module wrote in Activity, which is what the drawer records."""
+    store: Store = request.app.state.store
+    module, name = str(body.get("module") or ""), str(body.get("verb") or "")
+    endpoint = _action(request, module)
+    mark = store.scalar("SELECT COALESCE(MAX(id), 0) FROM app_events")
+    await endpoint(request, name, body)
+    said = store.one("SELECT verb, text FROM app_events WHERE id > ? AND module = ? ORDER BY id DESC LIMIT 1", (mark, module))
+    return {"ok": True, "said": f"{said['verb']} {said['text']}" if said else name, "removes": name in REMOVES}
+
+
 # ---- tasks / jobs / events -----------------------------------------------------------------
 @router.get("/api/tasks")
 def tasks(request: Request) -> list[dict]:
@@ -216,7 +245,7 @@ def events(request: Request, module: str = "", limit: int = 200, offset: int = 0
 
 
 # ---- settings --------------------------------------------------------------------------------
-UI_KEYS = {"ui.start_page": str, "ui.refresh_seconds": int, "ui.time_format": str, "ui.page_size": int}
+UI_KEYS = {"ui.refresh_seconds": int, "ui.time_format": str, "ui.page_size": int}
 
 
 @router.get("/api/settings")
@@ -237,10 +266,8 @@ def settings_put(request: Request, body: dict = Body(...)) -> dict:
                 raise HTTPException(400, "rows per page must be 10 to 200")
             if key == "ui.time_format" and value not in ("24h", "12h"):
                 raise HTTPException(400, "time format must be 24h or 12h")
-            if key == "ui.start_page" and value not in st.registry.modules and value not in ("activity", "settings"):
-                raise HTTPException(400, "unknown start page")
         elif key.startswith("modules.") and key.rsplit(".", 1)[-1] in ("enabled", "scheduled"):
-            value = bool(value)   # .enabled = shown in the rail; .scheduled = its tasks run
+            value = bool(value)   # .enabled = its rows reach the feed; .scheduled = its tasks run
         elif key.startswith("modules.") and key.rsplit(".", 1)[-1] in ("model", "effort"):
             choices = st.config.claude.models if key.endswith(".model") else st.config.claude.efforts
             if value not in ("default", *choices):   # .model and .effort go on every CLI run the module makes
@@ -332,11 +359,41 @@ async def vacuum(request: Request) -> dict:
 
 
 # ---- sessions --------------------------------------------------------------------------------
-# A session is one CLI conversation. The module panes keep any number open per module, one tab each,
-# streaming on key `<module>:<id>`; Chat keeps many on its own page. start_turn and tag_session are the two
-# paths every session goes through; a module's routes call them with its own broadcast key. Busy state is per session id.
+# A session is one CLI conversation, streaming on key `<module>:<id>`. The drawer keeps any number open under the
+# name `otto`, one tab each; Chat keeps its own. start_turn and tag_session are the two paths every session goes
+# through; a module's routes call them with its own broadcast key. Busy state is per session id.
+OTTO = "otto"
+
+
+def _agents(st) -> list:
+    """Every enabled module that brings an agent; together they are Otto."""
+    return [m for m in st.registry.ordered() if m.manifest.agent and st.store.setting(f"modules.{m.name}.enabled") is not False]
+
+
+def _union(agents: list, field: str) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(v for a in agents for v in getattr(a, field)))
+
+
+def _otto(st) -> Module:
+    """The one agent: every enabled module's tools, skills and prompt behind a single session module."""
+    mods = _agents(st)
+    a = [m.manifest.agent for m in mods]
+    agent = Agent(placeholder="", skills=_union(a, "skills"), read_tools=_union(a, "read_tools"),
+                  write_tools=_union(a, "write_tools"), builtins=_union(a, "builtins"))
+    home = st.registry.modules.get("home")
+    return Module(
+        manifest=Manifest(name=OTTO, title="Otto", hue="", icon="", order=0, agent=agent),
+        path=st.config.root / "app" / "modules", tasks={}, router=None, schema=None, numbers=None, today=None,
+        queue=None, item=None, context=getattr(home, "context", None), register_tools=None,
+        prompt="\n\n".join(m.prompt for m in mods if m.prompt),
+    )
+
+
 def _module(request: Request, name: str):
-    mod = request.app.state.registry.modules.get(name)
+    st = request.app.state
+    if name == OTTO:
+        return _otto(st)
+    mod = st.registry.modules.get(name)
     if mod is None or mod.manifest.agent is None:
         raise HTTPException(404, "no agent for that module")
     return mod
@@ -378,6 +435,9 @@ def add_turn(store: Store, session_id: str, role: str, text: str | None = None, 
 
 
 def _context_label(st, mod) -> str:
+    """What the prompt carries: for Otto the modules it can see, for one module its own counter."""
+    if mod.name == OTTO:
+        return ", ".join(m.manifest.title for m in _agents(st))
     n = mod.numbers(st.store) if mod.numbers else None
     if n:
         v = n["value"]

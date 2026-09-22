@@ -20,6 +20,12 @@ def _day(offset: int) -> str:
     return (date.today() + timedelta(days=offset)).isoformat()
 
 
+def _md(offset: int) -> str:
+    """The same day the way the owner reads dates, which is how a row's kv carries it."""
+    y, m, d = _day(offset).split("-")
+    return f"{m}-{d}-{y}"
+
+
 def _search(store, name="jobs", tags=("work",), every_days=1, cap=3, next_run=None) -> int:
     cur = store.execute(
         "INSERT INTO newsfeed_searches(name, prompt, every_days, cap, created_at, next_run) VALUES (?, ?, ?, ?, ?, ?)",
@@ -59,9 +65,11 @@ def test_newsfeed_end_to_end(config):
             assert left["chip"] == "All" and left["chips"] == ["All", "Open", "Accepted"]
             assert [r["id"] for g in left["groups"] for r in g["rows"]] == [a, b]
             rows = {r["id"]: r for g in left["groups"] for r in g["rows"]}
-            assert rows[a]["title"] == "Acme is hiring" and rows[a]["status"] == "open" and "happens" not in rows[a]
-            assert rows[a]["search"] == "jobs" and len(rows[a]["when"]) == 16                    # the day found, in the owner's clock
-            assert rows[b]["happens"] == f"{_day(3)}T19:00" and rows[b]["fixed"] == ["game"] and rows[b]["tags"] == []
+            assert rows[a]["title"] == "Acme is hiring" and rows[a]["type"] == "article" and rows[a]["dim"] is False
+            assert rows[a]["snip"] == "jobs" and len(rows[a]["when"]) == 16                      # the search it came from, and the day found in the owner's clock
+            assert rows[a]["kv"] == [["Search", "jobs, every 1 d"], ["Link", "acme.example"]]
+            assert ["Happens", _md(3)] in rows[b]["kv"]
+            assert rows[b]["fixed"] == ["newsfeed"] and rows[b]["tags"] == ["game"]   # newsfeed is the only fixed tag; what a run wrote narrows as a plain one
             assert (await c.post("/api/tags/add", json={"module": "newsfeed", "id": a, "tags": ["Remote"]})).json()["tags"] == ["remote"]
             assert [r["id"] for r in (await c.get("/api/items?tags=remote")).json()["items"]] == [a]   # the owner's tags, through the rows hook
             assert (await c.get("/api/newsfeed/left?query=game")).json()["groups"] != []      # a tag is searchable
@@ -71,12 +79,13 @@ def test_newsfeed_end_to_end(config):
             assert (await c.get("/api/newsfeed/left?chip=Accepted")).json()["groups"] == []
 
             item = (await c.get(f"/api/newsfeed/item/{a}")).json()
-            assert item["kind"] == "entry" and item["search"] == "jobs" and [x["verb"] for x in item["actions"]] == ["accept", "dismiss", "link"]
+            assert item["type"] == "article" and item["snip"] == "jobs"
+            assert [v for v, _ in item["verbs"]] == ["accept", "link", "dismiss"]
             blank = (await c.get("/api/newsfeed/blank")).json()
             assert blank["open"] == 2 and blank["searches"][0]["id"] == f"s{sid}" and blank["searches"][0]["open"] == 2 and blank["searches"][0]["tags"] == ["work"]
-            home = (await c.get("/api/home/left")).json()
-            review = next(g for g in home["groups"] if g["label"] == "Review")
-            assert review["module"] == "newsfeed" and [r["id"] for r in review["rows"]] == [a, b]   # newest found first
+            waiting = (await c.get("/api/feed?mode=priority")).json()["items"]
+            assert [(r["module"], r["id"]) for r in waiting] == [("newsfeed", a), ("newsfeed", b)]   # newest found first
+            assert [r["waits"] for r in waiting] == [1, 2]                                          # the feed ranks what every queue handed it
             assert next(n for n in (await c.get("/api/home/numbers")).json() if n["module"] == "newsfeed")["value"] == 2
 
             # Tags on an entry and on a search, through the same two verbs; a search's id is s<id>.
@@ -89,23 +98,57 @@ def test_newsfeed_end_to_end(config):
 
             assert (await c.post("/api/newsfeed/action/accept", json={"id": a})).json()["status"] == "accepted"
             assert (await c.post("/api/newsfeed/action/dismiss", json={"id": a})).status_code == 409
-            assert [x["verb"] for x in (await c.get(f"/api/newsfeed/item/{a}")).json()["actions"]] == ["link"]
+            decided = (await c.get(f"/api/newsfeed/item/{a}")).json()
+            assert [v for v, _ in decided["verbs"]] == ["link"] and decided["dim"] is True
             assert (await c.post("/api/newsfeed/action/dismiss", json={"id": b})).json()["status"] == "dismissed"
             # Dismissed: off every chip and off Home; still in the table so no run proposes it again.
             assert [r["id"] for g in (await c.get("/api/newsfeed/left")).json()["groups"] for r in g["rows"]] == [a]
-            assert all(g["label"] != "Review" for g in (await c.get("/api/home/left")).json()["groups"])
+            assert (await c.get("/api/feed?mode=priority")).json()["items"] == []
             assert store.scalar("SELECT COUNT(*) FROM newsfeed_items") == 2
 
             # Killing a search keeps its entries, now without a search.
             s = (await c.get(f"/api/newsfeed/item/s{sid}")).json()
-            assert s["kind"] == "search" and s["entries"] == 2 and s["actions"][0]["verb"] == "kill" and s["actions"][0]["removes"]
+            assert s["type"] == "article" and s["fixed"] == ["newsfeed"] and s["snip"] == "every 1 d"
+            assert ["Found", "2, 0 waiting"] in s["kv"] and s["verbs"] == [["kill", "Kill"]]
             assert (await c.post("/api/newsfeed/action/kill", json={"id": a})).status_code == 400
             assert (await c.post("/api/newsfeed/action/kill", json={"id": f"s{sid}"})).json() == {"id": f"s{sid}"}
             assert (await c.get(f"/api/newsfeed/item/s{sid}")).status_code == 404
-            assert (await c.get(f"/api/newsfeed/item/{a}")).json()["search"] is None
+            orphan = (await c.get(f"/api/newsfeed/item/{a}")).json()
+            assert orphan["snip"] == "" and all(k != "Search" for k, _ in orphan["kv"])
             assert store.scalar("SELECT COUNT(*) FROM newsfeed_tags WHERE kind = 'search'") == 0
             ev = (await c.get("/api/events?module=newsfeed")).json()
             assert [e["verb"] for e in ev["events"]][:4] == ["killed", "dismissed", "accepted", "tagged"]
+        await app.state.runner.drain(1)
+        store.close()
+
+    run(main())
+
+
+def test_newsfeed_feed_and_verbs(config):
+    """What waits, on the one page: ranked least patient first, narrowed by a tag or a typed word, decided through one door."""
+
+    async def main():
+        app = build(config)
+        await app.state.runner.start()
+        store = app.state.store
+        async with client_for(app) as c:
+            sid = _search(store, "events", tags=("social",))
+            fresh = _entry(store, sid, "Acme is hiring", "https://acme.example/jobs", found_at=f"{_day(0)}T00:00:00+00:00")
+            stale = _entry(store, sid, "Board game night", "https://e.example/1")
+            store.execute("INSERT INTO newsfeed_tags(kind, ref, tag) VALUES ('item', ?, 'game')", (stale,))
+            ids = lambda d: [r["id"] for r in d["items"]]
+            waiting = (await c.get("/api/feed?mode=priority")).json()
+            assert ids(waiting) == [fresh, stale] and [r["waits"] for r in waiting["items"]] == [1, 2]
+            assert ids((await c.get("/api/feed?mode=priority&tags=newsfeed,game")).json()) == [stale]
+            assert ids((await c.get("/api/feed?mode=priority&q=acme")).json()) == [fresh]
+
+            took = (await c.post("/api/verb", json={"module": "newsfeed", "id": fresh, "verb": "accept"})).json()
+            assert took == {"ok": True, "said": "accepted Acme is hiring", "removes": False}
+            dropped = (await c.post("/api/verb", json={"module": "newsfeed", "id": stale, "verb": "dismiss"})).json()
+            assert dropped["said"] == "dismissed Board game night" and dropped["removes"] is True
+            assert (await c.get("/api/feed?mode=priority")).json()["items"] == []    # both decided: nothing is waiting
+            assert ids((await c.get("/api/feed?mode=recent&tags=newsfeed")).json()) == [fresh]   # accepted stays listed, dismissed does not
+            assert (await c.post("/api/verb", json={"module": "newsfeed", "id": fresh, "verb": "accept"})).status_code == 409
         await app.state.runner.drain(1)
         store.close()
 

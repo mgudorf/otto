@@ -17,6 +17,7 @@ CHIPS = {"All": None, "Tasks": "task"}   # the kinds stay in the table for the a
 SUGGESTION = "s"                                   # a suggestion's row id, "s12"; an item carries the bare integer
 RESOURCE = "second_brain"
 MODULE = "second_brain"
+FACET = "entry"
 
 
 def _when(ts: str) -> str:
@@ -25,11 +26,15 @@ def _when(ts: str) -> str:
 
 
 def _row(r: dict, tags: list[str]) -> dict:
-    """One item as a ROW: what it is drives `fixed`, the owner's own tags stay editable."""
-    return {
+    """One item as a ROW: the facet is its only fixed tag, and what it is becomes its type and a tag to filter on."""
+    row = {
         "id": r["id"], "module": MODULE, "title": r["text"], "when": _when(r["created_at"]),
-        "kind": r["kind"], "fixed": [r["kind"]], "tags": tags, "done": bool(r["done_at"]),
+        "fixed": [FACET], "tags": [r["kind"]] + [t for t in tags if t != r["kind"]],
+        "type": r["kind"], "done": bool(r["done_at"]), "verbs": _verbs(r),
     }
+    if r["kind"] == "link":
+        row["href"] = r["text"].split()[0]          # the url Open needs; a [verb, label] pair carries none
+    return row
 
 
 def _rows(store: Store, rs: list[dict]) -> list[dict]:
@@ -42,14 +47,12 @@ def _day_label(when: str) -> str:
 
 
 def _group_by_day(store: Store, rs: list[dict]) -> list[dict]:
-    """A listed row carries its verbs, so a button on the row asks what the same button in the pane asks."""
     groups: list[dict] = []
-    verbs = {r["id"]: _actions(r) for r in rs}
     for row in _rows(store, rs):
         label = _day_label(row["when"])
         if not groups or groups[-1]["label"] != label:
             groups.append({"label": label, "count": 0, "rows": []})
-        groups[-1]["rows"].append({**row, "actions": verbs[row["id"]]})
+        groups[-1]["rows"].append(row)
         groups[-1]["count"] += 1
     return groups
 
@@ -77,29 +80,26 @@ def _suggestion_id(value) -> int:
     return int(text[len(SUGGESTION):])
 
 
-def _suggestion_actions(r: dict) -> list[dict]:
-    """A suggestion waits on a yes or a no; once it has one it offers nothing. The no is final, so it asks first."""
-    if r["status"] != "open":
-        return []
-    return [{"verb": "accept", "label": "Accept", "primary": True, "removes": True},
-            {"verb": "dismiss", "label": "Dismiss", "confirm": "Dismiss this suggestion?", "removes": True}]
+def _suggestion_verbs(r: dict) -> list[list[str]]:
+    """A suggestion waits on a yes or a no; once it has one it offers nothing."""
+    return [["accept", "Accept"], ["dismiss", "Dismiss"]] if r["status"] == "open" else []
 
 
-def _actions(r: dict) -> list[dict]:
-    """The verbs an item offers, and the question the destructive one must ask before it runs."""
-    actions = []
+def _verbs(r: dict) -> list[list[str]]:
+    """What an item offers, in the order the owner should see it; the one that removes it sits last."""
+    verbs = []
     if r["kind"] == "link":
-        actions.append({"verb": "open", "label": "Open", "primary": True, "href": r["text"].split()[0]})
+        verbs.append(["open", "Open"])
     elif r["kind"] == "task":
-        actions.append({"verb": "reopen", "label": "Reopen", "primary": True} if r["done_at"] else {"verb": "done", "label": "Done", "primary": True})
-    actions.append({"verb": "forget", "label": "Forget", "confirm": "Forget this item?", "removes": True})
-    return actions
+        verbs.append(["reopen", "Reopen"] if r["done_at"] else ["done", "Done"])
+    verbs.append(["forget", "Forget"])
+    return verbs
 
 
 def _suggestion_row(r: dict) -> dict:
     """A suggestion as a ROW: no row of the owner's stands behind it, so `taggable` false keeps every tagging path off it."""
     return {"id": f"{SUGGESTION}{r['id']}", "module": MODULE, "title": r["text"], "when": _when(r["created_at"]),
-            "kind": "suggestion", "fixed": ["suggestion"], "tags": [], "taggable": False, "actions": _suggestion_actions(r)}
+            "fixed": [FACET], "tags": [], "type": "suggestion", "taggable": False, "verbs": _suggestion_verbs(r)}
 
 
 @router.get("/left")
@@ -147,7 +147,7 @@ def item(store: Store, item_id: str) -> dict:
     if not str(item_id).isdigit():
         return _suggestion_item(store, _suggestion_id(item_id))
     r = _get(store, int(item_id))
-    return {**_row(r, _tags(store, r["id"])), "actions": _actions(r)}
+    return _row(r, _tags(store, r["id"]))
 
 
 @router.post("/action/{verb}")

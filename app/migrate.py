@@ -3,7 +3,7 @@
 Every table is named after the module that owns it: app_ for the platform, <module>_ for a module. RENAMES is every
 name a table has had, old -> current; renaming a table is one more line here, and the schemas keep only the new name.
 MODULE_RENAMES is every name a module has had, old -> current; renaming a module is one more line here, and the rows
-that carry the name (MODULE_COLUMNS, `<module>.<task>` names, `modules.<module>.` settings, the start page) follow it.
+that carry the name (MODULE_COLUMNS, `<module>.<task>` names, `modules.<module>.` settings) follow it.
 """
 
 from __future__ import annotations
@@ -132,7 +132,7 @@ def rename_modules(store: Store, backup_dir: Path) -> list[str]:
 
     Runs after the schemas, so every table it touches exists. The module columns take the new name, and so does a
     resource named after the module; task, job, run and cursor names swap their `<module>.` prefix, settings keys
-    their `modules.<module>.` prefix, and a start page set to the module moves with it. Returns the old names rewritten.
+    their `modules.<module>.` prefix. Returns the old names rewritten.
     """
     with store.raw() as conn:
         todo = pending_modules(conn)
@@ -150,7 +150,6 @@ def rename_modules(store: Store, backup_dir: Path) -> list[str]:
                 for table, column in (("app_tasks", "name"), ("app_jobs", "task"), ("app_llm_runs", "task"), ("app_cursors", "key")):
                     _reprefix(conn, table, column, f"{old}.", f"{new}.")
                 _reprefix(conn, "app_settings", "key", f"modules.{old}.", f"modules.{new}.")
-                conn.execute("UPDATE app_settings SET value = json_quote(?) WHERE key = 'ui.start_page' AND value = json_quote(?)", (new, old))
         except BaseException:
             conn.execute("ROLLBACK")
             raise

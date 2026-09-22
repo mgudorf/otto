@@ -1,4 +1,5 @@
-"""Chat module: conversations through the real app with a fake CLI, the title after the first turn, attachments, and the replay of a lost transcript."""
+"""Chat module: conversations through the real app with a fake CLI, the title after the first turn, attachments, the replay of a
+lost transcript, the one agent every conversation belongs to, and the feed those conversations reach."""
 
 import dataclasses
 import json
@@ -8,7 +9,9 @@ from app.daemon import build
 from app.modules.chat.routes import rows as rows_hook
 from app.modules.graph import build as graph_build
 from app.modules.newsfeed import tasks as feed_tasks
+from app.modules.system.routes import queue as routine_queue, rows as routine_rows
 from app.runner import JobFailed
+from app.store import now_iso
 from tests.conftest import FakeProc, run
 from tests.test_app import client_for, settle
 
@@ -48,16 +51,20 @@ def test_chat_conversation_lifecycle(config):
         st = app.state
         async with client_for(app) as c:
             shell = (await c.get("/api/shell")).json()
+            facets = {m["name"]: m["facet"] for m in shell["modules"]}
             chat = next(m for m in shell["modules"] if m["name"] == "chat")
-            assert chat["page"] is True and chat["agent"]["skills"] == ["web", "files"]
-            assert [m["name"] for m in shell["modules"] if m["page"]][:2] == ["home", "chat"]
+            assert chat["facet"] == "chats" and chat["agent"]["skills"] == ["web", "files"]
+            assert facets["home"] is None and facets["graph"] is None   # a backend module carries no facet and lists no rows
             assert (await c.post("/api/chat/send", json={"text": "  "})).status_code == 400
             r = await c.post("/api/chat/send", json={"text": "save a note about x"})
             assert r.status_code == 200, r.text
             sid = r.json()["id"]
             await settle(app)
             item = (await c.get(f"/api/chat/item/{sid}")).json()
-            assert [(t["role"], t.get("tool"), t.get("status")) for t in item["turns"]] == [("user", None, None), ("tool", "Write", "done"), ("model", None, None)]
+            # the page shows the tail as [role, text]; the whole transcript, tool turns and all, stays on the session route
+            assert item["turns"] == [["user", "save a note about x"], ["model", "Saved it as notes.md."]]
+            said = (await c.get(f"/api/session/chat/{sid}")).json()["turns"]
+            assert [(t["role"], t.get("tool"), t.get("status")) for t in said] == [("user", None, None), ("tool", "Write", "done"), ("model", None, None)]
             assert item["title"] == "Notes about x" and item["tags"] == ["notes", "chat"] and item["busy"] is False
             row = st.store.one("SELECT * FROM app_sessions WHERE id = ?", (sid,))
             assert row["module"] == "chat" and row["cli_started"] == 1 and row["closed_at"] is None
@@ -91,15 +98,21 @@ def test_chat_conversation_lifecycle(config):
             left = (await c.get("/api/chat/left")).json()
             assert left["more"] is False and [r["title"] for r in left["groups"][0]["rows"]] == ["something else", "Notes about x"]
             tagged = left["groups"][0]["rows"][1]
-            assert tagged == {"id": sid, "module": "chat", "title": "Notes about x", "when": tagged["when"], "tags": ["notes", "chat"], "fixed": []}
-            assert [r["id"] for r in rows_hook(st.store, 10)] == [sid2, sid]   # the ROWs /api/items and Home's Recent read
+            assert tagged == {
+                "id": sid, "module": "chat", "title": "Notes about x", "when": tagged["when"],
+                "fixed": ["chats"], "tags": ["notes", "chat"], "type": "conversation",
+                "verbs": [["reopen", "Reopen"], ["delete", "Delete"]],
+            }
+            assert [r["id"] for r in rows_hook(st.store, 10)] == [sid2, sid]   # the ROWs /api/items and the feed read
             assert [r["id"] for r in (await c.get("/api/chat/left?query=heading")).json()["groups"][0]["rows"]] == [sid]
             assert (await c.get("/api/chat/left?query=zzz")).json()["groups"] == []
             n = next(n for n in (await c.get("/api/home/numbers")).json() if n["module"] == "chat")
             assert n["value"] == 2 and n["label"] == "conversations"
-            # delete is the only removal: row, turns and folder
-            assert (await c.post("/api/chat/action/nope", json={"id": sid2})).status_code == 404
-            assert (await c.post("/api/chat/action/delete", json={"id": sid2})).status_code == 200
+            # delete is the only removal: row, turns and folder, and the browser asks for it through the one front door
+            assert (await c.post("/api/verb", json={"module": "chat", "id": sid2, "verb": "nope"})).status_code == 404
+            assert (await c.post("/api/verb", json={"module": "nope", "id": sid2, "verb": "delete"})).status_code == 404
+            r = await c.post("/api/verb", json={"module": "chat", "id": sid2, "verb": "delete"})
+            assert r.status_code == 200 and r.json() == {"ok": True, "said": "deleted something else", "removes": True}, r.text
             assert st.store.one("SELECT id FROM app_sessions WHERE id = ?", (sid2,)) is None
             assert st.store.scalar("SELECT COUNT(*) FROM app_session_turns WHERE session_id = ?", (sid2,)) == 0
             assert not (config.data.workspace / "chat" / sid2).exists() and len((await c.get("/api/chat/left")).json()["groups"][0]["rows"]) == 1
@@ -135,9 +148,12 @@ def test_chat_replays_lost_transcript(config):
             await settle(app)
             assert (await c.post("/api/chat/send", json={"id": sid, "text": "and now?"})).status_code == 200
             await settle(app)
-            turns = (await c.get(f"/api/chat/item/{sid}")).json()["turns"]
+            turns = (await c.get(f"/api/session/chat/{sid}")).json()["turns"]
             assert [t["role"] for t in turns] == ["user", "tool", "model", "user", "system", "tool", "model"]
             assert turns[4]["text"] == "resumed from Otto's record"
+            # the page's excerpt is the tail of what the two of them said; the replay note is bookkeeping and stays out of it
+            excerpt = (await c.get(f"/api/chat/item/{sid}")).json()["turns"]
+            assert excerpt[-2:] == [["user", "and now?"], ["model", "Saved it as notes.md."]] and all(t[0] in ("user", "model") for t in excerpt)
             assert "--resume" in calls[2]["args"] and "--session-id" in calls[3]["args"]
             prompt = procs[3].stdin.data.decode("utf-8")
             transcript = "user: save a note about x\nmodel: Saved it as notes.md."
@@ -184,6 +200,103 @@ def test_chat_upload_and_files(config):
             assert item["title"] == "read it" and {f["name"] for f in item["files"]} == {"notes.txt", "notes (2).txt"}   # the tagger's reply was not JSON: the first line stands
             assert "attached" in [e["verb"] for e in (await c.get("/api/events?module=chat")).json()["events"]]
             assert (await c.get("/api/chat/item/nope")).status_code == 404
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())
+
+
+def test_otto_is_every_agent_at_once(config):
+    """The drawer talks to one agent: every enabled module's tools and prompt behind the session module `otto`, and what it
+    says lands in the chats facet like any other conversation."""
+    calls, procs = [], []
+
+    async def main():
+        app = build(config, spawn_fn=sequence([(TURN, ())], calls, procs))
+        await app.state.runner.start()
+        st = app.state
+        async with client_for(app) as c:
+            pane = (await c.get("/api/session/otto")).json()
+            assert pane["sessions"] == [] and pane["agent"]["cmd"] == "claude · otto"
+            assert {"web", "files", "triage", "quiz"} <= set(pane["agent"]["skills"])
+            assert "Email" in pane["context_label"] and "Entry" in pane["context_label"]
+            r = await c.post("/api/session/otto/send", json={"text": "what waits?"})
+            assert r.status_code == 200, r.text
+            sid = r.json()["session"]
+            await settle(app)
+            args = calls[0]["args"]
+            allowed = args[args.index("--allowedTools") + 1]
+            assert {"mcp__otto__email_search", "mcp__otto__education_grade", "mcp__otto__second_brain_add"} <= set(allowed.split(","))
+            prompt = args[args.index("--system-prompt") + 1]
+            agents = [m for m in st.registry.ordered() if m.manifest.agent and m.prompt]
+            assert len(agents) > 1 and all(m.prompt.strip() in prompt for m in agents)
+            # every conversation is a conversation, whichever agent held it
+            assert [x["id"] for x in rows_hook(st.store, 10)] == [sid]
+            row = (await c.get(f"/api/chat/item/{sid}")).json()
+            assert row["fixed"] == ["chats"] and row["title"] == "what waits?" and row["turns"][0] == ["user", "what waits?"]
+            assert [x["id"] for x in (await c.get("/api/session/otto")).json()["sessions"]] == [sid]
+            assert (await c.get("/api/session/nope")).status_code == 404
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())
+
+
+def test_feed_recent_and_system_routines(config):
+    """The feed is the one list: Recent merges every faceted module newest first, undated rows behind them. System's
+    scheduled tasks are rows there like any other, run and paused through the same front door."""
+    calls, procs = [], []
+
+    async def main():
+        app = build(config, spawn_fn=sequence([(TURN, ())], calls, procs))
+        await app.state.runner.start()
+        st = app.state
+        st.scheduler.sync_tasks()       # the clock's own table is what System lists
+        async with client_for(app) as c:
+            sid = (await c.post("/api/chat/send", json={"text": "save a note about x"})).json()["id"]
+            await settle(app)
+            items = (await c.get("/api/feed?mode=recent")).json()["items"]
+            assert all(len(x["fixed"]) == 1 and x["type"] and x["verbs"] is not None for x in items)
+            assert [x["when"] is not None for x in items] == sorted((x["when"] is not None for x in items), reverse=True)
+            assert next(x for x in items if x["module"] == "chat")["id"] == sid
+            routines = [x for x in items if x["fixed"] == ["routine"]]
+            assert {x["id"] for x in routines} == {r["name"] for r in st.store.query("SELECT name FROM app_tasks")}
+            hb = next(x for x in routines if x["id"] == "system.heartbeat")
+            assert hb == {
+                "id": "system.heartbeat", "module": "system", "title": "system.heartbeat", "when": None,
+                "fixed": ["routine"], "tags": [], "type": "routine", "snip": "every 1 m", "late": False, "paused": False,
+                "right": "every 1 m", "kv": [["Every", "every 1 m"], ["Last run", "never"], ["Last result", "nothing said"]],
+                "verbs": [["run", "Run now"], ["pause", "Pause"]],
+            }
+            prune = next(x for x in routines if x["id"] == "system.prune_sessions")
+            assert prune["kv"][-1] == ["Resource", "sessions"] and prune["snip"] == "every 1 d"
+            counts = (await c.get("/api/home/numbers")).json()   # the brand menu counts the facets and nothing else
+            assert all(n["facet"] for n in counts) and not {"home", "graph", "feedback"} & {n["module"] for n in counts}
+            # a tag typed in the search bar and the words typed with it narrow the same list
+            assert [x["id"] for x in (await c.get("/api/feed?mode=recent&tags=routine")).json()["items"]] == [x["id"] for x in routines]
+            assert (await c.get("/api/feed?mode=recent&tags=chats&q=save a note")).json()["items"][0]["id"] == sid
+            assert (await c.get("/api/feed?mode=recent&tags=chats&q=zzz")).json()["items"] == []
+            assert (await c.get("/api/feed?mode=sideways")).status_code == 400
+
+            # pause, resume and run: the verbs the routine offers, through the one front door
+            assert (await c.post("/api/verb", json={"module": "system", "id": "system.heartbeat", "verb": "pause"})).json() == {
+                "ok": True, "said": "disabled system.heartbeat", "removes": False}
+            paused = next(x for x in routine_rows(st.store) if x["id"] == "system.heartbeat")
+            assert paused["paused"] is True and paused["right"] == "paused" and paused["verbs"][1] == ["resume", "Resume"]
+            assert (await c.post("/api/verb", json={"module": "system", "id": "system.heartbeat", "verb": "resume"})).json()["said"] == "enabled system.heartbeat"
+            assert (await c.post("/api/verb", json={"module": "system", "id": "nope", "verb": "run"})).status_code == 404
+            assert (await c.post("/api/verb", json={"module": "system", "id": "system.heartbeat", "verb": "run"})).json()["said"] == "run"
+            await settle(app)
+            assert st.store.one("SELECT status FROM app_jobs WHERE task = 'system.heartbeat'")["status"] == "done"
+
+            # only what broke waits on the owner, and Priority ranks it
+            assert routine_queue(st.store) == []
+            st.store.execute("UPDATE app_tasks SET last_status = 'failed', last_run = ? WHERE name = 'system.prune_sessions'", (now_iso(),))
+            [broken] = routine_queue(st.store)
+            assert broken["id"] == "system.prune_sessions" and broken["late"] is True and broken["right"] == "failed" and broken["waits"] == 0
+            queued = (await c.get("/api/feed?mode=priority")).json()["items"]
+            assert [x["id"] for x in queued if x["module"] == "system"] == ["system.prune_sessions"]
+            assert all(x["waits"] == rank for rank, x in enumerate(queued, 1))
         await app.state.runner.drain(1)
         app.state.store.close()
 

@@ -48,20 +48,25 @@ def test_science_tree_and_reads(sci):
             assert {g["label"]: sorted(r["id"] for r in g["rows"]) for g in left["groups"]} == {"": ["analysis.ipynb", "etl.py"], "sub/": ["sub/deep.py"]}
             assert left["more"] is False and all(g["count"] == len(g["rows"]) for g in left["groups"])
             row = next(r for g in left["groups"] for r in g["rows"] if r["id"] == "analysis.ipynb")
-            assert row["title"] == "analysis.ipynb" and row["kind"] == "ipynb" and row["fixed"] == ["notebook"] and row["tags"] == [] and row["when"]
-            assert row["kernel"] is None and row["running"] is False and row["schedule"] is None
+            assert row["title"] == "analysis.ipynb" and row["type"] == "notebook" and row["tags"] == [] and row["when"]
+            assert row["fixed"] == ["science"]   # the facet, never the extension: what a file is picks its renderer instead
+            assert row["status"] == "no kernel" and "right" not in row
             item = (await c.get("/api/science/item/analysis.ipynb")).json()
-            assert item["kind"] == "ipynb" and item["kernel"] is None and item["schedule"] is None
-            assert [x["type"] for x in item["cells"]] == ["code", "markdown"] and item["cells"][0]["source"] == "print(1)"
-            assert all(x["id"] for x in item["cells"])
+            assert item["type"] == "notebook" and item["status"] == "no kernel"
+            assert [x["code"] for x in item["cells"]] == ["print(1)", "# notes"]
+            assert all(x["g"] == "" and x["out"] == "" and x["err"] is False and x["run"] is False for x in item["cells"])
             py = (await c.get("/api/science/item/sub/deep.py")).json()
-            assert py["kind"] == "py" and py["source"].startswith("print('deep')") and py["running"] is False and py["last"] is None
+            assert py["type"] == "script" and py["status"] == "idle"
+            assert py["cells"][0]["code"].startswith("print('deep')") and py["cells"][0]["run"] is False and py["cells"][0]["out"] == ""
             assert (await c.get("/api/science/item/missing.ipynb")).status_code == 404
             assert (await c.get("/api/science/blank")).json() == {"kernels": 0, "files": 3}
             numbers = (await c.get("/api/home/numbers")).json()
             assert any(n["module"] == "science" and n["label"] == "kernels" and n["value"] == 0 for n in numbers)
-            home = (await c.get("/api/home/left")).json()
-            assert next(g for g in home["groups"] if g["module"] == "science")["count"] == 3
+            shell = (await c.get("/api/shell")).json()
+            assert next(m for m in shell["modules"] if m["name"] == "science")["facet"] == "science"
+            recent = (await c.get("/api/feed?mode=recent")).json()["items"]
+            assert len([r for r in recent if r["module"] == "science"]) == 3
+            assert [r for r in (await c.get("/api/feed?mode=priority")).json()["items"] if r["module"] == "science"] == []
         with pytest.raises(HTTPException):
             notebook.resolve(sci.science.root, "../secret.txt")
         await app.state.runner.drain(1)
@@ -102,8 +107,10 @@ def test_science_run_streams_and_saves(sci, monkeypatch):
             assert events[1]["output"] == {"kind": "stream", "name": "stdout", "text": "1\n"} and events[3]["execution_count"] == 3
             assert all(e["cell"] == first and e["index"] == 0 for e in events)
             cells = (await c.get("/api/science/item/analysis.ipynb")).json()["cells"]
-            assert cells[0]["source"] == "# above" and cells[1]["id"] == first
-            assert cells[1]["execution_count"] == 3 and [o["kind"] for o in cells[1]["outputs"]] == ["stream", "text"]
+            assert cells[0]["code"] == "# above" and cells[1]["code"] == "print(1)"
+            assert cells[1]["g"] == "[3]" and cells[1]["out"] == "1\n\n2" and cells[1]["err"] is False
+            on_disk = notebook.cells(notebook.read(sci.science.root / "analysis.ipynb"))
+            assert on_disk[1]["id"] == first and [o["kind"] for o in on_disk[1]["outputs"]] == ["stream", "text"]
             nb = nbformat.read(str(sci.science.root / "analysis.ipynb"), as_version=4)
             assert nb.cells[1].execution_count == 3 and len(nb.cells[1].outputs) == 2
             assert not list(sci.science.root.glob("*.tmp"))
@@ -137,13 +144,14 @@ def test_science_script_runs_as_subprocess(sci):
             assert [e["event"] for e in events] == ["started", "output", "error"] and all(e["cell"] == "script" and e["path"] == "sub/deep.py" for e in events)
             assert events[1]["output"]["text"] == "deep\n" and events[2]["text"] == "exit 3"
             item = (await c.get("/api/science/item/sub/deep.py")).json()
-            assert item["running"] is False and item["last"]["status"] == "failed" and item["last"]["exit_code"] == 3 and item["last"]["output"] == "deep\n"
+            failed = item["cells"][0]
+            assert item["status"] == "idle" and failed["run"] is False and failed["err"] is True and failed["out"] == "deep\n"
             job = (await c.get("/api/jobs")).json()[0]
             assert job["task"] == "science.script" and job["resource"] == "script:sub/deep.py" and job["status"] == "failed"
             assert (await c.post("/api/science/action/run", json={"id": "etl.py"})).status_code == 200
             await settle(app)
-            last = (await c.get("/api/science/item/etl.py")).json()["last"]
-            assert last["status"] == "done" and last["exit_code"] == 0 and last["output"] == ""
+            done = (await c.get("/api/science/item/etl.py")).json()["cells"][0]
+            assert done["run"] is False and done["err"] is False and done["out"] == ""
             assert [e["verb"] for e in (await c.get("/api/events?module=science")).json()["events"]] == ["ran", "failed"]
         assert state.scripts == {}
         await app.state.runner.drain(1)
@@ -164,8 +172,9 @@ def test_science_edits_write_valid_notebooks(sci):
             assert (await post("set_cell", {"id": "analysis.ipynb", "index": 0, "source": "print(2)"})).status_code == 200
             assert (await post("insert_cell", {"id": "analysis.ipynb", "after": 0, "type": "markdown"})).json()["index"] == 1
             assert (await post("insert_cell", {"id": "analysis.ipynb"})).json()["index"] == 3
-            cells = (await c.get("/api/science/item/analysis.ipynb")).json()["cells"]
-            assert [(x["type"], x["source"]) for x in cells] == [("code", "print(2)"), ("markdown", ""), ("markdown", "# notes"), ("code", "")]
+            assert [x["code"] for x in (await c.get("/api/science/item/analysis.ipynb")).json()["cells"]] == ["print(2)", "", "# notes", ""]
+            on_disk = notebook.cells(notebook.read(root / "analysis.ipynb"))   # the page draws no cell type, so the file is where it is checked
+            assert [(x["type"], x["source"]) for x in on_disk] == [("code", "print(2)"), ("markdown", ""), ("markdown", "# notes"), ("code", "")]
             assert (await post("delete_cell", {"id": "analysis.ipynb", "index": 1})).status_code == 200
             assert (await post("set_cell", {"id": "analysis.ipynb", "index": 9, "source": "x"})).status_code == 400
             assert (await post("set_cell", {"id": "etl.py", "index": 0, "source": "x"})).status_code == 400
@@ -208,19 +217,22 @@ def test_science_set_cells_keeps_outputs_by_id(sci):
         nbformat.write(nb, str(root / "old.ipynb"))
         async with client_for(app) as c:
             post = lambda cells, id="old.ipynb": c.post("/api/science/action/set_cells", json={"id": id, "cells": cells})
-            cells = (await c.get("/api/science/item/old.ipynb")).json()["cells"]
-            assert [x["id"] for x in cells] == ["c0", "c1"]
+            disk = lambda: notebook.cells(notebook.read(root / "old.ipynb"))   # ids live in the file; the page draws cells without them
+            assert [x["id"] for x in disk()] == ["c0", "c1"]
             r = await post([{"type": "markdown", "source": "# top"}, {"id": "c0", "type": "code", "source": "print(2)"}, {"id": "c1", "type": "code", "source": "# notes"}])
             assert r.json() == {"id": "old.ipynb", "cells": 3}, r.text
-            cells = (await c.get("/api/science/item/old.ipynb")).json()["cells"]
+            cells = disk()
             assert [(x["type"], x["source"]) for x in cells] == [("markdown", "# top"), ("code", "print(2)"), ("code", "# notes")]
             assert cells[1]["id"] == "c0" and cells[1]["execution_count"] == 3 and [o["text"] for o in cells[1]["outputs"]] == ["1\n"]
             assert cells[2]["id"] != "c1" and cells[2]["execution_count"] is None and cells[2]["outputs"] == []
             assert cells[0]["id"] and cells[0]["outputs"] == []
+            page = (await c.get("/api/science/item/old.ipynb")).json()["cells"]
+            assert [x["code"] for x in page] == ["# top", "print(2)", "# notes"]
+            assert (page[1]["g"], page[1]["out"]) == ("[3]", "1\n") and page[0]["g"] == "" and page[2]["out"] == ""
             # A merge: every old id vanishes but every text survives, so nothing is logged as deleted.
             assert (await post([{"type": "code", "source": "# top\n\nprint(2)\n\n# notes"}])).json()["cells"] == 1
             assert (await c.get("/api/events?module=science")).json()["events"] == []
-            merged = (await c.get("/api/science/item/old.ipynb")).json()["cells"][0]["id"]
+            merged = disk()[0]["id"]
             assert (await post([{"id": merged, "type": "code", "source": "print(3)"}])).json()["cells"] == 1   # text changed in place: an edit, not a deletion
             assert (await c.get("/api/events?module=science")).json()["events"] == []
             assert (await post([{"type": "code", "source": "x"}])).json()["cells"] == 1   # the merged cell's text is gone
@@ -300,9 +312,10 @@ def test_science_schedules_and_due(sci, monkeypatch):
             assert (await post("schedule", {"id": "etl.py", "every": "30m"})).status_code == 200
             assert (await post("schedule", {"id": "missing.py", "every": "30m"})).status_code == 404
             item = (await c.get("/api/science/item/analysis.ipynb")).json()
-            assert item["schedule"] == "every 1 d at 06:00" and parse(item["next_run"]) > now()
+            assert item["right"] == "every 1 d at 06:00" and item["status"] == "no kernel, every 1 d at 06:00"
+            assert parse(store.one("SELECT next_run FROM science_schedules WHERE path = ?", ("analysis.ipynb",))["next_run"]) > now()
             assert (await post("unschedule", {"id": "etl.py"})).status_code == 200
-            assert (await c.get("/api/science/item/etl.py")).json()["schedule"] is None
+            assert "right" not in (await c.get("/api/science/item/etl.py")).json()
             assert [e["verb"] for e in (await c.get("/api/events?module=science")).json()["events"]] == ["unscheduled", "scheduled", "scheduled"]
             assert (await post("schedule", {"id": "sub/deep.py", "every": "1h"})).status_code == 200
 

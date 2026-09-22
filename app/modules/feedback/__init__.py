@@ -13,7 +13,6 @@ MANIFEST = Manifest(
     hue="#A6ACB8",
     icon="",
     order=99,
-    page=False,
     agent=Agent(
         placeholder="",
         read_tools=("docs_list", "docs_read", "feedback_list"),

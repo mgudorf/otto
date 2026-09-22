@@ -7,18 +7,31 @@ A module is a package under app/modules/<name>/ with:
   routes.py     router (APIRouter) plus hooks numbers(store), today(store), queue(store), rows(store, limit),
                 item(store, id), context(store, registry) (all optional; route handlers must not share these names)
   tools.py      register(read, full, store, config) adding MCP tools (optional)
-  agent.md      system prompt for the module's Claude session (optional)
+  agent.md      the module's share of the one agent's system prompt (optional)
   setup(config) / async shutdown()   on the package, for modules that own process resources (optional)
 A module that fails to import or set up is recorded and skipped; the rest of the app keeps running.
-rows(store, limit) is the module's own items as ROWs, newest first: {id, module, title, when, tags, fixed, …extras}.
-`tags` comes from app.store.tags_for, `fixed` is what the item is and cannot be edited. The cross-module routes
-/api/items, the tag intersection and Home's Recent are built on it, so a module without it appears in none of them.
-A row the owner dismisses or deletes leaves every list that presents it (the module's LEFT, today, queue and the agent's
-context) while staying in its table, so no task suggests it again. The action that removes a row says so with removes: True;
-that is how the page and Home know to close the inspector standing on it.
-Its page, app/static/pages/<name>.js, default-exports one config: load() (its only fetch), cols and colsSplit, chips and seg,
-filter, groups, cells, rowClass, and optionally tools, summary, above, alt and detail. app/static/core.js renders it;
-the detail pane's buttons come from the item's own `actions`, so a page offers exactly what the module allows.
+
+MANIFEST.facet is the module's immutable tag: the one `fixed` tag every row of it carries, which decides the row's
+group on the feed, its hue and its mark. A module without a facet lists no rows and has no place on the brain.
+
+rows(store, limit) is the module's own items as ROWs, newest first; queue(store) is the ones still waiting on the owner.
+A ROW:
+  id       unique within the module; may be prefixed ("s12", "query:12") or a path
+  module   str
+  title    str
+  when     ISO-8601, or None for an undated row
+  fixed    [facet] — exactly one element, the module's facet, never the item's kind
+  tags     from app.store.tags_for: the owner's own tags, editable
+  type     which renderer the page uses (note, task, email, question, notebook, ledger, table, conversation, …)
+  verbs    [[verb, "Label"], …] what the module allows on this row, in the order the owner should see them
+  waits    int on a queue row, lower first; None elsewhere
+  …extras  per type: snip, unread, dim, done, starred, late, due, right, amount, pct, summary, related, taggable
+A kind worth filtering on is a plain tag, not `fixed`. A verb named trash, dismiss, forget, delete, archive, later or
+end removes the row: the browser asks before running it, and the row then leaves every list that presents it (queue,
+today and the agent's context) while staying in its table, so no task suggests it again.
+
+There is one page and one agent. /api/feed groups every module's rows by facet, /api/brain draws their tags, and
+POST /api/verb runs a row's verb through the module's own /api/<module>/action/<verb>.
 """
 
 from __future__ import annotations
@@ -59,7 +72,7 @@ class Schedule:
 @dataclass(frozen=True)
 class Agent:
     placeholder: str
-    skills: tuple[str, ...] = ()       # chips shown in the session pane
+    skills: tuple[str, ...] = ()       # named in the palette, which sends them to the drawer
     read_tools: tuple[str, ...] = ()   # MCP tool names on the read server
     write_tools: tuple[str, ...] = ()  # MCP tool names on the full server only
     builtins: tuple[str, ...] = ()     # CLI built-ins beyond the read set (Write, Edit) on session turns; tasks never get them
@@ -75,7 +88,7 @@ class Manifest:
     order: int
     schedules: tuple[Schedule, ...] = ()
     agent: Agent | None = None
-    page: bool = True                  # False: tasks only, no rail entry
+    facet: str | None = None           # the module's immutable tag; a module without one lists no rows and has no place on the brain
 
 
 TaskFn = Callable[[Any], Awaitable[Any]]
@@ -90,12 +103,12 @@ class Module:
     schema: str | None
     numbers: Callable[[Any], dict | None] | None
     today: Callable[[Any], list[dict]] | None
-    queue: Callable[[Any], list[dict]] | None    # rows still waiting on the owner; Home lists every one
+    queue: Callable[[Any], list[dict]] | None    # rows still waiting on the owner, each with waits; Priority lists every one
     item: Callable[[Any, str], dict | None] | None
     context: Callable[[Any, Any], str] | None   # (store, registry) -> text for the agent's system prompt
     register_tools: Callable[..., None] | None
     prompt: str | None
-    rows: Callable[[Any, int], list[dict]] | None = None   # (store, limit) -> ROWs newest first; /api/items and Home's Recent
+    rows: Callable[[Any, int], list[dict]] | None = None   # (store, limit) -> ROWs newest first; /api/items and the feed
     setup: Callable[[Any], None] | None = None          # (config) at build, for modules holding process resources
     shutdown: Callable[[], Awaitable[None]] | None = None  # awaited when the daemon stops
 

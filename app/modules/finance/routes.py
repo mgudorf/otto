@@ -9,7 +9,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from app.modules import int_id
-from app.store import Store, iso, now_iso, tags_for
+from app.store import Store, iso, now_iso, parse, tags_for
 
 router = APIRouter(prefix="/api/finance")
 
@@ -21,6 +21,8 @@ PER_MONTH = {"monthly": Decimal(1), "yearly": Decimal(1) / 12, "weekly": Decimal
 PERIOD_MONTHS = {"monthly": 1, "yearly": 12}
 HISTORY = 12                                   # the amounts one open entry carries; finance_amounts keeps every one
 RESOURCE = "finance"
+FACET = "finance"
+TYPE = "ledger"
 
 
 def to_cents(value) -> int:
@@ -33,6 +35,21 @@ def to_cents(value) -> int:
 
 def fmt(cents: int) -> str:
     return f"{Decimal(cents) / 100:,.2f}"
+
+
+def money(cents: int) -> str:
+    """What the feed and the page show: the amount with its currency sign."""
+    return f"${fmt(cents)}"
+
+
+def day(ts: str) -> str:
+    """A history stamp the way the owner reads dates: month first."""
+    return parse(ts).astimezone().strftime("%m-%d-%Y")
+
+
+def _when(ts: str) -> str:
+    """A stored moment on the owner's own clock, so the feed orders it against every other module's rows."""
+    return parse(ts).astimezone().strftime("%Y-%m-%dT%H:%M")
 
 
 def to_date(value) -> str | None:
@@ -77,21 +94,33 @@ def next_due(r: dict, today: date) -> str | None:
     return (d if d >= today else _month_step(a, (periods + 1) * step)).isoformat()
 
 
+def _verbs(r: dict) -> list[list[str]]:
+    """What the facet allows on the entry: only a recurring payment has a date, and an ended one cannot end twice."""
+    out = [["update", "Update amount"]]
+    if r["kind"] == "recurring":
+        out.append(["due", "Set date"])
+    if not r["ended_at"]:
+        out.append(["end", "End"])
+    out.append(["forget", "Forget"])
+    return out
+
+
 def _row(r: dict, today: date, tags: list[str]) -> dict:
-    """One ROW: the kind is the identity tag, the amount stays in cents, the date is the next occurrence.
+    """One ROW: the kind is a plain tag, the amount reads as money, the date is the next occurrence.
     The note travels with the row so typing a word from it finds the entry."""
     return {
         "id": r["id"],
         "module": "finance",
         "title": r["name"],
-        "when": r["updated_at"],
-        "tags": tags,
-        "fixed": [r["kind"]],
-        "kind": r["kind"],
-        "amount": r["amount"],
-        "cadence": r["cadence"],
+        "when": _when(r["updated_at"]),
+        "fixed": [FACET],
+        "tags": [r["kind"], *(t for t in tags if t != r["kind"])],
+        "type": TYPE,
+        "verbs": _verbs(r),
+        "snip": r["cadence"],
+        "amount": money(r["amount"]),
         "due": next_due(r, today),
-        "ended": r["ended_at"],
+        "dim": bool(r["ended_at"]),
         "note": r["note"],
     }
 
@@ -175,14 +204,9 @@ def item(store: Store, entry_id: str) -> dict:
     history = store.query(
         "SELECT ts, amount FROM finance_amounts WHERE entry_id = ? ORDER BY ts DESC LIMIT ?", (r["id"], HISTORY)
     )
-    actions = [{"verb": "update", "label": "Update amount", "primary": True}]
-    if r["kind"] == "recurring":
-        actions.append({"verb": "due", "label": "Set date"})
-    if not r["ended_at"]:
-        actions.append({"verb": "end", "label": "End"})
-    actions.append({"verb": "forget", "label": "Forget", "confirm": "Forget this entry and its history?", "removes": True})
+    kv = ([["Cadence", r["cadence"]]] if r["cadence"] else []) + ([["Note", r["note"]]] if r["note"] else [])
     row = _rows(store, [r], date.today())[0]
-    return {**row, "due_on": r["due_on"], "history": history, "actions": actions}
+    return {**row, "due_on": r["due_on"], "kv": kv, "hist": [[day(h["ts"]), money(h["amount"])] for h in history]}
 
 
 @router.post("/action/{verb}")

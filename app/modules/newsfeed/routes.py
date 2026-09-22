@@ -1,22 +1,25 @@
 """Newsfeed: the entries the nightly searches return, the yes or no on each, tags on entries and searches, and killing a search.
 
-A search's row id is `s<id>`; an entry's is the bare integer, so Home's inspector and the page post the same thing.
+A search's row id is `s<id>`; an entry's is the bare integer, so every caller posts the same thing.
 Nothing here creates a search: that is the agent's newsfeed_search_add. Every write is a user action through the runner.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from html import escape
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
-from app.store import Store, iso, now_iso, parse, tags_for
+from app.store import Store, iso, now, now_iso, parse, tags_for
 
 router = APIRouter(prefix="/api/newsfeed")
 
 CHIPS = {"All": "status != 'dismissed'", "Open": "status = 'open'", "Accepted": "status = 'accepted'"}
 LISTED = CHIPS["All"]                              # a dismissed entry leaves every list; the row stays so no run proposes it again
 SEARCH = "s"                                       # a search's row id, "s12"; an entry carries the bare integer
+FACET = "newsfeed"                                 # the module's immutable tag, the only one an entry carries
 RESOURCE = "newsfeed"
 ROW_LIMIT = 200                                    # one list per load; the shell narrows it in the browser
 
@@ -31,8 +34,8 @@ def _day(when: str) -> str:
     return f"{m}-{d}-{y}"
 
 
-def _fixed(store: Store, ids: list[int]) -> dict[int, list[str]]:
-    """The tags a run wrote on an entry, its search's among them: what the entry is, so the owner cannot edit them."""
+def _written(store: Store, ids: list[int]) -> dict[int, list[str]]:
+    """The tags a run wrote on an entry, its search's among them; the owner's `untag` drops any of them."""
     out: dict[int, list[str]] = {i: [] for i in ids}
     if not ids:
         return out
@@ -42,32 +45,50 @@ def _fixed(store: Store, ids: list[int]) -> dict[int, list[str]]:
     return out
 
 
+def _kv(r: dict, search: dict | None) -> list[list[str]]:
+    kv = [["Search", f"{search['name']}, every {search['every_days']} d"]] if search else []
+    if r["url"]:
+        kv.append(["Link", urlsplit(r["url"]).netloc])
+    if r["starts_at"]:
+        kv.append(["Happens", _day(r["starts_at"])])
+    if r["follow_up_at"]:
+        kv.append(["Follow-up", _day(r["follow_up_at"])])
+    return kv
+
+
+def _verbs(r: dict) -> list[list[str]]:
+    """An entry waiting on a yes or no offers both; a decided one offers only its link."""
+    link = [["link", "Open link"]] if r["url"] else []
+    if r["status"] != "open":
+        return link
+    return [["accept", "Accept"], *link, ["dismiss", "Dismiss"]]
+
+
 def _rows(store: Store, entries: list[dict]) -> list[dict]:
-    """Entries as ROWs: the headline, the day found, both tag sets, and the fields the page's cells read."""
+    """Entries as ROWs of type `article`: the headline, the day found, its tags, and what the page reads."""
     if not entries:
         return []
     ids = [r["id"] for r in entries]
-    fixed, mine = _fixed(store, ids), tags_for(store, "newsfeed", ids)
-    names = {s["id"]: s["name"] for s in store.query("SELECT id, name FROM newsfeed_searches")}
+    written, mine = _written(store, ids), tags_for(store, "newsfeed", ids)
+    searches_by_id = {s["id"]: s for s in store.query("SELECT id, name, every_days FROM newsfeed_searches")}
     rows_out = []
     for r in entries:
-        row = {
+        s = searches_by_id.get(r["search_id"])
+        rows_out.append({
             "id": r["id"],
             "module": "newsfeed",
             "title": r["text"],
             "when": _when(r["found_at"]),
-            "tags": mine.get(r["id"], []),
-            "fixed": fixed.get(r["id"], []),
-            "status": r["status"],
-            "summary": r["summary"],
+            "fixed": [FACET],
+            "tags": sorted({*written[r["id"]], *mine.get(r["id"], [])}),
+            "type": "article",
+            "snip": s["name"] if s else "",
             "url": r["url"],
-            "search": names.get(r["search_id"]),
-        }
-        if r["starts_at"]:
-            row["happens"] = r["starts_at"]
-        if r["follow_up_at"]:
-            row["followUp"] = r["follow_up_at"]
-        rows_out.append(row)
+            "kv": _kv(r, s),
+            "body": f"<p>{escape(r['summary'])}</p>" if r["summary"] else "",
+            "dim": r["status"] != "open",
+            "verbs": _verbs(r),
+        })
     return rows_out
 
 
@@ -172,33 +193,28 @@ def item_route(request: Request, item_id: str) -> dict:
 
 
 def _search_item(store: Store, search_id: int) -> dict:
+    """A standing search, shaped like the entries it returns: what it looks for, how often, and how much it has found."""
     r = _get_search(store, search_id)
+    waiting = store.scalar("SELECT COUNT(*) FROM newsfeed_items WHERE search_id = ? AND status = 'open'", (r["id"],))
+    found = store.scalar("SELECT COUNT(*) FROM newsfeed_items WHERE search_id = ?", (r["id"],))
     return {
-        **r,
         "id": f"{SEARCH}{r['id']}",
         "module": "newsfeed",
-        "kind": "search",
         "title": r["name"],
         "when": _when(r["created_at"]),
+        "fixed": [FACET],
         "tags": tags_of(store, "search", r["id"]),
-        "open": store.scalar("SELECT COUNT(*) FROM newsfeed_items WHERE search_id = ? AND status = 'open'", (r["id"],)),
-        "entries": store.scalar("SELECT COUNT(*) FROM newsfeed_items WHERE search_id = ?", (r["id"],)),
-        "actions": [{"verb": "kill", "label": "Kill", "confirm": "Kill this search? Its entries stay.", "removes": True}],
+        "type": "article",
+        "snip": f"every {r['every_days']} d",
+        "kv": [["Next run", _day(r["next_run"])], ["Found", f"{found}, {waiting} waiting"], ["Last result", r["last_result"] or "never run"]],
+        "body": f"<p>{escape(r['prompt'])}</p>",
+        "verbs": [["kill", "Kill"]],
     }
 
 
 def item(store: Store, item_id: str) -> dict:
     kind, ref = _ref(item_id)
-    if kind == "search":
-        return _search_item(store, ref)
-    r = _get_item(store, ref)
-    actions = []
-    if r["status"] == "open":
-        actions.append({"verb": "accept", "label": "Accept", "primary": True})
-        actions.append({"verb": "dismiss", "label": "Dismiss", "removes": True})
-    if r["url"]:
-        actions.append({"verb": "link", "label": "Open", "href": r["url"]})   # no url, no button: there is nothing to open
-    return {**_rows(store, [r])[0], "kind": "entry", "actions": actions}
+    return _search_item(store, ref) if kind == "search" else _rows(store, [_get_item(store, ref)])[0]
 
 
 @router.post("/action/{verb}")
@@ -301,13 +317,13 @@ def today(store: Store) -> list[dict]:
 
 
 def queue(store: Store) -> list[dict]:
-    """Every entry still waiting on a yes or no, newest first; Home lists these under Review however old they are."""
+    """Every entry still waiting on a yes or no, however old; `waits` is the days it has stood, so tonight's lead."""
     entries = store.query("SELECT * FROM newsfeed_items WHERE status = 'open' ORDER BY found_at DESC, id DESC")
-    return _rows(store, entries)
+    return [{**row, "waits": (now() - parse(e["found_at"])).days} for row, e in zip(_rows(store, entries), entries)]
 
 
 def rows(store: Store, limit: int = ROW_LIMIT) -> list[dict]:
-    """Every entry still listed, newest first; the tag intersection and Home's Recent read these."""
+    """Every entry still listed, newest first; the tag intersection and the feed's Recent read these."""
     entries = store.query(
         f"SELECT * FROM newsfeed_items WHERE {LISTED} ORDER BY found_at DESC, id DESC LIMIT ?",
         (max(1, min(limit, 1000)),),

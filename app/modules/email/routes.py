@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta
+from html import escape
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
@@ -13,6 +15,8 @@ from app.store import Store, iso, now, parse, tags_for
 router = APIRouter(prefix="/api/email")
 
 RESOURCE = "gmail"
+FACET = "email"
+GMAIL = "https://mail.google.com/mail/u/0/#all/"
 CHIPS = ("All", "Unread", "Flagged", "Priority")
 CHIP_LABELS = {"All": (), "Unread": ("UNREAD",), "Flagged": ("STARRED",)}
 CONFIG = None   # set by setup(); the queue hook is handed only the store
@@ -62,21 +66,37 @@ def _local(ts: str) -> str:
     return parse(ts).astimezone().isoformat(timespec="minutes")
 
 
+def _verbs(labels: list[str]) -> list[list[str]]:
+    """Archive first, then the two toggles and Gmail; the one that cannot be undone sits last."""
+    inbox = "INBOX" in labels
+    verbs = [["archive", "Archive"]] if inbox else []
+    verbs.append(["read", "Mark read"] if "UNREAD" in labels else ["unread", "Mark unread"])
+    verbs.append(["unstar", "Unstar"] if "STARRED" in labels else ["star", "Star"])
+    verbs.append(["open", "Open in Gmail"])
+    if inbox:
+        verbs.append(["trash", "Trash"])
+    return verbs
+
+
 def _row(r: dict, tags: list[str]) -> dict:
-    """One ROW. The sender and the subject stay apart; the page decides how to seat them."""
+    """One ROW. The sender is the clause after the subject, the Gmail snippet the gist under it."""
     labels = _labels(r)
+    unread = "UNREAD" in labels
     return {
         "id": r["id"],
         "module": "email",
         "title": r["subject"],
-        "from": r["from_name"] or r["from_addr"],
-        "snippet": r["snippet"],
+        "snip": r["from_name"] or r["from_addr"],
+        "summary": r["snippet"],
         "when": _local(r["internal_date"]),
+        "fixed": [FACET],
         "tags": tags,
-        "unread": "UNREAD" in labels,
+        "type": "email",
+        "unread": unread,
+        "dim": not unread,
         "starred": "STARRED" in labels,
-        "priority": r["priority"],
-        "attachments": json.loads(r["attachments"] or "[]"),
+        "href": f"{GMAIL}{r['id']}",                # the url Open needs; a [verb, label] pair carries none
+        "verbs": _verbs(labels),
     }
 
 
@@ -151,31 +171,27 @@ async def body_of(store: Store, config, message_id: str) -> dict:
     return {**row, "attachments": json.loads(row["attachments"])}
 
 
+def _html(b: dict | None, snippet: str) -> str:
+    """What the reader renders: the sanitized html the message carried, else its text as paragraphs."""
+    if b and b["html"]:
+        return b["html"]
+    text = (b["text"] if b else "") or snippet
+    return "".join(f"<p>{escape(p.strip())}</p>" for p in re.split(r"\n\s*\n", text) if p.strip())
+
+
 def item(store: Store, message_id: str) -> dict:
-    """The ROW plus what only the reader needs: the body, the triage reason and the verbs this message offers."""
+    """The ROW plus what only the reader needs: who it is from, what triage made of it, and the body."""
     r = _get(store, message_id)
     row = _row(r, tags_for(store, "email", [message_id])[message_id])
-    labels = _labels(r)
-    in_inbox = "INBOX" in labels
-    actions = []
-    if in_inbox:
-        actions.append({"verb": "archive", "label": "Archive", "primary": True, "removes": True})
-    actions.append({"verb": "read", "label": "Mark read"} if row["unread"] else {"verb": "unread", "label": "Mark unread"})
-    actions.append({"verb": "unstar", "label": "Unstar"} if row["starred"] else {"verb": "star", "label": "Star"})
-    actions.append({"verb": "open", "label": "Open in Gmail", "href": f"https://mail.google.com/mail/u/0/#all/{message_id}"})
-    if in_inbox:   # the destructive verb sits last, away from the primary one
-        actions.append({"verb": "trash", "label": "Trash", "confirm": "Trash this message?", "removes": True})
+    tri = store.one("SELECT priority, reason FROM email_triage WHERE message_id = ?", (message_id,))
+    attached = json.loads(r["attachments"] or "[]")
+    kv = [["From", f"{r['from_name']} <{r['from_addr']}>" if r["from_name"] else r["from_addr"]]]
+    if tri:
+        kv.append(["Priority", f"{tri['priority']}, {tri['reason']}" if tri["reason"] else tri["priority"]])
+    if attached:
+        kv.append(["Attached", ", ".join(attached)])
     b = store.one("SELECT text, html FROM email_bodies WHERE message_id = ?", (message_id,))
-    body = b["text"] if b else r["snippet"]
-    tri = store.one("SELECT reason FROM email_triage WHERE message_id = ?", (message_id,))
-    return {
-        **row, "kind": "email",
-        "from_addr": r["from_addr"], "to_addr": r["to_addr"],
-        "text": f"{r['subject']}\n\n{body}",
-        "body": body, "html": b["html"] if b else None,
-        "in_inbox": in_inbox, "reason": tri["reason"] if tri else None,
-        "actions": actions,
-    }
+    return {**row, "kv": kv, "body": _html(b, r["snippet"])}
 
 
 def _resolve(store: Store, body: dict) -> tuple[list[str], str]:
@@ -262,14 +278,19 @@ def queue(store: Store) -> list[dict]:
     if due is None or due - timedelta(days=CONFIG.email.consent_warn_days) > now():
         return []
     gone = due <= now()
+    when = _local(iso(due))
     return [{
         "id": "consent",
         "module": "email",
         "title": "Gmail consent has expired; run: python -m app.modules.email.gmail consent" if gone
                  else "Gmail consent expires soon; run: python -m app.modules.email.gmail consent",
-        "when": _local(iso(due)),
+        "when": when,
+        "fixed": [FACET],
         "tags": [],
-        "fixed": ["notice"],
+        "type": "decision",        # no message stands behind it, so nothing tags it and no verb runs on it
+        "taggable": False,
+        "due": when[:10],
+        "verbs": [],
     }]
 
 

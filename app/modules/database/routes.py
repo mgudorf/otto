@@ -11,13 +11,14 @@ from datetime import datetime
 from fastapi import APIRouter, Body, HTTPException, Request, Response
 
 from app.modules.database import query
-from app.store import Store, now_iso
+from app.store import Store, now_iso, parse, tags_for
 
 router = APIRouter(prefix="/api/database")
 
 RESOURCE = "db"  # shared with data.backup and data.vacuum, so they never overlap a query
 REFUSED = "readonly"  # what SQLite says when a statement tries to write on the mode=ro connection
 QUERY = "query:"      # a saved query's id, so tables and saved queries share one list
+FACET = "database"    # the module's immutable tag, the only one its rows carry
 
 
 def _size_bytes(store: Store) -> int:
@@ -189,38 +190,55 @@ ACTIONS = {"run": _run, "write": _write, "explain": _explain, "save": _save, "de
 
 
 # ---- shell hooks ---------------------------------------------------------------------------
+def _when(ts: str) -> str:
+    """A stored moment on the owner's own clock, so the feed orders it against every other module's rows."""
+    return parse(ts).astimezone().strftime("%Y-%m-%dT%H:%M")
+
+
+def _comment(c: dict) -> str:
+    """What a column promises: its key, whether it may be empty, what it holds when nothing is given."""
+    parts = ["primary key"] if c["pk"] else (["not null"] if c["notnull"] else [])
+    if c["default"] is not None:
+        parts.append(f"default {c['default']}")
+    return ", ".join(parts)
+
+
 def _table_row(t: dict) -> dict:
-    """One table as a ROW. A table is the store's own shape rather than an item, so it takes no tag at all,
-    and the owning module rides as `owner`: a tag is something the owner wrote."""
-    return {"id": t["name"], "module": "database", "kind": "table", "title": t["name"],
-            "owner": t["module"], "count": t["rows"], "tags": [], "fixed": [], "taggable": False}
+    """One described table as a ROW. A table is the store's own shape rather than something the owner wrote, so it
+    takes no tag of its own and carries no moment: undated, it sorts behind everything in Recent."""
+    return {"id": t["name"], "module": "database", "title": t["name"], "when": None, "fixed": [FACET],
+            "tags": ["table"], "taggable": False, "type": "table", "right": f"{t['rows']:,} rows",
+            "cols": [[c["name"], c["type"], _comment(c)] for c in t["columns"]],
+            "href": "/api/database/export/" + t["name"],   # the url Export needs; a [verb, label] pair carries none
+            "verbs": [["query", "Query"], ["export", "Export"]]}
 
 
-def _query_row(q: dict) -> dict:
+def _query_row(store: Store, q: dict) -> dict:
     """One saved query as a ROW, stamped with the moment it was last kept."""
-    return {"id": f"{QUERY}{q['id']}", "module": "database", "kind": "query", "title": q["name"],
-            "when": q["updated_at"], "sql": q["sql"], "tags": [], "fixed": []}
+    row_id = f"{QUERY}{q['id']}"
+    return {"id": row_id, "module": "database", "title": q["name"], "when": _when(q["updated_at"]),
+            "fixed": [FACET], "tags": sorted({"query", *tags_for(store, "database", [row_id])[row_id]}),
+            "type": "query", "snip": "saved", "sql": q["sql"],
+            "verbs": [["delete", "Delete"]]}   # Load waits on the query console returning to the page
 
 
 def rows(store: Store, limit: int = 200) -> list[dict]:
-    """The saved queries, newest first. A table carries no moment, so it is nothing Home's Recent can order."""
-    return [_query_row(q) for q in _saved(store)][:limit]
+    """The saved queries newest first, then every table the store holds."""
+    return [*(_query_row(store, q) for q in _saved(store)), *(_table_row(t) for t in query.schema(store))][:limit]
 
 
 def item(store: Store, item_id: str) -> dict:
-    """A table with its columns, or a saved query with its text; each carries the buttons its pane offers."""
+    """A table with its columns, or a saved query with its text."""
     if item_id.startswith(QUERY):
         ref = item_id[len(QUERY):]
         q = store.one("SELECT * FROM database_queries WHERE id = ?", (int(ref),)) if ref.isdigit() else None
         if q is None:
             raise HTTPException(404, "no such saved query")
-        return {**_query_row(q),
-                "actions": [{"verb": "delete", "label": "Delete", "confirm": f'Delete "{q["name"]}"?', "removes": True}]}
+        return _query_row(store, q)
     t = query.table(store, item_id)
     if t is None:
         raise HTTPException(404, "no such table")
-    return {**_table_row(t), "columns": t["columns"],
-            "actions": [{"verb": "export", "label": "Export", "primary": True, "href": f"/api/database/export/{t['name']}"}]}
+    return _table_row(t)
 
 
 def numbers(store: Store) -> dict:

@@ -1,4 +1,4 @@
-"""Database module: every executor, run/write/explain/save through the app, the tables by module with their schemas, the CSV export, and the tool split."""
+"""Database module: every executor, run/write/explain/save through the app, the tables by module with their schemas, its rows on the feed, the CSV export, and the tool split."""
 
 import dataclasses
 import re
@@ -129,13 +129,15 @@ def test_database_run_explain_save(config):
             assert (await c.post("/api/database/action/save", json={"name": "recent", "sql": "select id from second_brain_items"})).json()["id"] == qid
             assert (await c.post("/api/database/action/save", json={"name": "", "sql": "x"})).status_code != 200
             saved_item = (await c.get(f"/api/database/item/query:{qid}")).json()
-            assert saved_item["kind"] == "query" and saved_item["title"] == "recent" and saved_item["sql"].startswith("select id")
-            assert saved_item["actions"] == [{"verb": "delete", "label": "Delete", "confirm": 'Delete "recent"?', "removes": True}]
+            assert saved_item["type"] == "query" and saved_item["title"] == "recent" and saved_item["sql"].startswith("select id")
+            assert saved_item["fixed"] == ["database"] and saved_item["tags"] == ["query"] and saved_item["snip"] == "saved"
+            assert saved_item["verbs"] == [["delete", "Delete"]]   # Load waits on the query console
             assert (await c.get("/api/database/item/query:9999")).status_code == 404
-            # the rows hook is the saved queries, each stamped; a table carries no moment, so Home's Recent cannot order it
+            # the rows hook is the saved queries, each stamped, then every table, which carries no moment at all
             kept = app.state.registry.get("database").rows(app.state.store, 200)
-            assert [r["id"] for r in kept] == [f"query:{qid}"] and kept[0]["title"] == "recent" and kept[0]["when"]
-            assert kept[0]["fixed"] == [] and kept[0]["tags"] == []
+            assert kept[0]["id"] == f"query:{qid}" and kept[0]["title"] == "recent" and kept[0]["when"]
+            assert kept[0]["fixed"] == ["database"] and kept[0]["tags"] == ["query"]
+            assert {r["id"] for r in kept[1:]} == tables and all(r["when"] is None and r["type"] == "table" for r in kept[1:])
             # the page sends back the id it was listed under, prefix and all
             assert (await c.post("/api/database/action/delete", json={"id": f"query:{qid}"})).status_code == 200
             assert (await c.get("/api/database/left")).json()["saved"] == []
@@ -148,12 +150,14 @@ def test_database_run_explain_save(config):
             assert "1 rows: delete from second_brain_items" in next(e["text"] for e in ev["events"] if e["verb"] == "wrote")
             ctx = app.state.registry.get("database").context(app.state.store, app.state.registry)
             assert "\napp:\n" in ctx and "\nsecond_brain:\n  second_brain_fts (2): text\n  second_brain_items (2): id, kind, text" in ctx
-            # with the query deleted the hook has nothing left, and one table's pane carries its columns and its Export
-            assert app.state.registry.get("database").rows(app.state.store, 200) == []
+            # with the query deleted only the tables are left, and one table's page carries its columns and its verbs
+            assert all(r["type"] == "table" for r in app.state.registry.get("database").rows(app.state.store, 200))
             row = (await c.get("/api/database/item/second_brain_items")).json()
-            assert row["module"] == "database" and row["owner"] == "second_brain" and row["count"] == 2 and row["fixed"] == []
-            assert [x["name"] for x in row["columns"]] == ["id", "kind", "text", "created_at", "updated_at", "done_at"]
-            assert row["actions"] == [{"verb": "export", "label": "Export", "primary": True, "href": "/api/database/export/second_brain_items"}]
+            assert row["module"] == "database" and row["type"] == "table" and row["right"] == "2 rows" and row["when"] is None
+            assert row["fixed"] == ["database"] and row["tags"] == ["table"] and row["taggable"] is False
+            assert [name for name, _, _ in row["cols"]] == ["id", "kind", "text", "created_at", "updated_at", "done_at"]
+            assert row["cols"][0] == ["id", "INTEGER", "primary key"] and row["cols"][1][2] == "not null"
+            assert row["verbs"] == [["query", "Query"], ["export", "Export"]]
             assert (await c.get("/api/database/item/second_brain_fts_data")).status_code == 404
             # the whole table as CSV, named after the table and the moment
             csv = await c.get("/api/database/export/second_brain_items")
@@ -168,6 +172,32 @@ def test_database_run_explain_save(config):
             left = (await c.get("/api/database/left")).json()
             assert left["modules"][-1] == {"name": "other", "rows": 0, "tables": [{"name": "scratch", "module": "other", "rows": 0}]}
             assert (await c.get("/api/database/table/scratch")).json()["module"] == "other"
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())
+
+
+def test_database_feed_rows(config):
+    """Database on the one page: one facet over its two shapes, the saved query stamped, the tables undated and last."""
+
+    async def main():
+        app = build(config)
+        await app.state.runner.start()
+        async with client_for(app) as c:
+            assert (await c.post("/api/second_brain/action/capture", json={"kind": "note", "text": "a"})).status_code == 200
+            qid = (await c.post("/api/database/action/save", json={"name": "recent", "sql": "select 1"})).json()["id"]
+            items = (await c.get("/api/feed?mode=recent")).json()["items"]
+            mine = [r for r in items if r["module"] == "database"]
+            assert mine[0]["id"] == f"query:{qid}" and mine[0]["type"] == "query"
+            assert len(mine) > 1 and all(r["type"] == "table" for r in mine[1:])
+            assert all(r["fixed"] == ["database"] for r in mine)
+            dated = [i for i, r in enumerate(items) if r["when"]]
+            assert min(i for i, r in enumerate(items) if r["when"] is None) > max(dated)   # an undated row sits behind every dated one
+            assert [r["type"] for r in (await c.get("/api/feed?mode=recent&tags=database,query")).json()["items"]] == ["query"]
+            assert [r for r in (await c.get("/api/feed?mode=priority")).json()["items"] if r["module"] == "database"] == []
+            shell = (await c.get("/api/shell")).json()
+            assert next(m for m in shell["modules"] if m["name"] == "database")["facet"] == "database"
         await app.state.runner.drain(1)
         app.state.store.close()
 

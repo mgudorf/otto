@@ -69,11 +69,10 @@ def build(config: Config, spawn_fn=None) -> FastAPI:
             conn.execute("INSERT INTO app_module_errors(module, ts, error) VALUES (?, ?, ?)", (name, now_iso(), err))
             log.error("module %s failed to load:\n%s", name, err)
     store.seed_settings({
-        "ui.start_page": config.ui.start_page,
         "ui.refresh_seconds": config.ui.refresh_seconds,
         "ui.time_format": config.ui.time_format,
         "ui.page_size": config.ui.page_size,
-        **{f"modules.{m.name}.enabled": True for m in registry.ordered() if m.manifest.page},
+        **{f"modules.{m.name}.enabled": True for m in registry.ordered() if m.manifest.facet},
         **{f"modules.{m.name}.scheduled": True for m in registry.ordered() if m.manifest.schedules},
     })
 
