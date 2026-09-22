@@ -120,6 +120,7 @@ def test_chat_conversation_lifecycle(config):
             st.store.execute(
                 "INSERT INTO newsfeed_searches(name, prompt, every_days, cap, created_at, next_run) VALUES ('x', 'find x', 1, 3, '2026-09-01T00:00:00+00:00', '2000-01-01')"
             )
+            st.store.set_setting("tasks.newsfeed.run.effort", "high")   # a scheduled task's own pick, by its task name
             job = st.runner.submit("newsfeed.run", "newsfeed", "newsfeed", "scheduled", feed_tasks.run)
             try:
                 await job.done
@@ -127,6 +128,7 @@ def test_chat_conversation_lifecycle(config):
                 pass   # the fake's reply is not a JSON array; the args are what matters
             task_args = calls[-1]["args"]
             assert task_args[task_args.index("--tools") + 1] == "Read,Grep,Glob,WebSearch,WebFetch" and "--include-partial-messages" not in task_args
+            assert task_args[task_args.index("--effort") + 1] == "high"
         await app.state.runner.drain(1)
         app.state.store.close()
 

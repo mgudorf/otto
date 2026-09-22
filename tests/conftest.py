@@ -94,8 +94,9 @@ class FakeProc:
 
 def fake_spawn(lines: list[str], calls: list | None = None, stderr: list[str] = ()):
     async def spawn(args, cwd, env):
+        proc = FakeProc(list(lines), stderr)
         if calls is not None:
-            calls.append({"args": args, "cwd": cwd, "env": env})
-        return FakeProc(list(lines), stderr)
+            calls.append({"args": args, "cwd": cwd, "env": env, "stdin": proc.stdin})   # stdin.data is the prompt, once written
+        return proc
 
     return spawn

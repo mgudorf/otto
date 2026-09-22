@@ -88,14 +88,12 @@ def shell(request: Request) -> dict:
         modules.append({
             "name": m.name, "title": m.manifest.title, "hue": m.manifest.hue, "icon": m.manifest.icon,
             "order": m.manifest.order, "facet": m.manifest.facet, "enabled": settings.get(f"modules.{m.name}.enabled", True) is not False,
-            "scheduled": settings.get(f"modules.{m.name}.scheduled", True) is not False, "tasks": len(m.manifest.schedules),
-            "model": settings.get(f"modules.{m.name}.model") or "default", "effort": settings.get(f"modules.{m.name}.effort") or "default",
             "agent": {"placeholder": a.placeholder} if a else None, "error": None,
         })
     for name, err in st.registry.errors.items():
         modules.append({
             "name": name, "title": name, "hue": "#5f636c", "icon": "", "order": 98, "facet": None, "enabled": False,
-            "scheduled": False, "tasks": 0, "model": "default", "effort": "default", "agent": None, "error": err.strip().splitlines()[-1][:300],
+            "agent": None, "error": err.strip().splitlines()[-1][:300],
         })
     c = st.config
     return {
@@ -242,11 +240,11 @@ def settings_put(request: Request, body: dict = Body(...)) -> dict:
                 raise HTTPException(400, "rows per page must be 10 to 200")
             if key == "ui.time_format" and value not in ("24h", "12h"):
                 raise HTTPException(400, "time format must be 24h or 12h")
-        elif key.startswith("modules.") and key.rsplit(".", 1)[-1] in ("enabled", "scheduled"):
-            value = bool(value)   # .enabled = its rows reach the feed; .scheduled = its tasks run
-        elif key.startswith("modules.") and key.rsplit(".", 1)[-1] in ("model", "effort"):
+        elif key.startswith("modules.") and key.endswith(".enabled"):
+            value = bool(value)   # its facet's rows reach the feed and its tools reach the agent
+        elif key.startswith("tasks.") and key.rsplit(".", 1)[-1] in ("model", "effort"):
             choices = st.config.claude.models if key.endswith(".model") else st.config.claude.efforts
-            if value not in ("default", *choices):   # .model and .effort go on every CLI run the module makes
+            if value not in ("default", *choices):   # tasks.<job name>.model and .effort go on every CLI run that job makes
                 raise HTTPException(400, f"{key.rsplit('.', 1)[-1]} must be default or one of {', '.join(choices)}")
         else:
             raise HTTPException(400, f"unknown setting {key}")
@@ -471,9 +469,17 @@ def session_title(request: Request, module: str, sid: str, body: dict = Body(...
     return {"module": module, "id": sid, "title": title}
 
 
+@router.post("/api/session/{module}/new")
+def session_new(request: Request, module: str) -> dict:
+    """An empty tab, so a file can be attached before the first message."""
+    _module(request, module)
+    return new_session(request.app.state.store, module)
+
+
 @router.post("/api/session/{module}/send")
 async def session_send(request: Request, module: str, body: dict = Body(...)) -> dict:
-    """`id` names the tab; without one the turn opens a new session. `/clear` tags and closes the tab it names."""
+    """`id` names the tab; without one the turn opens a new session. `/clear` tags and closes the tab it names.
+    `files` names what Chat's upload route put in the tab's folder; the CLI is told to read them, the transcript is not."""
     st = request.app.state
     store: Store = st.store
     mod = _module(request, module)
@@ -484,6 +490,14 @@ async def session_send(request: Request, module: str, body: dict = Body(...)) ->
     sess = _session(store, module, str(sid)) if sid else None
     if sess is not None and sess["id"] in st.session_busy:
         raise HTTPException(409, "a turn is still running")
+    names = [str(n) for n in body.get("files") or []]
+    if names and sess is None:
+        raise HTTPException(400, "attach to an open session")
+    folder = st.config.data.workspace / "chat" / sess["id"] if sess else None   # Chat's folder for the conversation
+    attached = [folder / os.path.basename(n) for n in names]
+    missing = [p.name for p in attached if not p.is_file()]
+    if missing:
+        raise HTTPException(400, f"no attachment named {missing[0]}")
 
     if text == "/clear":
         if sess is None:
@@ -495,7 +509,8 @@ async def session_send(request: Request, module: str, body: dict = Body(...)) ->
 
     if sess is None:
         sess = new_session(store, module)
-    job = start_turn(st, mod, sess["id"], bool(sess["cli_started"]), text, text, _key(module, sess["id"]))
+    prompt = text + (f"\n\n(Attached, read them with the Read tool: {'; '.join(str(p) for p in attached)})" if attached else "")
+    job = start_turn(st, mod, sess["id"], bool(sess["cli_started"]), text, prompt, _key(module, sess["id"]))
     return {"queued": job.id, "session": sess["id"]}
 
 

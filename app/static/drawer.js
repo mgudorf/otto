@@ -2,14 +2,16 @@
 // a token. Every turn belongs to the daemon: what is typed goes to one Claude session holding every module's tools, and
 // the reply arrives over a stream. Ending a conversation tags it and files it under the chats facet, where it becomes a
 // row like any other.
-import { S, ITEMS, $, h, put, icon, I, toast, modOf, hue, select, renderChat, registerDrawer, parts, call, load } from './core.js';
+import { S, ITEMS, $, h, put, icon, I, toast, modOf, hue, select, renderChat, registerDrawer, parts, call, load, closePops } from './core.js';
 import { leaveComposer } from './shell.js';
-import { get, post, sse } from './api.js';
+import { get, post, sse, upload } from './api.js';
 import { md } from './md.js';
+import { pickOf, saveSettings } from './settings.js';
 
 const AGENT = 'otto';   // one agent for the whole app; the daemon hands it every module's tools and every module's prompt
+const TURN = `${AGENT}.turn`;   // the job every turn runs as, and the name its model and effort are kept under on Settings
 let sessions = [], turns = [], toolAt = {}, sid = null, busy = false, ctxItem = null, ctxRef = null, plate = null, stop = null;
-const drafts = {};
+const drafts = {}, attached = {};   // per tab: the unsent text, and the files put in its folder for the next turn
 const cur = () => sessions.find((s) => s.id === sid) || null;
 
 // ---- the conversations ------------------------------------------------------------------------------------------
@@ -75,16 +77,34 @@ function refOf() {
 }
 function focus() { const c = $('#composer'); if (c) { c.focus(); c.setSelectionRange(c.value.length, c.value.length); } }
 function setDraft(text) { drafts[sid || '+'] = text; const c = $('#composer'); if (c) c.value = text; focus(); }
+// A file goes into the tab's folder at once, through Chat's upload route, and the next turn names it to the agent. The
+// folder is the conversation's, so a tab that does not exist yet is opened first, taking the draft with it.
+async function attach(files) {
+  if (!files.length) return;
+  let id = sid;
+  if (!id) {
+    try { id = (await post(`/api/session/${AGENT}/new`)).id; } catch (e) { toast(e.message); return; }
+    const c = $('#composer'); drafts[id] = c ? c.value : '';
+    await syncTabs(id);
+    drafts['+'] = '';
+  }
+  for (const f of files) {
+    try { (attached[id] = attached[id] || []).push((await upload(`/api/chat/upload/${id}`, f)).name); } catch (e) { toast(`${f.name}: ${e.message}`); }
+  }
+  draw(); focus();
+}
+function pickFiles() { const inp = h('input', { type: 'file', multiple: true }); inp.addEventListener('change', () => attach([...inp.files])); inp.click(); }
 // The turn is not drawn here: it arrives on the stream, the same way the reply does, so the transcript has one author.
 async function send() {
   const c = $('#composer');
   const typed = (c ? c.value : '').trim();
   if (!typed || busy) return false;
-  const ref = refOf();
+  const ref = refOf(), files = attached[sid] || [];
   drafts[sid || '+'] = ''; if (c) c.value = '';
   busy = true; draw();
   try {
-    const r = await post(`/api/session/${AGENT}/send`, { text: ref ? `${ref.label}\n\n${typed}` : typed, id: sid || undefined });
+    const r = await post(`/api/session/${AGENT}/send`, { text: ref ? `${ref.label}\n\n${typed}` : typed, id: sid || undefined, files: files.length ? files : undefined });
+    delete attached[r.session];
     if (r.session && r.session !== sid) await syncTabs(r.session);
   } catch (e) { busy = false; turns.push({ role: 'system', text: e.message }); draw(); return false; }
   if (ctxRef) { S.pointRef = null; ctxRef = null; }
@@ -139,11 +159,39 @@ function refToken(r) {
   return h('span', { class: 'token ref', style: `--c:${r.module ? hue(r.module) : 'var(--ink-3)'}` }, r.module ? icon(modOf(r.module).icon) : icon(I.target),
     h('span', { class: 't' }, r.label, r.quote ? h('span', { class: 'q' }, ` “${r.quote}”`) : null), h('button', { title: 'Drop reference', onclick: drop }, '×'));
 }
+function fileToken(name) {
+  const drop = () => { attached[sid] = (attached[sid] || []).filter((n) => n !== name); draw(); };   // off the next turn; the file stays in the folder
+  return h('span', { class: 'token ref' }, icon(I.file), h('span', { class: 't' }, name), h('button', { title: 'Drop attachment', onclick: drop }, '×'));
+}
+// The drawer's own model and effort: the `otto.turn` pick Settings lays out under Conversation.
+function modelLabel() { const m = pickOf(TURN, 'model'), e = pickOf(TURN, 'effort'); return e === 'default' ? m : `${m} · ${e}`; }
+function openModelPop(anchor) {
+  closePops();
+  if (!S.shell) return;
+  const c = S.shell.claude, pop = h('div', { class: 'pop models', id: 'tagPop' });
+  const opt = (key, v) => h('div', { class: 'pi', onclick: async () => { if (await saveSettings({ [`tasks.${TURN}.${key}`]: v })) fill(); } }, h('span', { class: `chk${pickOf(TURN, key) === v ? ' on' : ''}` }), v);
+  const fill = () => put(pop, h('div', { class: 'ph' }, 'Model'), ...['default', ...c.models].map((v) => opt('model', v)),
+    h('div', { class: 'ph' }, 'Effort'), ...['default', ...c.efforts].map((v) => opt('effort', v)));
+  fill(); document.body.append(pop);
+  const r = anchor.getBoundingClientRect();
+  pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8))}px`;
+  pop.style.top = `${Math.max(8, r.top - pop.offsetHeight - 6)}px`;
+}
+// Text above, the bar under it: attach, the drawer's model and effort, send. A file dropped or pasted attaches too.
 function composer() {
-  const r = refOf();
-  return h('div', { class: 'composer' }, r ? h('div', { class: 'refs' }, refToken(r)) : null,
-    h('textarea', { id: 'composer', 'aria-label': 'Message', onkeydown: onKey }),
-    h('button', { class: 'send', title: 'Send', onclick: send }, icon(I.up)));
+  const r = refOf(), files = attached[sid] || [];
+  const dropped = (e) => [...((e.dataTransfer || e.clipboardData || {}).files || [])];
+  return h('div', {
+    class: 'composer',
+    ondragover: (e) => { if ([...(e.dataTransfer ? e.dataTransfer.types : [])].includes('Files')) e.preventDefault(); },
+    ondrop: (e) => { const fs = dropped(e); if (fs.length) { e.preventDefault(); attach(fs); } },
+  }, r || files.length ? h('div', { class: 'refs' }, r ? refToken(r) : null, ...files.map(fileToken)) : null,
+  h('textarea', { id: 'composer', 'aria-label': 'Message', onkeydown: onKey, onpaste: (e) => { const fs = dropped(e); if (fs.length) { e.preventDefault(); attach(fs); } } }),
+  h('div', { class: 'bar' },
+    h('button', { class: 'tool', title: 'Attach files', onclick: pickFiles }, icon(I.plus)),
+    h('button', { class: 'chip', title: 'Model and effort', 'data-tagbtn': '1', onclick: (e) => openModelPop(e.currentTarget) }, modelLabel()),
+    h('span', { class: 'spacer' }),
+    h('button', { class: 'send', title: 'Send', onclick: send }, icon(I.up))));
 }
 function draw() {
   if (!plate) return;
