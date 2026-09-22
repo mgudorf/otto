@@ -40,7 +40,7 @@ Fix: `order = 0` here, which is free (Home carries 0 and has no facet, so it tak
 - Found: 09-21-2026, the one-page change
 - Status: open
 
-What happens: a link offers `open` first and the row carries the url as `href`. Nothing reads `href`: the browser posts every verb to `/api/verb`, which hands it to `action/{verb}`, and `open` is not in `ACTIONS`, so the press answers 404 and says so. The browser does open a `url` a verb answers with, so only the daemon half is missing.
+What happens: a link offers `open` first and the row carries the url as `href`. Nothing reads `href`: the browser posts every verb to `/api/verb`, which hands it to `action/{verb}`, and `open` is not in `ACTIONS`, so the press answers 404 and says so. The browser does open a `url` a verb answers with, so only the daemon half is missing. Since the one-page change the browser handles `open` itself: `core.js` maps it to `away`, which reads `href` and calls `window.open`, so the 404 no longer happens. What is left is that the link opens in the app's own Chrome profile, filed in the app doc as "Open in Gmail, and every link the page opens, lands in a browser that is not mine".
 
 Expected: `Open` opens the link.
 

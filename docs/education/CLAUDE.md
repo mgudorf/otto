@@ -108,3 +108,16 @@ What happens: `blank` answers the per-topic progress and the two topic verbs sti
 Expected: the fourteen domains and their progress are the owner's to see and change, and the feedback given about a question reads beside it.
 
 Fix: progress per topic is a shape the feed has no place for — a topic is not a row — so it wants the brain or a facet callout rather than a card; the feedback is one more block in the `question` renderer, under the parts.
+
+### A question's topic and topic_tag are shown as tags
+
+- Kind: defect
+- Where: `app/modules/education/routes.py` `_row_tags`; `app/modules/education/prompts/generate.md` (`topic_tag`), `app/modules/education/tools.py` `education_add_question`, `app/modules/education/agent.md`
+- Found: 09-21-2026, the owner seeing `#probability and statistics` and `#estimation and inference` on a row
+- Status: open, owner decision
+
+What happens: `_row_tags` puts the topic's name and the question's `topic_tag` at the head of the row's tags, so they show as tags, narrow the feed and reach the brain. The generator and the tool ask for `topic_tag` as a 2 to 5 word label, so every question carries a phrase-long tag by design, and a topic named "Probability and statistics" is a three-word tag on every question under it. No multi-word tag in the database was written by an agent; these two are the only source.
+
+Expected: the row's tags are one word each: `estimation`, `inference`, `probability`, `statistics`. `topic_tag` stays the label the question page shows beside the topic.
+
+Fix: the generator and `education_add_question` also give `tags`, one word each through the platform helper of [[An agent's tag is one word]], and `_row_tags` takes those in place of `topic_tag`. The topic name needs a decision: either it is split into its words minus joining words ("and", "of"), or a topic carries its own one-word tags given when it is added and `education_add_topic` takes them.
