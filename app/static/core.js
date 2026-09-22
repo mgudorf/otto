@@ -44,6 +44,10 @@ export const I = {
   tag: '<path d="M3 3h6l8 8-6 6-8-8z"></path><circle cx="6.5" cy="6.5" r="1"></circle>',
   layout: '<rect x="3" y="4" width="14" height="12" rx="2"></rect><path d="M8 4v12M13 4v12"></path>',
   target: '<circle cx="4.5" cy="10" r="2.6"></circle><path d="M8.7 7v6M11.3 7v6"></path><circle cx="15.5" cy="10" r="2.6"></circle>',
+  sliders: '<path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle>',
+  plus: '<path d="M10 4v12M4 10h12"></path>',
+  slash: '<rect x="3" y="3" width="14" height="14" rx="3"></rect><path d="M12 6.5l-4 7"></path>',
+  file: '<path d="M6 3h5l4 4v10H6z"></path><path d="M11 3v4h4"></path>',
 };
 let toastT;
 export function toast(msg) { const t = $('#toast'); if (!t) return; t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2000); }

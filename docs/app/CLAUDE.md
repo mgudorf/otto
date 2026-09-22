@@ -73,8 +73,8 @@ The UI is a view of daemon state. The page renders from the store and polls or s
 | One instance, restart on code change | `/health` returns `rev`, a sha256 of `app/**` and `config.toml`. The launcher compares it with the working tree; on mismatch it posts `/admin/restart`: the daemon drains running jobs up to `drain_seconds`, spawns a detached replacement, exits; the replacement waits for the port to free. Direct starts wait the same way and give up if the port stays busy | `test_revision_changes_with_content` |
 | Daemon owns the clock | `Scheduler.sync_tasks` turns manifest schedules into `app_tasks` rows and deletes rows no manifest declares; `tick` every `tick_seconds` submits enabled tasks whose `next_run` passed. LLM tasks become due only inside `[nightly] window` and are re-armed for the next window start; only one goes per `stagger_minutes`, the rest stay due for a later tick, so two nightly runs never overlap | `test_sync_creates_rows_and_removes_orphans`, `test_tick_submits_due_and_advances`, `test_window_logic`, `test_nightly_runs_are_staggered` |
 | One job runner | `Runner`: one queue, `max_concurrent` workers, one lock per `resource`, an `app_jobs` row per job (`scheduled`, `action`, `session`) with `app_job_logs`. Routes run user actions through `run_action` and await the result, or `submit` and return the job id when the outcome arrives later. Rows left `queued` or `running` by a crash are marked failed at start | `test_same_resource_serializes_and_different_overlap`, `test_cap_holds` |
-| Every scheduled task visible | `app_tasks(name, module, interval_seconds, resource, llm, enabled, last_run, next_run, last_status, last_result)`; System turns each row into a routine row of the feed, carrying its cadence, last run and last result, with `Run now` and `Pause` or `Resume` as its verbs; one whose last run failed waits in Priority. A task of a module switched off stays listed and says so | `test_system_lists_its_routines`, `test_disabled_and_missing_module` |
-| The owner decides what runs | `modules.<name>.scheduled`, one switch per module through `PUT /api/settings`, held by `Scheduler.runs`: every task of a module switched off stays due and goes the tick after it is switched back on. Seeded true once at boot; nothing but the owner ever writes it | `test_module_switch_holds_every_task` |
+| Every scheduled task visible | `app_tasks(name, module, interval_seconds, resource, llm, enabled, last_run, next_run, last_status, last_result)`; System turns each row into a routine row of the feed, carrying its cadence, last run and last result, with `Run now` and `Pause` or `Resume` as its verbs; one whose last run failed waits in Priority. A task switched off stays listed and says paused | `test_system_lists_its_routines`, `test_disabled_and_missing_module` |
+| The owner decides what runs | `app_tasks.enabled`, one switch per task, thrown from Settings through `POST /api/tasks/<name>` or by the routine row's Pause and Resume: `tick` skips a task switched off, which keeps its `next_run` and goes the tick after it is switched back on. `sync_tasks` folds the per-module `modules.<name>.scheduled` switch the old Settings threw into its module's tasks, once, and deletes the key; nothing but the owner ever writes a switch | `test_module_switch_becomes_task_switches` |
 | Durable job records | SQLite WAL; jobs, logs, events, sessions survive restarts; nothing is replayed | `test_skipped_and_logs_and_commit` |
 | Resources in the daemon | tokens under `data/secrets/`, cursors in `app_cursors`, Claude runs as child processes of the daemon, Jupyter kernels as child processes held in Science's module state and shut down at lifespan exit; the page holds nothing | `test_science_reap` |
 | Idempotent, kill-safe tasks | a task's only write path is `ctx.commit(cursor=...)`: results and the new cursor in one transaction | `test_skipped_and_logs_and_commit` |
@@ -84,13 +84,13 @@ The UI is a view of daemon state. The page renders from the store and polls or s
 
 ### Config
 
-`config.toml` holds boot values; changing one means relaunching. Live settings are seeded from `[ui]` into the `app_settings` table on first start (`INSERT OR IGNORE`, so a new key reaches an old database on the next boot) and changed afterwards through `PUT /api/settings` (keys `ui.*`, `modules.<name>.enabled`, `modules.<name>.scheduled`, `modules.<name>.model` and `modules.<name>.effort`; a value outside its range is a 400: refresh 5 to 3600 s, rows per page 10 to 200, model and effort `default` or one of `claude.models` / `claude.efforts`). `enabled` and `scheduled` are seeded true, `enabled` for every module carrying a facet; `model` and `effort` are absent until the owner picks one, which reads as `default`. Nothing in the page writes a setting today — the patch below carries what that costs.
+`config.toml` holds boot values; changing one means relaunching. Live settings are seeded from `[ui]` into the `app_settings` table on first start (`INSERT OR IGNORE`, so a new key reaches an old database on the next boot) and changed afterwards from Settings through `PUT /api/settings` (keys `ui.*`, `modules.<name>.enabled`, and `tasks.<task>.model` and `tasks.<task>.effort`, where the task is the name of the job that makes the run; a value outside its range is a 400: refresh 5 to 3600 s, rows per page 10 to 200, model and effort `default` or one of `claude.models` / `claude.efforts`; any other key, the retired per-module `scheduled`, `model` and `effort` among them, is a 400 too). `enabled` is seeded true for every module carrying a facet; a task's `model` and `effort` are absent until the owner picks one, which reads as `default`.
 
 | Section | Keys |
 |---|---|
 | server | host, port |
 | scheduler | tick_seconds, max_concurrent, drain_seconds |
-| claude | binary, model (`default` keeps the CLI's own choice; a module's own pick overrides it), models and efforts (what a module may pick, besides `default`), sessions_kept_days |
+| claude | binary, model (`default` keeps the CLI's own choice; a task's own pick overrides it), models and efforts (what a task may pick, besides `default`), sessions_kept_days |
 | data | db, workspace (working directory of every Claude run; file tools are confined to it) |
 | nightly | window (local time), max_sessions per day (at least one per nightly LLM task), max_turns and max_minutes per run, stagger_minutes between one nightly run and the next |
 | chat | upload_max_mb (an attachment past it is a 413), replay_chars (tail of the stored transcript replayed when the CLI has lost a conversation) |
@@ -105,7 +105,7 @@ The UI is a view of daemon state. The page renders from the store and polls or s
 
 ### Claude
 
-Every run is one CLI process with the prompt on stdin and `--output-format stream-json --verbose`, launched with `--setting-sources ""`, `--restricted`, `--strict-mcp-config`, `--permission-prompts none`, `--tools` with the read built-ins `Read,Grep,Glob,WebSearch,WebFetch` (a session turn adds the agent's `builtins`, and Otto's are every enabled module's, so `Write` and `Edit` ride every turn, confined to the workspace by `--restricted`), `--allowedTools` for those plus the module's MCP tools, `--system-prompt`, then `--model` and `--effort` when the module's own settings (or, for the model, `claude.model`) say something other than `default`. The environment is scrubbed of every `ANTHROPIC_*`, `CLAUDECODE*` and `CLAUDE_CODE_*` variable. Stdout is read in 64 KiB chunks and split on newlines by the daemon itself, so one message carrying a whole file as a tool result never truncates the run. Any run past `max_minutes` is killed. Verified on this machine: the CLI answers with no API key set, WebSearch works headless under these flags, and the owner's global CLAUDE.md does not reach these runs.
+Every run is one CLI process with the prompt on stdin and `--output-format stream-json --verbose`, launched with `--setting-sources ""`, `--restricted`, `--strict-mcp-config`, `--permission-prompts none`, `--tools` with the read built-ins `Read,Grep,Glob,WebSearch,WebFetch` (a session turn adds the agent's `builtins`, and Otto's are every enabled module's, so `Write` and `Edit` ride every turn, confined to the workspace by `--restricted`), `--allowedTools` for those plus the module's MCP tools, `--system-prompt`, then `--model` and `--effort` when the task's own settings (or, for the model, `claude.model`) say something other than `default`. The task is the job's name: a scheduled task's own (`email.triage`), `<module>.turn` for a session turn (the drawer's is `otto.turn`), `<module>.close` or `<module>.tag` for the tagger, `feedback.file` for a filing. The environment is scrubbed of every `ANTHROPIC_*`, `CLAUDECODE*` and `CLAUDE_CODE_*` variable. Stdout is read in 64 KiB chunks and split on newlines by the daemon itself, so one message carrying a whole file as a tool result never truncates the run. Any run past `max_minutes` is killed. Verified on this machine: the CLI answers with no API key set, WebSearch works headless under these flags, and the owner's global CLAUDE.md does not reach these runs.
 
 | Path | Who | MCP server | Extra flags |
 |---|---|---|---|
@@ -132,7 +132,8 @@ Sessions: `app_sessions(id, module, opened_at, closed_at, title, tags, cli_start
 |---|---|
 | `GET /api/session/<module>` | the module's open sessions, oldest first, each labelled with its title once tagged, until then its first user line |
 | `GET /api/session/<module>/<id>` | one session with its turns and busy state |
-| `POST /api/session/<module>/send` | `{text, id?}`: no `id` opens a new session; an unknown or closed one is a 404. `/clear` with an `id` tags and closes that one; any other message starting with `/` goes to the CLI unchanged, so Claude Code commands and skills work from the drawer |
+| `POST /api/session/<module>/new` | opens an empty session, so a file can be attached before the first message |
+| `POST /api/session/<module>/send` | `{text, id?, files?}`: no `id` opens a new session; an unknown or closed one is a 404. `files` names what Chat's `upload/<id>` put in the session's folder, `data/workspace/chat/<id>/`: the CLI gets the text plus a trailer naming their paths, the transcript the text alone, and a name not in the folder, or files with no `id`, is a 400. `/clear` with an `id` tags and closes that one; any other message starting with `/` goes to the CLI unchanged, so Claude Code commands and skills work from the drawer |
 | `POST /api/session/<module>/<id>/title` | renames the tab, and the name outranks the tagger's |
 | `POST /api/session/<module>/<id>/reopen` | a closed session opens again, keeping its turns and its tags |
 | `GET /api/session/<module>/<id>/events` | the stream on key `<module>:<id>`: `user`, `model`, `delta` (text as it is written, never stored; the drawer ignores it), `tool`, `tool_result`, `result`, `error`, `idle`, `tagged` |
@@ -274,7 +275,9 @@ A verb runs through `POST /api/verb`, which finds the module's own `/action/{ver
 
 ### The drawer
 
-One agent. A tab per open conversation with a `+` at the head, the transcript, and a composer carrying what is being discussed as a token — the open item, or what point mode aimed at. `c` opens a conversation, `C` reopens the newest closed one through Chat's `reopen` verb, `F2` renames a tab, and closing one sends `/clear`, which names it, tags it and keeps it as a chats row. Nothing stateful lives in the DOM across a render: a draft per tab, the caret and which tab is open are module state.
+One agent. A tab per open conversation with a `+` at the head, the transcript, and a composer carrying what is being discussed as a token — the open item, or what point mode aimed at. `c` opens a conversation, `C` reopens the newest closed one through Chat's `reopen` verb, `F2` renames a tab, and closing one sends `/clear`, which names it, tags it and keeps it as a chats row. Nothing stateful lives in the DOM across a render: a draft per tab, the files attached to it, the caret and which tab is open are module state.
+
+The composer is the text over a bar, after the Claude Code panel in VS Code: attach, skills, a chip with the drawer's model and effort, and send at the far end. Attach opens the file picker, and a file dropped on the composer or pasted into it attaches the same way: it goes straight into the tab's folder through Chat's `upload/<id>`, shows as a token beside the reference, and the next turn names it to the agent. From the `+` tab, attaching first opens an empty tab through `/api/session/otto/new`, which takes the draft with it. Skills opens the palette on the agent's skills, as `/` in an empty composer does. The chip reads `default`, a model, or a model and an effort, and opens a popover of both lists, and a pick writes `tasks.otto.turn.model` or `.effort`: the same setting Settings lays out as Otto under Conversation. The clock and the Auto mode of the VS Code panel have no counterpart, since a turn here has no time budget of its own to set and the agent never asks permission.
 
 ### Tags
 
@@ -284,7 +287,7 @@ Selection is an intersection, never a path. `S.tokens` is the one set: a tag pic
 
 ### The brain
 
-A figure of dots turning slowly inside a dotted chamber, one lobe per facet, each dot shaded by the nearest lobe's hue. Every facet has a callout on a ring outside the figure, its leader following its lobe; picking one zooms into that facet's cluster, where its tags are a point cloud and the ten that matter most in the current mode are named. Up to nine plain tags can be pinned (`m`), each taking a numbered callout in the gaps between the facets, its number key toggling it in the search; the pins are kept in `otto-pins`. Tag nodes are placed by the facets their items belong to, so a tag sits near one, between two or among several, and a node's edges to its facets are drawn only while it is picked, pointed at or the open item's. Positions come from hashes, so a tag sits where it sat. The figure holds still when the system asks for reduced motion, and the program menu sets its minutes per turn.
+A figure of dots turning slowly inside a dotted chamber, one lobe per facet, each dot shaded by the nearest lobe's hue. Every facet has a callout on a ring outside the figure, its leader following its lobe; picking one zooms into that facet's cluster, where its tags are a point cloud and the ten that matter most in the current mode are named. Up to nine plain tags can be pinned (`m`), each taking a numbered callout in the gaps between the facets, its number key toggling it in the search; the pins are kept in `otto-pins`. Tag nodes are placed by the facets their items belong to, so a tag sits near one, between two or among several, and a node's edges to its facets are drawn only while it is picked, pointed at or the open item's. Positions come from hashes, so a tag sits where it sat. The figure holds still when the system asks for reduced motion, and Settings sets its minutes per turn.
 
 ### Keyboard
 
@@ -294,7 +297,7 @@ The palette holds the open item's own verbs first, then the frame's actions, the
 
 ### History and refresh
 
-The tokens, the open item and the mode are one history entry each (`pushState`), so the mouse's back and forward buttons walk the page's states; `?open=<id>` and `?tag=<tag>` open a link on a row or a tag. The feed refreshes on `ui.refresh_seconds` and after every verb, and a refresh waits while anything is being typed into. Static files go out `Cache-Control: no-cache`.
+The tokens, the open item and the mode are one history entry each (`pushState`), so the mouse's back and forward buttons walk the page's states; `?open=<id>` and `?tag=<tag>` open a link on a row or a tag. The feed refreshes on `ui.refresh_seconds`, read afresh before each wait so a change on Settings holds from the next refresh, and after every verb; a refresh waits while anything is being typed into. Static files go out `Cache-Control: no-cache`.
 
 ### Point mode
 
@@ -302,22 +305,34 @@ The tokens, the open item and the mode are one history entry each (`pushState`),
 
 ### Activity and Settings
 
-Neither is a page. The program menu under the brand holds Settings (the shares the feed and the drawer take, and the brain's minutes per turn), Activity (which adds the `routine` token, so the feed shows System's rows), Back up now, Export, the key list, the theme and what revision is running. A task's row carries `Run now` and `Pause` or `Resume`, so the scheduler is steered from the feed.
+The program menu under the brand holds Settings, Activity (which adds the `routine` token, so the feed shows System's rows), Back up now, Export, the key list, the theme and what revision is running. A task's row carries `Run now` and `Pause` or `Resume`, so the scheduler is steered from the feed as well.
+
+Settings (`settings.js`) opens from the menu or the palette as a dialog over the page and holds the keyboard until `Esc` or a click outside it. It reads `/api/tasks`, `/api/data` and a fresh `/api/shell`, and every control keeps its own state, so a change never redraws the dialog under the keyboard. The left column is every task by the kind of work it is, each row its title (the job's name on hover), its switch when it has a schedule, and its model and effort when it runs Claude:
+
+| Group | Tasks | Controls |
+|---|---|---|
+| Conversation | Otto (`otto.turn`, the drawer) | model, effort |
+| Filing | Naming conversations (`otto.close`, the tagger when a tab closes), Filing feedback (`feedback.file`) | model, effort |
+| Nightly | every `app_tasks` row with `llm`: Question writing, Email triage, Newsfeed searches, Entry suggestions | switch, model, effort |
+| Upkeep | every other `app_tasks` row: Email sync, Graph rebuild, Scheduled files, Idle kernel shutdown, Heartbeat, Old conversation cleanup | switch |
+
+A switch is the task's own `app_tasks.enabled`, the one its routine row's Pause and Resume throw; model and effort write `tasks.<job name>.model` and `.effort`, `default` included. A scheduled task missing from the titles in `settings.js` shows its job name. The right column holds Feed, a switch per facet (`modules.<name>.enabled`: its rows reach the feed and its tools reach the agent; the brain is built on the facets once, so the page reloads when the dialog closes after one changed), General (refresh every, 24 h or 12 h), Layout (the cards' and the drawer's shares and the brain's minutes per turn, this browser's own in `otto-layout`, applied as they are typed), Data (the database's path and size, Back up now, Export and Vacuum, each run followed by the date of the last one), and App (the server, the Claude binary, the workspace, `claude.model` when it is not `default`, the nightly window with the day's runs against the budget, and how long closed sessions are kept).
 
 ### Files
 
 | File | What it is |
 |---|---|
-| `index.html` | the skeleton: the header, the four columns, and the popovers, palette, key list and toast |
+| `index.html` | the skeleton: the header, the four columns, and the popovers, palette, key list, Settings and toast |
 | `styles.css` | the design; later rules override earlier ones, so changes are appended |
 | `fonts.css` | the `@font-face` block for the cuts vendored under `vendor/fonts` |
 | `core.js` | the state, the DOM helpers, the facets and dates, the search bar and its tokens, the feed, the open item and its types, the verbs, the tag and confirm popovers, history, and the frames the other parts fill |
-| `shell.js` | the four zones and the keyboard, the palette, the key list, the program menu, the layout popover, the grips, and boot |
+| `shell.js` | the four zones and the keyboard, the palette, the key list, the program menu, the grips, and boot |
+| `settings.js` | the Settings dialog, and the setting helpers the drawer's chip shares |
 | `brain.js` | the figure, the chamber, the callouts, the pins, the cluster zoom and the turn |
-| `drawer.js` | the one agent: tabs, transcript, composer, streaming |
+| `drawer.js` | the one agent: tabs, transcript, the composer and its bar, attachments, streaming |
 | `point.js` | aiming and the point popover |
 | `sql.js` | the query editor: a table or a saved query as SQL that runs on the page, its draft and result kept per item |
-| `api.js` | the fetch helpers and the in-flight count behind the pulse |
+| `api.js` | the fetch helpers, a file upload, and the in-flight count behind the pulse |
 | `md.js` | markdown with KaTeX |
 | `app.js` | imports the parts, which register themselves with core, then boots |
 
@@ -370,18 +385,44 @@ Expected: the answer is typed on the part it belongs to and sent from there, and
 
 Fix: the `question` renderer grows a box per ungraded part, its half-typed text in module state so a refresh cannot throw it away, posting `{id, n, answer}` to `/api/education/action/answer`, which already briefs the tutor and clears the old grade. The send key belongs in the `?` overlay.
 
-### The daemon's own state has no home: no Activity, no Settings
+### The daemon's own log has no home
 
 - Kind: gap
-- Where: `app/static/shell.js` (`openAppMenu`, `openLayoutPop`), `app/api.py` (`/api/events`, `/api/jobs`, `GET` and `PUT /api/settings`)
+- Where: `app/static/shell.js` (`openAppMenu`), `app/api.py` (`/api/events`, `/api/jobs`)
 - Found: 09-21-2026, writing the one page's doc
 - Status: open, needs a decision
 
-What happens: System's routine rows carry each task's cadence, last run, last result and its Run, Pause and Resume verbs, and that is all the daemon shows of itself. The events by day, a failed job's error and traceback, the nightly window and how much of its run budget is used are drawn nowhere. `PUT /api/settings` is served and nothing calls it: a module's `enabled` and `scheduled` switches, its model and its effort, `ui.refresh_seconds` and `ui.time_format` can only be changed against the API by hand, and `ui.page_size` is seeded, validated and read by nobody — the feed asks for 200 rows.
+What happens: System's routine rows carry each task's cadence, last run, last result and its Run, Pause and Resume verbs, and Settings carries the nightly window and the day's runs; that is all the daemon shows of itself. The events by day and a failed job's error and traceback are drawn nowhere.
 
-Expected: the owner can read the daemon's log and change a live setting from the one page.
+Expected: the owner can read the daemon's log from the one page.
 
-Fix: the events are rows and could be a facet of their own, or the program menu could open them as an item; the settings want a pane or an item, one row per key. Which of the two shapes each takes is the owner's call, since both are new surfaces rather than a port of the deleted pages.
+Fix: the events are rows and could be a facet of their own, or the program menu could open them as an item, as Settings opens as a dialog. Which shape it takes is the owner's call, since either is a new surface rather than a port of the deleted Activity page.
+
+### Rows per page is kept and read by nobody
+
+- Kind: defect
+- Where: `app/api.py` (`UI_KEYS`), `app/daemon.py` (the `ui.page_size` seed), `app/static/core.js` (`load`), `app/modules/home/routes.py` (`FEED_ROWS`)
+- Found: 09-21-2026, recovering Settings
+- Status: open, needs a decision
+
+What happens: `ui.page_size` is seeded from `[ui]`, validated at 10 to 200 and held at 40 in the live database, and nothing reads it: the feed asks every module for 200 rows in Recent, a number written into both `load` and `FEED_ROWS`. Settings leaves it off rather than show a knob that moves nothing.
+
+Expected: the rows the feed asks for are one setting the owner can see and change, or there is no such setting.
+
+Fix: `load` asks for `ui.page_size` rows per module and Settings shows it under General; the live value of 40 would cut Recent from 200 rows per facet to 40 on the day it lands, and the search bar narrows only the rows in hand, so how many to hold is the owner's call. Otherwise the key leaves `UI_KEYS`, the seed, `[ui]` and `Ui`.
+
+### The repo's CLAUDE.md still describes the twelve-page frontend
+
+- Kind: defect
+- Where: `CLAUDE.md` (Development 3, Layout 3)
+- Found: 09-21-2026, recovering Settings
+- Status: open
+
+What happens: Development 3 names `app/static/shell.js` "an import and the `PAGES` map" as a shared seam, and Layout 3 lists `pages/<name>.js`, `rows.js`, `session.js`, `feedback.js`, `module_settings.js` and Preact and htm under `vendor/`. None of these exist since the one page: the frontend is `core.js`, `shell.js`, `brain.js`, `drawer.js`, `point.js`, `settings.js`, `api.js` and `md.js`, and `shell.js` has no `PAGES` map.
+
+Expected: the file every change is held to describes the code as it is.
+
+Fix: Layout 3 takes the file list of this doc's Files table, and Development 3 drops `shell.js` from the seams, since no module adds a line to it any more.
 
 ### The window keeps running the code it booted with
 

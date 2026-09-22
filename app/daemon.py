@@ -73,7 +73,6 @@ def build(config: Config, spawn_fn=None) -> FastAPI:
         "ui.time_format": config.ui.time_format,
         "ui.page_size": config.ui.page_size,
         **{f"modules.{m.name}.enabled": True for m in registry.ordered() if m.manifest.facet},
-        **{f"modules.{m.name}.scheduled": True for m in registry.ordered() if m.manifest.schedules},
     })
 
     read = MCPServer(READ_SERVER, instructions="Read-only tools over the owner's Otto data.")
