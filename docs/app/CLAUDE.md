@@ -14,7 +14,7 @@ Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps 
 | Window | Google Chrome in app mode on its own profile in `app/.chrome-profile/`, first-run, default-browser and sync prompts off; its title bar and taskbar button show the Otto icon, which Chrome takes from the shell's favicon `app/static/otto.ico`. The app never touches Microsoft Edge |
 | Store | one SQLite file `data/otto.db` in WAL mode, platform and module tables together, every table named `<module>_<name>` (`app_` for the platform), timestamps as UTC ISO strings. At boot, before any schema runs, `app/migrate.py` renames an older database's tables to the current names: a backup into `data/backups/` first, then one transaction, refused when a new name already holds a table with rows. After the schemas, `MODULE_RENAMES` rewrites the rows that still name a module by an old name, behind its own backup (`tests/test_migrate.py`) |
 | LLM | the Claude Code CLI (2.1.263) headless under the owner's claude.ai Max login; no API key exists anywhere in the app |
-| Frontend | static ES modules and one stylesheet, no framework: `core.js` holds the state and renders the feed and the open item, `brain.js` the brain, `drawer.js` the agent, `shell.js` the frame and the keyboard; `styles.css` is the approved design and `fonts.css` declares the vendored PT Serif and Geist Mono cuts. marked, KaTeX and highlight.js are vendored for markdown, LaTeX and code; no build step, no Node, nothing fetched from the network at runtime |
+| Frontend | static ES modules and one stylesheet, no framework: `core.js` holds the state and renders the feed and the open item, `brain.js` the brain, `drawer.js` the agent, `sql.js` the query editor, `shell.js` the frame and the keyboard; `styles.css` is the approved design and `fonts.css` declares the vendored PT Serif and Geist Mono cuts. marked, KaTeX and highlight.js are vendored for markdown, LaTeX and code; no build step, no Node, nothing fetched from the network at runtime |
 | Modules built | nine carry a facet and list rows: Entry, Chat, Email, Education, Science, Finance, Newsfeed, Database and System. Home serves the feed, Graph keeps the tag graph its agent's tools work on, Feedback takes what point mode files; those three carry no facet, so they list nothing and hold no lobe |
 
 Run: `Otto.exe` at the repo root, tracked in git, is how Otto is opened: it runs `.venv/Scripts/python.exe -m app` from its own directory with no console, which checks the port and code revision, starts or restarts the daemon, then opens the window; a failed launch's output shows in a box. A pinned `Otto.exe` and the open window are two taskbar buttons, since the window carries Chrome's app identity. `python -m app setup` registers the Windows Task Scheduler entry `Otto` that starts the daemon at logon. `python -m app build` derives `app/static/otto.ico` from `otto.png` and recompiles `Otto.exe`; both are committed, so it runs only after the logo or the launcher source changes. `python -m app status` prints health. `python -m app.modules.email.gmail consent` runs the Gmail OAuth flow once and writes the token file. Tests: `.venv/Scripts/python.exe -m pytest -q`, offline; the CLI is mocked at `app.claude.spawn` and a real invocation raises; no Jupyter kernel is started.
@@ -32,7 +32,7 @@ app/runner.py     one queue, per-resource locks, worker count = cap, job rows an
 app/revision.py   sha256 of app/** and config.toml, served by /health
 app/claude.py     CLI spawn, event stream, read-only allowlist, nightly budget
 app/modules/      registry, agent_base.md, one package per module (contract under Daemon)
-app/static/       index.html, styles.css, fonts.css, otto.ico, app.js, core.js, shell.js, brain.js, drawer.js, point.js, api.js, md.js, vendor/
+app/static/       index.html, styles.css, fonts.css, otto.ico, app.js, core.js, shell.js, brain.js, drawer.js, point.js, sql.js, api.js, md.js, vendor/
 data/             otto.db, daemon.log and its rotations, secrets/, workspace/ (Science's root: chat/<id>/ and the owner's notebooks, scripts and folders), backups/, exports/; .gitignore covers data/*.log and data/*.log.*, the db, secrets, workspace, backups and exports
 .claude/          skills/ (feature-flow, feedback-queue, sync-architecture, data-migration): the repo's own workflows
 otto.png          the logo, the one source of otto.ico and of Otto.exe's icon
@@ -171,7 +171,7 @@ waits    int on a queue row, lower first; None elsewhere
 …extras  per type: snip, unread, dim, done, starred, late, due, right, amount, pct, summary, related, taggable
 ```
 
-A kind worth filtering on is a plain tag, not `fixed`: Entry adds `task`, `note`, `link` and `quote` to `tags`. Every verb must be a key of the module's own action table, since the browser posts it through `POST /api/verb` with `{module, id}` and nothing else; six verbs — `edit`, `answer`, `explain`, `update`, `due`, `query` — run in the browser and are never sent. `test_row_verbs_are_routes_the_module_serves` walks every module's verb literals against its table and holds the set that reaches no route. A verb named `trash`, `dismiss`, `forget`, `delete`, `archive`, `later` or `end` removes the row: the browser asks first and drops the row when the daemon answers.
+A kind worth filtering on is a plain tag, not `fixed`: Entry adds `task`, `note`, `link` and `quote` to `tags`. Every verb must be a key of the module's own action table, since the browser posts it through `POST /api/verb` with `{module, id}` and nothing else; eight verbs — `edit`, `answer`, `explain`, `update`, `due`, `open`, `link`, `export` — run in the browser and are never sent. `test_row_verbs_are_routes_the_module_serves` walks every module's verb literals against its table and holds the set that reaches no route. A verb named `trash`, `dismiss`, `forget`, `delete`, `archive`, `later` or `end` removes the row: the browser asks first and drops the row when the daemon answers.
 
 External systems follow one pattern: tasks get a read client, action routes get a write client, and a test proves the split.
 
@@ -250,7 +250,7 @@ The window is one page: the brain, the feed, the open item and the agent drawer 
 
 One list of every module's rows, grouped by facet in manifest order; each group is a card carrying the facet's hue and mark. Priority is every module's `queue()`, ranked least patient first; Recent is every module's `rows()`, newest first with undated rows behind them. `p` and `r` choose, and the tokens narrow both. The browser holds one set for both modes: `load()` asks `/api/feed` once per mode and merges them by `module/id`, so switching modes or narrowing costs no round trip.
 
-The right-hand cell is a progress bar for a question, the amount for a ledger entry, a box for a task, otherwise the row's own `right`, its due date, or its stamp. Clicking a row opens it in place: the row stays where it is and a summary slides out under it with its tags, its gist and the rows it relates to, each of which opens from there. `x` or the checkbox picks rows, and `t` tags everything picked at once.
+The right-hand cell is a progress bar for a question, the amount for a ledger entry, a box for a task, otherwise the row's own `right`, its due date, or its stamp. Clicking a row opens it in place: the row stays where it is and a summary slides out under it with its tags, its gist, a table's columns or a saved query's SQL, and the rows it relates to, each of which opens from there. `x` or the checkbox picks rows, and `t` tags everything picked at once.
 
 ### The open item
 
@@ -265,8 +265,8 @@ The page draws the item in the shape its `type` names, after `GET /api/{module}/
 | `notebook` `script` | Science | every cell, its code and its last output, read only; the stamp is the kernel's state and the owner's schedule |
 | `ledger` | Finance | the amount, the due date, the fields and the history |
 | `article` | Newsfeed | the fields and the body |
-| `table` | Database | every column with its type and its comment; the stamp is the row count |
-| `query` | Database | the saved SQL |
+| `table` | Database | the query editor seeded with `SELECT * FROM` the table, with Run, Explain and Save; the stamp is the row count. The columns, each with its type and what it promises, are the summary under the row |
+| `query` | Database | the query editor holding the saved SQL, which Save keeps under the same name; the SQL is also the summary under the row |
 | `conversation` | Chat | the last four turns |
 | `routine` | System | the cadence, the last run, the last result and the resource |
 | `decision` | any | the fields, the body and the date |
@@ -291,7 +291,7 @@ A figure of dots turning slowly inside a dotted chamber, one lobe per facet, eac
 
 ### Keyboard
 
-`?` opens the one list of keys; no control anywhere else names its own. `h` `l` (`←` `→`) step between the brain, the feed, the page and the drawer; `j` `k` (`↓` `↑`) move inside one; `↵` opens what the keyboard stands on, and moving never opens. In the drawer `j` `k` walk the `+`, each tab and then the composer. `1`–`9` toggle the pinned tags. `x` picks a row, `t` tags it, `a` asks about it, `n` starts an entry in the drawer, `e` edits, `Del` deletes, `p` and `r` are the modes, `o` is point mode, `/` or `Ctrl+K` the palette, `Ctrl+Space` the search bar and `Ctrl+Shift+Space` clears it, `Alt+←` and `Alt+→` walk history, `Esc` always leaves one layer.
+`?` opens the one list of keys; no control anywhere else names its own. `h` `l` (`←` `→`) step between the brain, the feed, the page and the drawer; `j` `k` (`↓` `↑`) move inside one; `↵` opens what the keyboard stands on, and moving never opens. In the drawer `j` `k` walk the `+`, each tab and then the composer. `1`–`9` toggle the pinned tags. `x` picks a row, `t` tags it, `a` asks about it, `n` starts an entry in the drawer, `e` edits, `Del` deletes, `p` and `r` are the modes, `o` is point mode, `/` or `Ctrl+K` the palette, `Ctrl+Space` the search bar and `Ctrl+Shift+Space` clears it, `Alt+←` and `Alt+→` walk history, `Esc` always leaves one layer, and `Ctrl+↵` in the query editor runs the SQL.
 
 The palette holds the open item's own verbs first, then the frame's actions, the agent's skills (typing `/` shows only those), the facets, the tags and matching rows.
 
@@ -331,6 +331,7 @@ A switch is the task's own `app_tasks.enabled`, the one its routine row's Pause 
 | `brain.js` | the figure, the chamber, the callouts, the pins, the cluster zoom and the turn |
 | `drawer.js` | the one agent: tabs, transcript, the composer and its bar, attachments, streaming |
 | `point.js` | aiming and the point popover |
+| `sql.js` | the query editor: a table or a saved query as SQL that runs on the page, its draft and result kept per item |
 | `api.js` | the fetch helpers, a file upload, and the in-flight count behind the pulse |
 | `md.js` | markdown with KaTeX |
 | `app.js` | imports the parts, which register themselves with core, then boots |
@@ -383,19 +384,6 @@ What happens: the `question` renderer draws the prompt and each part as a card t
 Expected: the answer is typed on the part it belongs to and sent from there, and the grade comes back on that card.
 
 Fix: the `question` renderer grows a box per ungraded part, its half-typed text in module state so a refresh cannot throw it away, posting `{id, n, answer}` to `/api/education/action/answer`, which already briefs the tutor and clears the old grade. The send key belongs in the `?` overlay.
-
-### A saved query shows its SQL and cannot run it
-
-- Kind: gap
-- Where: `app/static/core.js` (`contentEl`, the `table` and `query` cases), `app/modules/database/routes.py` (`ACTIONS`)
-- Found: 09-21-2026, writing the one page's doc
-- Status: open
-
-What happens: a table draws its columns and its row count; a saved query draws its SQL as one read-only block. Neither runs anything. The table's `Query` verb only opens the drawer with `query <table>: ` half-typed, so every read now goes through the agent. `run`, `write`, `explain` and `save` are served and unreachable, so there is no result grid, no plan, and no place for the confirmation a writing statement asks for.
-
-Expected: a query is edited and run where it is shown, its rows drawn under it, `EXPLAIN` available, and a statement that writes confirmed before it goes.
-
-Fix: the `query` renderer becomes an editable block with Run, Explain and Save, drawing `{cols, rows}` as a grid under it; `write` keeps the confirmation the old console asked for. A table's `Query` verb then opens that block seeded with a `SELECT` rather than the drawer.
 
 ### The daemon's own log has no home
 
