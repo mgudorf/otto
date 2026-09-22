@@ -356,7 +356,7 @@ body.pointing, body.pointing * { cursor: crosshair !important; }
 .mail td, .mail th { padding: 1px 4px; vertical-align: top; text-align: left; }
 .mail th { font-weight: 600; }
 .mail hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
-// The URL lives in the title, so a tracking link costs one glyph instead of two lines of the body.
+/* The URL lives in the title, so a tracking link costs one glyph instead of two lines of the body. */
 .mail .url { cursor: help; color: var(--ink-3); font-size: .62em; vertical-align: super; }
 .mail .url::after { content: '↗'; }
 .mail .img { color: var(--ink-3); font-size: .82em; }
