@@ -79,17 +79,22 @@ def test_nightly_runs_are_staggered(store, config):
     run(main())
 
 
-def test_module_switch_holds_every_task(store, config):
-    """The owner's per-module switch on Settings holds the module back; its rows stay due for the tick after."""
-    reg = fake_registry(("a", (Schedule("t1", "60s"),)))
+def test_module_switch_becomes_task_switches(store, config):
+    """The per-module switch the old Settings threw becomes each of its tasks' own switch at the next sync, once; a task
+    switched off stays due and goes the tick after it is switched back on."""
+    reg = fake_registry(("a", (Schedule("t1", "60s"), Schedule("t2", "60s"))), ("b", (Schedule("t1", "60s"),)))
     runner = Runner(store, config, reg, None, 1)
     sched = Scheduler(store, config, reg, runner)
+    store.set_setting("modules.a.scheduled", False)
+    store.set_setting("modules.b.scheduled", True)
     sched.sync_tasks()
+    assert {r["name"]: r["enabled"] for r in store.query("SELECT name, enabled FROM app_tasks")} == {"a.t1": 0, "a.t2": 0, "b.t1": 1}
+    assert store.setting("modules.a.scheduled") is None and store.setting("modules.b.scheduled") is None
 
     async def main():
-        store.set_setting("modules.a.scheduled", False)
-        assert sched.tick() == []
-        store.set_setting("modules.a.scheduled", True)
+        assert sched.tick() == ["b.t1"]
+        sched.set_enabled("a.t1", True)
+        sched.sync_tasks()   # the next boot's sync leaves the owner's switch alone
         assert sched.tick() == ["a.t1"]
 
     run(main())

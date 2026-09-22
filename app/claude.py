@@ -129,12 +129,13 @@ class ClaudeRunner:
         }
 
     # ---- argument building --------------------------------------------------------------
-    def _choice(self, mod, key: str, fallback: str) -> str:
-        """The module's own pick on its page (`modules.<name>.<key>`), or the fallback when it has none or says `default`."""
-        value = self.store.setting(f"modules.{mod.name}.{key}") if mod else None
+    def _choice(self, task: str, key: str, fallback: str) -> str:
+        """The owner's pick for this task on Settings (`tasks.<task>.<key>`), or the fallback when there is none or it says `default`.
+        A task is the job's name: `email.triage`, `otto.turn`, `otto.close`, `feedback.file`."""
+        value = self.store.setting(f"tasks.{task}.{key}")
         return value if value and value != "default" else fallback
 
-    def _args(self, mod, system_prompt: str, server: str, allowed: list[str], extra: list[str], builtins: tuple[str, ...] = READ_BUILTINS) -> list[str]:
+    def _args(self, task: str, system_prompt: str, server: str, allowed: list[str], extra: list[str], builtins: tuple[str, ...] = READ_BUILTINS) -> list[str]:
         mcp = {"mcpServers": {server: {"type": "http", "url": f"{self.mcp_url}/mcp/{'read' if server == READ_SERVER else 'full'}"}}}
         args = [
             self.config.claude.binary, "-p",
@@ -147,10 +148,10 @@ class ClaudeRunner:
             "--permission-prompts", "none",
             "--system-prompt", system_prompt,
         ]
-        model = self._choice(mod, "model", self.config.claude.model)
+        model = self._choice(task, "model", self.config.claude.model)
         if model != "default":
             args += ["--model", model]
-        effort = self._choice(mod, "effort", "default")
+        effort = self._choice(task, "effort", "default")
         if effort != "default":
             args += ["--effort", effort]
         return args + extra
@@ -213,7 +214,7 @@ class ClaudeRunner:
         mod = ctx.registry.modules.get(module)
         system = self._system_prompt(mod, scheduled=True)
         allowed = [f"mcp__{READ_SERVER}__{t}" for t in tools]
-        args = self._args(mod, system, READ_SERVER, allowed, ["--max-turns", str(self.config.nightly.max_turns), "--no-session-persistence"])
+        args = self._args(task, system, READ_SERVER, allowed, ["--max-turns", str(self.config.nightly.max_turns), "--no-session-persistence"])
         started = now()
         ctx.log(f"claude run_task tools={list(tools)}")
         run_id = self._record(ctx, "running", 0, None)   # counted from now, so concurrent runs see each other
@@ -238,7 +239,7 @@ class ClaudeRunner:
     async def oneshot(self, ctx, mod, prompt: str, tools: tuple[str, ...] = (), max_turns: int = 2) -> str:
         """User-triggered, read-only, unbudgeted single answer (session tagging, feedback filing)."""
         allowed = [f"mcp__{READ_SERVER}__{t}" for t in tools]
-        args = self._args(mod, self._system_prompt(mod, scheduled=True), READ_SERVER, allowed, ["--max-turns", str(max_turns), "--no-session-persistence"])
+        args = self._args(ctx.job.task, self._system_prompt(mod, scheduled=True), READ_SERVER, allowed, ["--max-turns", str(max_turns), "--no-session-persistence"])
         started = now()
         try:
             final = await self._stream(args, prompt, self.config.nightly.max_minutes * 60, None)
@@ -255,7 +256,7 @@ class ClaudeRunner:
         allowed = [f"mcp__{FULL_SERVER}__{t}" for t in tools]
         extra = (["--session-id", session_id] if is_new else ["--resume", session_id]) + ["--include-partial-messages"]
         builtins = READ_BUILTINS + tuple(agent.builtins)
-        args = self._args(mod, self._system_prompt(mod, scheduled=False), FULL_SERVER, allowed, extra, builtins)
+        args = self._args(f"{mod.name}.turn", self._system_prompt(mod, scheduled=False), FULL_SERVER, allowed, extra, builtins)   # start_turn's job name
         return await self._stream(args, text, self.config.nightly.max_minutes * 60, on_event)
 
     # ---- prompts ---------------------------------------------------------------------------

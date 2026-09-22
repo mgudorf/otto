@@ -33,6 +33,7 @@ INSERT INTO jobs(id, task, module, resource, kind, status, queued_at) VALUES (1,
 INSERT INTO job_logs(job_id, ts, message) VALUES (1, '2026-09-01T00:00:01+00:00', 'hello');
 INSERT INTO settings VALUES ('ui.start_page', '"memory"');
 INSERT INTO settings VALUES ('modules.memory.scheduled', 'false');
+INSERT INTO settings VALUES ('tasks.memory.suggest.model', '"haiku"');
 INSERT INTO cursors VALUES ('memory.suggest', '2026-09-01T00:00:00+00:00');
 INSERT INTO sessions(id, module, opened_at, closed_at, title, tags) VALUES ('s1', 'memory', '2026-09-01T00:00:00+00:00', '2026-09-01T00:01:00+00:00', 'one', '["sky"]');
 INSERT INTO memories(id, kind, text, created_at, updated_at) VALUES (7, 'note', 'the sky is blue', '2026-09-01T00:00:00+00:00', '2026-09-01T00:00:00+00:00');
@@ -72,7 +73,7 @@ def test_boot_renames_an_older_database(config):
     assert store.one("SELECT task, module, resource FROM app_jobs") == {"task": "second_brain.suggest", "module": "second_brain", "resource": "second_brain"}
     assert store.scalar("SELECT module FROM app_sessions") == "second_brain" and store.scalar("SELECT page FROM feedback_items") == "second_brain"
     assert store.cursor("second_brain.suggest") == "2026-09-01T00:00:00+00:00" and store.cursor("memory.suggest") is None
-    assert store.setting("modules.second_brain.scheduled") is False
+    assert store.setting("modules.second_brain.scheduled") is False and store.setting("tasks.second_brain.suggest.model") == "haiku"
     assert not [k for k in store.all_settings() if "memory" in k]
     # one page means no start page: the setting is gone from the config, and the row an older database carries is
     # left as it lies, neither reseeded nor rewritten by the module rename

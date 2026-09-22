@@ -9,8 +9,9 @@ function bump(d) {
 export async function api(path, opts = {}) {
   bump(1);
   try {
-    const init = { method: opts.method || 'GET', headers: { 'content-type': 'application/json' } };
-    if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
+    const init = { method: opts.method || 'GET', headers: opts.form ? {} : { 'content-type': 'application/json' } };   // a form sets its own boundary
+    if (opts.form) init.body = opts.form;
+    else if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
     const r = await fetch(path, init);
     const text = await r.text();
     let data = null;
@@ -28,6 +29,7 @@ export async function api(path, opts = {}) {
 export const get = (p) => api(p);
 export const post = (p, body) => api(p, { method: 'POST', body: body === undefined ? {} : body });
 export const apiPut = (p, body) => api(p, { method: 'PUT', body });   // `put` is the DOM helper in core.js
+export function upload(p, file) { const form = new FormData(); form.append('file', file); return api(p, { method: 'POST', form }); }
 
 // A path with a query string: missing and empty values are left out, a list joins on commas.
 export function q(path, params) {
