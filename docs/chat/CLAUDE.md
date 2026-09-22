@@ -30,19 +30,6 @@ Expected: any conversation the facet lists comes back as a tab, and one count of
 
 Fix: either `reopen` moves the session's `module` to `otto` as it clears `closed_at`, or the platform's session lookups take the id alone the way `_get` here now does. The first keeps the module column meaning who held the conversation; the second makes it decoration.
 
-### A conversation's own tags cannot be removed
-
-- Kind: defect
-- Where: `app/modules/chat/routes.py` `_tags`, against `app/api.py` `/api/tags/remove`
-- Found: 09-20-2026, porting the Chat page to the new shell
-- Status: open
-
-What happens: the tagger writes a conversation's tags into `app_sessions.tags`, and the row surfaces them as its `tags`, so they are offered in the tag popup like any other. Removing one posts `/api/tags/remove`, which deletes from `app_tags` only, so the tag is still there after the refresh and nothing says why.
-
-Expected: a tag shown as the owner's can be taken off, or is drawn as an identity tag that cannot.
-
-Fix: have the tagger's tags land in `app_tags` alongside the session's JSON, so the platform's tag routes reach them.
-
 ### A file attached while Claude is answering sits there until the turn ends
 
 - Kind: defect

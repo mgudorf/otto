@@ -412,3 +412,55 @@ What happens: Development 3 names `app/static/shell.js` "an import and the `PAGE
 Expected: the file every change is held to describes the code as it is.
 
 Fix: Layout 3 takes the file list of this doc's Files table, and Development 3 drops `shell.js` from the seams, since no module adds a line to it any more.
+
+### A tag lives in one of six stores
+
+- Kind: defect
+- Where: `app/store.py` (`tags_for`, `add_tags`, `remove_tag`, `all_tags` and their `SECOND_BRAIN` branches), `app/schema.sql` (the `app_tags` comment); `second_brain_tags` in `app/modules/second_brain/tools.py` and `routes.py` (`_tag`, `_untag`); `newsfeed_tags` in `app/modules/newsfeed/routes.py` (`_written`, `_tag`, `_untag`, `tags_of`), `tasks.py` and `tools.py`; `education_questions.tags` in `app/modules/education/routes.py` (`_tags`, `_row_tags`) and `questions.py` (`clean_tags`, `tags_of`); `app_sessions.tags` in `app/api.py` (`tag_session`) and `app/modules/chat/routes.py` (`_tags`); `feedback_items.tags` in `app/modules/feedback/routes.py` and `agent.md`; `app/modules/graph/build.py` (`SOURCES`) and `app/modules/graph/agent.md`
+- Found: 09-21-2026, the owner asking for one notion of tag; absorbs Chat's "A conversation's own tags cannot be removed" and Education's "A question's tags live in two places", both 09-20-2026
+- Status: open
+
+What happens: the contract says a row's `tags` come from `tags_for`, and five modules keep tags somewhere else: Entry in `second_brain_tags`, Newsfeed in `newsfeed_tags`, Education in a JSON list on the question, the session tagger in a JSON list on the session, Feedback in a JSON list on the filing. Every reader knows a different subset. `tags_for`, `add_tags`, `remove_tag` and the catalog reach `app_tags` and `second_brain_tags`; Graph's rebuild reads those two and the sessions'; a row shows whatever its module merges. So the × on a tag the session tagger, a nightly run or Education's list gave does nothing and the tag is back on the next refresh, Graph never sees a Newsfeed or Education tag, the catalog misses Newsfeed's, and the tutor's context lists only Education's own. Each store cleans a tag its own way: `tag_key`, `word_tags`, Education's `clean_tags`, which does not lowercase, and inline strips in the Newsfeed and Entry routes. Feedback's prompt asks for its tags as slots, the page, the kind and the subject, which repeat the filing's own fields, and nothing but `feedback_list` reads them.
+
+Expected: one table holds every tag on every row, whoever wrote it. Every writer goes through `add_tags`, an agent's tags through `word_tags` first, and every reader through `tags_for`, so the × works on every tag but a facet, and Graph, the catalog and the brain see one set.
+
+Fix: `app_tags` is the one store. `second_brain_tags`, `newsfeed_tags` (a search keyed `s<id>`) and the Education, session and Feedback lists move into it through the data-migration skill and are dropped, and the `SECOND_BRAIN` branches leave `app/store.py`. The module routes and tools write through `add_tags`, and `SOURCES` becomes `app_tags` alone. Feedback's prompt asks for what the note is about, not for slots.
+
+### A row's kind is drawn as a tag
+
+- Kind: defect
+- Where: `app/modules/__init__.py` (the contract line "A kind worth filtering on is a plain tag") and the same line in this doc's module contract; `app/modules/second_brain/routes.py` (`_row`), `app/modules/finance/routes.py` (`_row`), `app/modules/database/routes.py` (`_table_row`, `_query_row`); `app/static/point.js` (`capture`); `docs/design/data.js` (the sample rows' first tags)
+- Found: 09-21-2026, the owner asking for one notion of tag
+- Status: open, needs a decision
+
+What happens: the contract tells a module to put a kind worth filtering on into `tags`, beside its own line that `tags` are the owner's own and editable. Entry puts the item's kind first (`task`, `note`, `link`, `quote`, `fact`), Finance its kind, Database `table` on a table and `query` on a saved query. They are drawn, narrowed on and placed on the brain as tags nobody gave; the × on one does nothing and it is back on the next refresh, and a Database table carries `table` while refusing any other tag. That is a second class of privileged tag beside the facets, undeclared and looking like the owner's. On Entry and Database it repeats the row's `type`. Point mode's Capture copies a row's tags onto the new note, so a derived tag becomes a stored one there. The artboard's sample rows lead with their type as a tag too.
+
+Expected: a tag is a label someone gave. The facets are the only tags nobody can take off.
+
+Fix: the contract line goes, the three modules stop writing their kind into `tags`, and the artboard's sample rows follow. Where a kind is still wanted as a filter it is one of three things: an immutable tag beside the facets, declared in the manifest and drawn like one; the row's `type`, which the search bar narrows on the way it narrows on `is:`; or an ordinary tag written once at capture, which the owner may take off. The second keeps the immutable set to the facets and stores nothing new, and is the recommendation.
+
+### The window lands in whichever Chrome profile was used last
+
+- Kind: bug
+- Where: `app/__main__.py` (`open_window`); `app/config.py` and `config.toml` for the key it needs
+- Found: 09-22-2026, checking the real-Chrome change against the owner's Chrome
+- Status: open
+
+What happens: `open_window` starts Chrome with `--app` and no profile, and Chrome opens an app window in the profile used last. This Chrome has two profiles, and only `Default` is signed in with the owner's Google account. `Default` was the one used last today, so links land in the owner's Gmail. After a stretch in the other profile, the Otto window and every link it opens land there instead, under another account or none.
+
+Expected: the window, and every link it opens, is always in the profile that holds the owner's account.
+
+Fix: a `[window] profile` key in `config.toml`, `"Default"` on this machine, carried by a `Config` field and passed as `--profile-directory=<profile>` in `open_window`. Chrome then hands the window to the running browser under that profile, whichever profile was used last.
+
+### The first launcher's profile folder is still on disk and still named
+
+- Kind: defect
+- Where: `app/revision.py` (`SKIP_DIRS`), `.gitignore` (`app/.browser-profile/`), the folder `app/.browser-profile/` in the primary checkout
+- Found: 09-22-2026, deleting `app/.chrome-profile`
+- Status: open
+
+What happens: nothing has opened a browser on `app/.browser-profile/` since the window moved to Chrome on 09-07-2026. The folder still sits in the primary checkout at 49 MB, the revision hash still skips it by name, and `.gitignore` still lists it.
+
+Expected: the code names no folder that nothing creates, and the checkout holds no dead browser state.
+
+Fix: delete the folder first, by hand and with the owner's yes, since it is ignored runtime state. Then drop `.browser-profile` from `SKIP_DIRS` and its line from `.gitignore`. The order matters: the hash walks all of `app/`, so with the entry gone and the folder still there, a `.js` or `.html` file written into it would change the revision and restart the daemon.

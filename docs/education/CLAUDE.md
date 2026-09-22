@@ -83,19 +83,6 @@ Expected: the answer the tutor grades is the answer the question holds.
 
 Fix: either the page grows the answer box back and posts `action/answer` (which already briefs the tutor and clears the part's grade), or `education_grade` takes the answer it graded and stores it with the score. The second makes the tutor the only witness of what was written, which is why the first is the shape to rebuild.
 
-### A question's tags live in two places
-
-- Kind: bug
-- Where: `app/modules/education/routes.py` `_row_tags` and `_tags`, `education_questions.tags`, the platform's `app_tags`
-- Found: 2026-09-20, porting the page to the new shell
-- Status: open
-
-What happens: the tag popup writes every tag to `app_tags`, while `action/tags` (which the tutor uses) replaces the JSON list on the question itself. The row shows both stores, so nothing is hidden, but `/api/tags/remove` only reaches `app_tags`: the `×` on a tag that came from the JSON list does nothing, and the tutor's context lists only the JSON ones.
-
-Expected: one tag store per question, added and removed from the same place, and the same set in the tutor's context.
-
-Fix: move the question's tags into `app_tags` — `action/tags` writes there, `tags_of` reads there, and the JSON column is migrated once and dropped — or give the platform a per-module remove hook so both stores answer one `×`.
-
 ### A topic cannot be added or retired, and recorded feedback is drawn nowhere
 
 - Kind: gap
@@ -109,15 +96,15 @@ Expected: the fourteen domains and their progress are the owner's to see and cha
 
 Fix: progress per topic is a shape the feed has no place for — a topic is not a row — so it wants the brain or a facet callout rather than a card; the feedback is one more block in the `question` renderer, under the parts.
 
-### A question's topic and topic_tag are shown as tags
+### Education has a tag of its own, and draws its topic as a tag
 
 - Kind: defect
-- Where: `app/modules/education/routes.py` `_row_tags`; `app/modules/education/prompts/generate.md` (`topic_tag`), `app/modules/education/tools.py` `education_add_question`, `app/modules/education/agent.md`
+- Where: `app/modules/education/routes.py` (`_row_tags`, the context line, the generator's fields), `questions.py` (`validate_question`, `insert_question`, `add_question`, `unbound_acronyms`), `schema.sql` (`topic_tag`), `tasks.py`, `tools.py` (`education_add_question`, `education_questions`), `prompts/generate.md` (the output shape, `topic_tag`, rule 13), `agent.md`; `docs/design/data.js` (the sample questions' `hyperbolic-geometry`)
 - Found: 09-21-2026, the owner seeing `#probability and statistics` and `#estimation and inference` on a row
-- Status: open, owner decision
+- Status: open
 
-What happens: `_row_tags` puts the topic's name and the question's `topic_tag` at the head of the row's tags, so they show as tags, narrow the feed and reach the brain. The generator and the tool ask for `topic_tag` as a 2 to 5 word label, so every question carries a phrase-long tag by design, and a topic named "Probability and statistics" is a three-word tag on every question under it. No multi-word tag in the database was written by an agent; these two are the only source.
+What happens: `_row_tags` puts the topic's name and the question's `topic_tag` at the head of the row's tags, so they are drawn, narrowed on and placed on the brain as tags, but nobody gave them and the × cannot take them off. `topic_tag` is a tag of Education's own: a 2 to 5 word "facet within the topic" that the generator and `education_add_question` must supply, checked for acronyms and stored in its own column. A topic named "Probability and statistics" becomes a three-word tag on every question under it. The page draws neither anywhere else.
 
-Expected: the row's tags are one word each: `estimation`, `inference`, `probability`, `statistics`. `topic_tag` stays the label the question page shows beside the topic.
+Expected: Education has no tag of its own. A question carries ordinary tags, one word each, given by the generator and the tutor like any agent's: `estimation`, `inference`, `probability`, `statistics`. The topic stays what the generator writes for and is never drawn as a tag, so it shows nowhere on the page.
 
-Fix: the generator and `education_add_question` also give `tags`, one word each through the platform helper of [[An agent's tag is one word]], and `_row_tags` takes those in place of `topic_tag`. The topic name needs a decision: either it is split into its words minus joining words ("and", "of"), or a topic carries its own one-word tags given when it is added and `education_add_topic` takes them.
+Fix: `topic_tag` goes wherever it is named: the column through the data-migration skill, the generator's output shape and rule 13, the tool's argument, validation and the acronym check. The generator and `education_add_question` take `tags`, kept through `word_tags` and written to the one store of the platform entry "A tag lives in one of six stores"; `_row_tags` reads that store alone. The artboard's sample questions carry one-word tags.

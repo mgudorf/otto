@@ -32,3 +32,16 @@ What happens: the brain places every tag it draws from the rows the feed is hold
 Expected: the brain is the graph, drawn. Every tag the rebuild knows is a node whether or not its items are in the feed, the edges position it, and a stale map is tellable from a fresh one.
 
 Fix: build `GET /api/brain` over `graph_nodes`, `graph_edges` and `all_tags`, returning each tag with its count, the facets its items belong to and the map's `built_at`, and have `brain.js` take its nodes from that instead of from `ITEMS`. Which facets a tag belongs to is what positions it on the figure, so `graph_nodes` gains a column for the modules the rebuild already reads off its sources.
+
+### Graph keeps its own notion of a tag
+
+- Kind: defect
+- Where: `app/modules/graph/build.py` (`sources`), `app/modules/graph/tools.py` (`graph_merge`, `graph_restore`), `app/modules/graph/routes.py` (`_item`, `item/{tag}`, the `owned` tags in `graph`)
+- Found: 09-21-2026, the owner asking for one notion of tag
+- Status: open
+
+What happens: `graph_merge` folds one tag into another only inside Graph's own tables. The rows, the catalog, the search bar and the brain still see two tags where Graph sees one. Graph also serves a tag as a row, `item/{tag}` with an empty `fixed` against the contract's one facet, and puts the tags written on a tag onto its nodes, so a tag can carry tags. Nothing calls either route.
+
+Expected: a tag is one thing in every view, and a tag is a label that carries no tags.
+
+Fix: the merges fold in the one read path, `tags_for` and `all_tags`, instead of in `sources`, which keeps `graph_restore`; rewriting the tag in `app_tags` instead would make a merge final. `item/{tag}` and the `owned` tags go.
