@@ -360,3 +360,22 @@ body.pointing, body.pointing * { cursor: crosshair !important; }
 .mail .url { cursor: help; color: var(--ink-3); font-size: .62em; vertical-align: super; }
 .mail .url::after { content: '↗'; }
 .mail .img { color: var(--ink-3); font-size: .82em; }
+
+/* The query editor: a table or a saved query opens on the page as SQL that runs there; the schema sits in the summary under the row. */
+.sql textarea { display: block; width: 100%; min-height: 96px; max-height: 50vh; resize: vertical; padding: 10px 12px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line-strong); font-family: var(--mono); font-size: 16px; line-height: 1.55; field-sizing: content; }
+.sql textarea:focus { box-shadow: var(--lift-strong); transform: translateY(-1px); outline: none; }
+.sqlbar { display: flex; gap: 6px; margin: 8px 0 12px; }
+.sqlbar button { height: 32px; padding: 0 12px; border-radius: 6px; font-size: 16px; font-weight: 700; color: var(--ink-2); border: 1px solid var(--line-strong); background: var(--surface); }
+.sqlbar button:hover { color: var(--ink); border-color: var(--ink); }
+.sqlbar .run { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.sqlbar .run:hover { filter: brightness(1.15); }
+.sqlout .stamp { margin: 0 0 8px; }
+.sqlout .grid { overflow: auto; max-height: 60vh; border: 1px solid var(--line); border-radius: 6px; }
+.sqlout table { border-collapse: collapse; font-family: var(--mono); font-size: 15px; white-space: nowrap; }
+.sqlout th, .sqlout td { padding: 5px 10px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; max-width: 42ch; overflow: hidden; text-overflow: ellipsis; }
+.sqlout th { position: sticky; top: 0; background: var(--surface-2); color: var(--ink-2); font-weight: 500; }
+.sqlout td.null { color: var(--ink-3); font-style: italic; }
+.sqlout .err { color: var(--danger); font-family: var(--mono); font-size: 15.5px; white-space: pre-wrap; }
+.sqlout pre { margin: 0; padding: 8px 12px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); font-family: var(--mono); font-size: 15.5px; white-space: pre-wrap; }
+.summary .cols { border-top: 0; padding-top: 0; }
+.summary .sqltext { margin: 0; font-family: var(--mono); font-size: 15px; color: var(--ink-2); white-space: pre-wrap; }

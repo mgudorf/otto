@@ -1,5 +1,5 @@
 """MCP tools for the Database agent. Reads on both servers; the one write (a saved query) on the full
-server only. The agent has no path to owner SQL: it drafts and saves, the owner runs."""
+server only. The agent has no path to owner SQL: it drafts, the owner runs; it saves only when told to."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def register(read, full, store: Store, config) -> None:
         return query.explain(store, sql, d.max_rows, d.max_seconds)
 
     def db_save_query(name: str, sql: str) -> dict:
-        """Save a query under a name so the owner finds it under `saved`; the same name replaces the SQL."""
+        """Save a query under a name, only when the owner asked to keep it; it becomes a row on the page, and the same name replaces the SQL."""
         name, sql = name.strip(), sql.strip()
         if not name or not sql:
             return {"error": "name and sql are required"}

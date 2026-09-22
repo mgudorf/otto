@@ -13,7 +13,7 @@ from app.store import add_tags, all_tags, remove_tag, tags_for
 
 FORBIDDEN_IN_TASKS = {"session_turn", "oneshot", "write_tools"}
 BACKEND_ONLY = {"home", "graph", "feedback"}                 # the modules that list no rows, so carry no facet
-BROWSER_VERBS = {"edit", "answer", "explain", "update", "due", "query", "open", "link", "export"}   # core.js HERE: run here, never sent to the daemon
+BROWSER_VERBS = {"edit", "answer", "explain", "update", "due", "open", "link", "export"}   # core.js HERE: run here, never sent to the daemon
 # Offered on a row, served by no module and absent from core.js: clicking one would answer 404. Nothing is stranded;
 # a verb that lands here fails the test below.
 STRANDED: set[tuple[str, str]] = set()   # a verb no route serves and core.js does not run itself
