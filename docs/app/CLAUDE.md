@@ -133,7 +133,7 @@ Sessions: `app_sessions(id, module, opened_at, closed_at, title, tags, cli_start
 | `GET /api/session/<module>` | the module's open sessions, oldest first, each labelled with its title once tagged, until then its first user line |
 | `GET /api/session/<module>/<id>` | one session with its turns and busy state |
 | `POST /api/session/<module>/new` | opens an empty session, so a file can be attached before the first message |
-| `POST /api/session/<module>/send` | `{text, id?, files?}`: no `id` opens a new session; an unknown or closed one is a 404. `files` names what Chat's `upload/<id>` put in the session's folder, `data/workspace/chat/<id>/`: the CLI gets the text plus a trailer naming their paths, the transcript the text alone, and a name not in the folder, or files with no `id`, is a 400. `/clear` with an `id` tags and closes that one; any other message starting with `/` goes to the CLI unchanged |
+| `POST /api/session/<module>/send` | `{text, id?, files?}`: no `id` opens a new session; an unknown or closed one is a 404. `files` names what Chat's `upload/<id>` put in the session's folder, `data/workspace/chat/<id>/`: the CLI gets the text plus a trailer naming their paths, the transcript the text alone, and a name not in the folder, or files with no `id`, is a 400. `/clear` with an `id` tags and closes that one; any other message starting with `/` goes to the CLI unchanged, so Claude Code commands and skills work from the drawer |
 | `POST /api/session/<module>/<id>/title` | renames the tab, and the name outranks the tagger's |
 | `POST /api/session/<module>/<id>/reopen` | a closed session opens again, keeping its turns and its tags |
 | `GET /api/session/<module>/<id>/events` | the stream on key `<module>:<id>`: `user`, `model`, `delta` (text as it is written, never stored; the drawer ignores it), `tool`, `tool_result`, `result`, `error`, `idle`, `tagged` |
@@ -422,19 +422,6 @@ What happens: `ui.page_size` is seeded from `[ui]`, validated at 10 to 200 and h
 Expected: the rows the feed asks for are one setting the owner can see and change, or there is no such setting.
 
 Fix: `load` asks for `ui.page_size` rows per module and Settings shows it under General; the live value of 40 would cut Recent from 200 rows per facet to 40 on the day it lands, and the search bar narrows only the rows in hand, so how many to hold is the owner's call. Otherwise the key leaves `UI_KEYS`, the seed, `[ui]` and `Ui`.
-
-### The palette's skills are commands the CLI does not know
-
-- Kind: bug
-- Where: `app/static/shell.js` (`SKILLS`, `paletteRows`), `app/static/drawer.js` (the skills button, `onKey`), `app/api.py` (`session_send`), every manifest's `Agent.skills`
-- Found: 09-21-2026, recovering Settings; the live drawer holds the answer
-- Status: open, needs a decision
-
-What happens: the palette, `/` in an empty composer and the composer's skills button offer every module's `skills` as `/<name>` (`/today`, `/triage`, `/nl-to-sql`), and picking one puts it in the draft. A skill is only a name in a manifest: no `agent.md` says what one does, and the CLI runs with `--setting-sources ""`, so it loads no skill files either. Sent, `/today` comes back `Unknown command: /today`, which is what the owner's open `/today` tab shows.
-
-Expected: a skill the page offers does what its name says, or the page offers none.
-
-Fix: either a skill gets a body the agent reads, a line per skill in its module's `agent.md` and `session_send` rewriting a leading `/<skill>` into a plain instruction naming it, or the skills leave the manifests, the palette and the composer's bar. What a skill should be in the one-agent app is the owner's call.
 
 ### The repo's CLAUDE.md still describes the twelve-page frontend
 
