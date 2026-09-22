@@ -98,13 +98,13 @@ def test_second_brain_end_to_end(config):
             assert s["ui.page_size"] == 20
             assert (await c.put("/api/settings", json={"ui.page_size": 5})).status_code == 400
             assert (await c.put("/api/settings", json={"ui.start_page": "home"})).status_code == 400   # retired with the per-module pages
-            # a module's own model and effort: one of the configured choices or default
-            assert (await c.put("/api/settings", json={"modules.second_brain.model": "gpt"})).status_code == 400
-            assert (await c.put("/api/settings", json={"modules.second_brain.effort": "extreme"})).status_code == 400
-            f = (await c.put("/api/settings", json={"modules.second_brain.model": config.claude.models[0], "modules.second_brain.effort": "low"})).json()
-            assert f["modules.second_brain.model"] == config.claude.models[0] and f["modules.second_brain.effort"] == "low"
-            mem = next(m for m in (await c.get("/api/shell")).json()["modules"] if m["name"] == "second_brain")
-            assert mem["model"] == config.claude.models[0] and mem["effort"] == "low"
+            # a task's own model and effort, kept under its job name: one of the configured choices or default
+            assert (await c.put("/api/settings", json={"tasks.second_brain.suggest.model": "gpt"})).status_code == 400
+            assert (await c.put("/api/settings", json={"tasks.otto.turn.effort": "extreme"})).status_code == 400
+            assert (await c.put("/api/settings", json={"modules.second_brain.model": "sonnet"})).status_code == 400   # the per-module picks are gone
+            assert (await c.put("/api/settings", json={"modules.second_brain.scheduled": False})).status_code == 400   # each task has its own switch
+            f = (await c.put("/api/settings", json={"tasks.otto.turn.model": config.claude.models[0], "tasks.otto.turn.effort": "low"})).json()
+            assert f["tasks.otto.turn.model"] == config.claude.models[0] and f["tasks.otto.turn.effort"] == "low"
             assert shell["claude"]["models"] == list(config.claude.models) and shell["claude"]["efforts"] == list(config.claude.efforts)
             # an export is every table as JSON rows
             r = (await c.post("/api/data/export")).json()
@@ -128,8 +128,9 @@ def test_session_turn_and_clear(config):
         app = build(config, spawn_fn=fake_spawn([INIT, TOOL, TOOL_OK, TEXT, RESULT], calls))
         await app.state.runner.start()
         async with client_for(app) as c:
-            app.state.store.set_setting("modules.second_brain.model", "sonnet")
-            app.state.store.set_setting("modules.second_brain.effort", "low")
+            app.state.store.set_setting("tasks.second_brain.turn.model", "sonnet")
+            app.state.store.set_setting("tasks.second_brain.turn.effort", "low")
+            app.state.store.set_setting("tasks.second_brain.close.model", "haiku")
             r = await c.post("/api/session/second_brain/send", json={"text": "anything about x?"})
             assert r.status_code == 200, r.text
             sid = r.json()["session"]
@@ -142,7 +143,7 @@ def test_session_turn_and_clear(config):
             assert s["session"]["cli_started"] == 1 and s["busy"] is False
             args = calls[0]["args"]
             assert "--session-id" in args and "--restricted" in args and "--permission-prompts" in args and "--include-partial-messages" in args
-            assert args[args.index("--model") + 1] == "sonnet" and args[args.index("--effort") + 1] == "low"   # the module's own picks
+            assert args[args.index("--model") + 1] == "sonnet" and args[args.index("--effort") + 1] == "low"   # the turn's own picks
             assert "--tools" in args and "Write" not in args[args.index("--tools") + 1]
             assert "mcp__otto__second_brain_add" in args[args.index("--allowedTools") + 1]
             assert not any(k.startswith("ANTHROPIC_") or k.startswith("CLAUDECODE") for k in calls[0]["env"])
@@ -163,6 +164,7 @@ def test_session_turn_and_clear(config):
             row = app.state.store.one("SELECT * FROM app_sessions WHERE id = ?", (sid,))
             assert row["closed_at"] and row["title"] == "Search for x" and json.loads(row["tags"]) == ["second_brain", "search"]
             assert calls[3]["args"][calls[3]["args"].index("--max-turns") + 1] == "2"
+            assert calls[3]["args"][calls[3]["args"].index("--model") + 1] == "haiku" and "--effort" not in calls[3]["args"]   # the tagger's job, not the turn's
             assert [t["id"] for t in (await c.get("/api/session/second_brain")).json()["sessions"]] == [sid2]
             assert (await c.post("/api/session/second_brain/send", json={"text": "/clear"})).json() == {"cleared": False}
             assert (await c.post("/api/session/second_brain/send", json={"text": "/clear", "id": sid})).status_code == 404
@@ -197,6 +199,32 @@ def test_otto_is_the_one_agent(config):
             assert [(t["id"], t["busy"]) for t in (await c.get("/api/session/otto")).json()["sessions"]] == [(sid, False)]
             assert app.state.store.scalar("SELECT module FROM app_sessions WHERE id = ?", (sid,)) == "otto"
             assert (await c.get("/api/session/system")).status_code == 404
+        await app.state.runner.drain(1)
+        app.state.store.close()
+
+    run(main())
+
+
+def test_drawer_attaches_files(config):
+    """A file goes into an empty tab's folder through Chat's upload route; the turn names it to the CLI and the
+    transcript keeps only what was typed."""
+    calls = []
+
+    async def main():
+        app = build(config, spawn_fn=fake_spawn([INIT, TEXT, RESULT], calls))
+        await app.state.runner.start()
+        async with client_for(app) as c:
+            sid = (await c.post("/api/session/otto/new")).json()["id"]
+            assert [t["id"] for t in (await c.get("/api/session/otto")).json()["sessions"]] == [sid]
+            assert (await c.post(f"/api/chat/upload/{sid}", files={"file": ("notes.txt", b"hello")})).json()["name"] == "notes.txt"
+            assert (await c.post("/api/session/otto/send", json={"text": "read it", "id": sid, "files": ["gone.txt"]})).status_code == 400
+            assert (await c.post("/api/session/otto/send", json={"text": "read it", "files": ["notes.txt"]})).status_code == 400
+            r = await c.post("/api/session/otto/send", json={"text": "read it", "id": sid, "files": ["notes.txt"]})
+            assert r.status_code == 200, r.text
+            await settle(app)
+            prompt = calls[0]["stdin"].data.decode("utf-8")
+            assert prompt.startswith("read it") and str(config.data.workspace / "chat" / sid / "notes.txt") in prompt
+            assert (await c.get(f"/api/session/otto/{sid}")).json()["turns"][0]["text"] == "read it"
         await app.state.runner.drain(1)
         app.state.store.close()
 

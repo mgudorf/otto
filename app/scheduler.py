@@ -1,8 +1,8 @@
 """The daemon owns the clock. Manifest schedules become rows in `tasks`; this loop submits the due ones.
 
 LLM tasks only become due inside the nightly window, and go one at a time `stagger_minutes` apart so two
-nightly runs never overlap; everything else runs on its interval. A module the owner switched off on
-Settings holds every one of its tasks back; the rows stay due and go the tick after it is switched on.
+nightly runs never overlap; everything else runs on its interval. Each task has one switch, `enabled`, thrown
+from Settings or by its routine row's Pause and Resume.
 """
 
 from __future__ import annotations
@@ -53,6 +53,10 @@ class Scheduler:
             for name in existing:
                 if name not in declared:
                     conn.execute("DELETE FROM app_tasks WHERE name = ?", (name,))
+            # The per-module switch Settings used to throw: a module held off holds each of its tasks off, once.
+            for (key,) in conn.execute("SELECT key FROM app_settings WHERE key LIKE 'modules.%.scheduled' AND value = 'false'").fetchall():
+                conn.execute("UPDATE app_tasks SET enabled = 0 WHERE module = ?", (key.split(".")[1],))
+            conn.execute("DELETE FROM app_settings WHERE key LIKE 'modules.%.scheduled'")
 
     def _first_run(self, llm: bool) -> str:
         if not llm:
@@ -77,19 +81,14 @@ class Scheduler:
             (cutoff,),
         ))
 
-    def runs(self, module: str) -> bool:
-        """The owner's per-module switch on Settings. Nothing but the owner ever writes it."""
-        return self.store.setting(f"modules.{module}.scheduled") is not False
-
     def tick(self) -> list[str]:
-        """Submit every enabled task whose next_run has passed. Returns the names submitted."""
+        """Submit every enabled task whose next_run has passed. Returns the names submitted. A task switched off keeps
+        its next_run, so it goes the tick after it is switched back on rather than skipping a turn."""
         due = self.store.query(
             "SELECT * FROM app_tasks WHERE enabled = 1 AND next_run IS NOT NULL AND next_run <= ? ORDER BY next_run, name", (now_iso(),)
         )
         submitted = []
         for row in due:
-            if not self.runs(row["module"]):
-                continue                     # switched off: the row stays due rather than skipping a turn
             if row["llm"] and self._staggered():
                 continue                     # one nightly run per gap; the rest stay due for a later tick
             self.store.execute(
