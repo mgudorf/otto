@@ -10,7 +10,7 @@
   --lift: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 20px -8px rgba(0, 0, 0, .6); --lift-strong: 0 2px 4px rgba(0, 0, 0, .55), 0 14px 32px -10px rgba(0, 0, 0, .7);
   --tint: 18%; --tint-hover: 26%;
   --navw: 248px; --chatw: 400px; --toph: 50px; --rowh: 42px;
-  --sans: 'PP Formula', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --sans: 'PT Serif', 'Times New Roman', Times, serif;
   --mono: 'Geist Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
   color-scheme: dark;
 }
@@ -530,28 +530,28 @@ body { font-size: 19px; }
 .chat .tab.plus { padding: 0 10px; }
 .chat .turns { padding-top: 12px; }
 
-/* PP Formula, by role. Light carries reading; Medium carries controls and figures; Narrow carries the rail, tags and dates;
-   SemiCondensed carries labels; Condensed the readout numbers and asides; SemiExtended item titles; Extended the page title and money. */
-body { font-weight: 300; }
-.row .t .title, .dbody .prose, .dbody .kv dd, .turn.user, .turn.model, .omni input, .chat .composer textarea, .capture textarea, .palette .pi, .palette .pin input, .form .frow, .pop input, .pointpop .fb textarea, .help .grid { font-family: 'PP Formula'; font-weight: 300; }
-.row.unread .t .title, .row .t .title.mono, .btn, .seg button, .token, .num, .switch, .form .frow .v, .nav-item .count, .pointpop .ph, .pointpop .acts button, .bulk, .chat .composer .send { font-family: 'PP Formula'; font-weight: 500; }
+/* PT Serif, by role. Regular carries reading, the rail, tags, dates and labels; bold carries controls, figures,
+   titles and money; italic carries asides, placeholders and a finished row. Size and spacing do the rest. */
+body { font-weight: 400; }
+.row .t .title, .dbody .prose, .dbody .kv dd, .turn.user, .turn.model, .omni input, .chat .composer textarea, .capture textarea, .palette .pi, .palette .pin input, .form .frow, .pop input, .pointpop .fb textarea, .help .grid { font-family: var(--sans); font-weight: 400; }
+.row.unread .t .title, .row .t .title.mono, .btn, .seg button, .token, .num, .switch, .form .frow .v, .nav-item .count, .pointpop .ph, .pointpop .acts button, .bulk, .chat .composer .send { font-family: var(--sans); font-weight: 700; }
 .row .t .title.mono, .cell pre, .cell .out, .editor textarea, .mono, .turn.tool, .turn.model code, .turn.model pre, .k, .s, .n { font-family: var(--mono); }
-.btn.primary, .chat .composer .send { font-family: 'PP Formula'; font-weight: 800; }
-.chat .ref, .toast, .chat .composer .hint, .row.done .t .title { font-family: 'PP Formula'; font-weight: 500; font-style: italic; }
-.nav-item, .tag, .tag-add, .chat .tab, .row .r, .row .c, .palette .pi .sub, .palette .pi .k, .gnode .lbl, .trail button, .trail .sep, .pop .pi, .row .acts button, .stat .l, .dhead .btn { font-family: 'PP Formula Narrow'; font-weight: 400; }
-.nav-item.active, .tag.fixed, .chat .tab.on, kbd, .gnode.focus .lbl, .gnode.near .lbl, .trail button.on, .row .r.strong { font-family: 'PP Formula Narrow'; font-weight: 600; }
-.chat .empty-chat { font-family: 'PP Formula SemiCondensed'; font-weight: 100; font-size: 24px; line-height: 1.35; color: var(--ink-2); }
-.pulse, .toolbar .rel, .dbody .kv dt, .related h4, .section-title, .group .n { font-family: 'PP Formula SemiCondensed'; font-weight: 200; }
-::placeholder, .omni input::placeholder, .chat .composer textarea::placeholder, .capture textarea::placeholder { font-family: 'PP Formula SemiCondensed'; font-weight: 200; font-style: italic; color: var(--ink-3); }
-.nav h6, .group, .palette .ph, .form h3, .thead, .toolbar .meta, .bulk strong { font-family: 'PP Formula SemiCondensed'; font-weight: 500; }
-.dhead .crumb { font-family: 'PP Formula Condensed'; font-weight: 200; font-size: 17px; }
-.empty, .pointpop .q, .nav-empty { font-family: 'PP Formula Condensed'; font-weight: 300; font-style: italic; }
-.stat .v { font-family: 'PP Formula Condensed'; font-weight: 900; font-size: 24px; letter-spacing: 0; }
-.stat.money .v, .row .r.strong, .dbody .amount { font-family: 'PP Formula Extended'; font-weight: 500; }
+.btn.primary, .chat .composer .send { font-family: var(--sans); font-weight: 700; }
+.chat .ref, .toast, .chat .composer .hint, .row.done .t .title { font-family: var(--sans); font-weight: 700; font-style: italic; }
+.nav-item, .tag, .tag-add, .chat .tab, .row .r, .row .c, .palette .pi .sub, .palette .pi .k, .gnode .lbl, .trail button, .trail .sep, .pop .pi, .row .acts button, .stat .l, .dhead .btn { font-family: var(--sans); font-weight: 400; }
+.nav-item.active, .tag.fixed, .chat .tab.on, kbd, .gnode.focus .lbl, .gnode.near .lbl, .trail button.on, .row .r.strong { font-family: var(--sans); font-weight: 700; }
+.chat .empty-chat { font-family: var(--sans); font-weight: 400; font-size: 24px; line-height: 1.35; color: var(--ink-2); }
+.pulse, .toolbar .rel, .dbody .kv dt, .related h4, .section-title, .group .n { font-family: var(--sans); font-weight: 400; }
+::placeholder, .omni input::placeholder, .chat .composer textarea::placeholder, .capture textarea::placeholder { font-family: var(--sans); font-weight: 400; font-style: italic; color: var(--ink-3); }
+.nav h6, .group, .palette .ph, .form h3, .thead, .toolbar .meta, .bulk strong { font-family: var(--sans); font-weight: 700; }
+.dhead .crumb { font-family: var(--sans); font-weight: 400; font-size: 17px; }
+.empty, .pointpop .q, .nav-empty { font-family: var(--sans); font-weight: 400; font-style: italic; }
+.stat .v { font-family: var(--sans); font-weight: 700; font-size: 24px; letter-spacing: 0; }
+.stat.money .v, .row .r.strong, .dbody .amount { font-family: var(--sans); font-weight: 700; }
 .stat.money .v { font-size: 17px; }
 .dbody .amount { font-size: 34px; letter-spacing: -.01em; margin: 2px 0 6px; }
-.dbody h2, .help h3, .tag-page-head .tag.lg { font-family: 'PP Formula SemiExtended'; font-weight: 700; letter-spacing: -.005em; }
-.toolbar h1, .brand { font-family: 'PP Formula Extended'; font-weight: 700; letter-spacing: -.01em; }
+.dbody h2, .help h3, .tag-page-head .tag.lg { font-family: var(--sans); font-weight: 700; letter-spacing: -.005em; }
+.toolbar h1, .brand { font-family: var(--sans); font-weight: 700; letter-spacing: -.01em; }
 .toolbar h1 { font-size: 21px; }
 .brand { font-size: 18px; }
 
@@ -564,7 +564,7 @@ body { font-weight: 300; }
 .qbody .katex-display { margin: 12px 0; overflow-x: auto; overflow-y: hidden; }
 .dbody .prose.qbody { padding-top: 16px; }
 .related .qbody { margin: 0 0 10px; }
-.dbody textarea.answer { width: 100%; min-height: 70px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--bg); font-family: 'PP Formula'; font-weight: 300; font-size: 17px; line-height: 1.5; resize: vertical; }
+.dbody textarea.answer { width: 100%; min-height: 70px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--bg); font-family: var(--sans); font-weight: 400; font-size: 17px; line-height: 1.5; resize: vertical; }
 .dbody textarea.answer:focus { border-color: var(--ink); }
 
 .dbody .qbody, .dbody .prose.qbody, .dbody .qbody strong, .dbody .qbody em { font-family: 'PT Serif', 'Times New Roman', Times, serif; }
@@ -574,7 +574,7 @@ body { font-weight: 300; }
 .gnode.shared .dot { box-shadow: inset 0 0 0 2px var(--ink), 0 0 0 4px color-mix(in oklab, var(--ink) 22%, transparent); }
 .gnode.shared .lbl { color: var(--ink); font-weight: 600; }
 .map .edge.shared { stroke: var(--ink); stroke-width: 3px; }
-.preview-of { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-family: 'PP Formula SemiCondensed'; font-weight: 500; font-size: 15px; color: var(--ink-3); }
+.preview-of { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-family: var(--sans); font-weight: 700; font-size: 15px; color: var(--ink-3); }
 .preview-of .ic { color: var(--c); }
 
 /* A symbol alone: tight padding, the label lives in the tooltip */
@@ -602,19 +602,19 @@ body { font-weight: 300; }
 .top .omni { margin: 0; flex: 1 1 320px; min-width: 200px; }
 .page-title { display: flex; align-items: center; flex: none; }
 .page-title:empty { display: none; }
-.page-title h1 { display: flex; align-items: center; gap: 8px; height: 38px; margin: 0; padding: 0 14px 0 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); font-family: 'PP Formula Extended'; font-weight: 700; font-size: 18px; letter-spacing: -.01em; white-space: nowrap; }
+.page-title h1 { display: flex; align-items: center; gap: 8px; height: 38px; margin: 0; padding: 0 14px 0 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); font-family: var(--sans); font-weight: 700; font-size: 18px; letter-spacing: -.01em; white-space: nowrap; }
 .page-title h1 .ic { width: 24px; height: 24px; padding: 5px; border-radius: 6px; background: color-mix(in oklab, var(--c, var(--ink-3)) 18%, transparent); color: var(--c, var(--ink-2)); }
 .page-tools { display: flex; align-items: center; gap: 8px; flex: none; }
 .page-tools:empty { display: none; }
 .toolbar:empty { display: none; }
 @media (max-width: 1440px) { .top-right .pulse span:last-child { display: none; } }
 
-/* PT Serif reads: item titles, prose, chat, descriptors, tags, keys, the search bar. PP Formula keeps the chrome:
+/* PT Serif reads and PT Serif is the chrome: item titles, prose, chat, descriptors, tags, keys, the search bar,
    module names, the rail, dates and numbers, the palette, the header. */
 .row .t .title, .row .c, .dbody h2, .dbody .prose, .dbody .kv dt, .dbody .kv dd, .dbody .stamp, .turn.user, .turn.model, .chat .composer textarea, .chat .ref, .omni input, .pop input, .pop .pi, .capture textarea, .capture .crow input, .pointpop .fb textarea, .pointpop .q, .tag, .token, .tag-add, kbd, .help .grid, .gnode .lbl, .qbody, .toast, .prio, .related h4 { font-family: 'PT Serif', Georgia, serif; font-weight: 400; font-style: normal; letter-spacing: 0; }
 .row.unread .t .title, .dbody h2, .tag.fixed, .gnode.focus .lbl, .gnode.shared .lbl { font-weight: 700; }
 .chat .ref, .toast, .pointpop .q, .row.done .t .title { font-style: italic; }
-.row .c.num, .dbody .kv dd.num, .dbody .stamp.num { font-family: 'PP Formula'; font-weight: 500; }
+.row .c.num, .dbody .kv dd.num, .dbody .stamp.num { font-family: var(--sans); font-weight: 700; }
 .dbody h2 { font-size: 23px; line-height: 1.3; }
 .dbody .stamp { font-size: 15.5px; color: var(--ink-3); margin: -2px 0 10px; }
 .dbody .tagline { margin: 0 0 14px; }
@@ -638,21 +638,21 @@ kbd { font: 400 13.5px/1 'PT Serif', Georgia, serif; display: inline-flex; align
 .page-tools .stat { gap: 5px; margin: 0; padding: 2px 6px; }
 .page-tools .stat .ic { width: 14px; height: 14px; }
 .page-tools .stat .v { font-size: 18px; }
-.page-tools .stat .l { display: inline; font-family: 'PP Formula Narrow'; font-size: 14.5px; color: var(--ink-3); }
+.page-tools .stat .l { display: inline; font-family: var(--sans); font-size: 14.5px; color: var(--ink-3); }
 
 /* Settings: tiles in the module pattern, a plate with the hue on its left edge that lifts on hover; the pane's picks open a list */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; padding: 12px 16px 16px; }
 .tile { margin: 0; padding: 12px 14px 12px 12px; cursor: pointer; }
-.tile .tt { display: flex; align-items: center; gap: 8px; font-family: 'PP Formula SemiExtended'; font-weight: 700; font-size: 16px; color: var(--ink); }
+.tile .tt { display: flex; align-items: center; gap: 8px; font-family: var(--sans); font-weight: 700; font-size: 16px; color: var(--ink); }
 .tile .tt .ic { width: 24px; height: 24px; padding: 5px; border-radius: 6px; background: color-mix(in oklab, var(--c) 18%, transparent); color: var(--c); }
-.tile .sub { margin-top: 6px; font-family: 'PP Formula Narrow'; font-size: 14.5px; color: var(--ink-3); }
+.tile .sub { margin-top: 6px; font-family: var(--sans); font-size: 14.5px; color: var(--ink-3); }
 .tile:hover { transform: translateY(-1px); box-shadow: var(--lift-strong); }
 .tile.sel { box-shadow: 0 0 0 1.5px var(--c), var(--lift); }
 .cfg { margin: 8px 0 20px; }
 .cfg .crow { display: grid; grid-template-columns: minmax(0, 1fr) 132px 132px; gap: 8px; align-items: center; min-height: 42px; padding: 0 2px; border-top: 1px solid var(--line); }
-.cfg .crow.head { border: 0; min-height: 24px; font-family: 'PP Formula SemiCondensed'; font-weight: 500; font-size: 14.5px; color: var(--ink-3); }
-.cfg .cn { display: flex; align-items: baseline; gap: 8px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: 'PP Formula'; font-weight: 500; font-size: 16.5px; }
-.cfg .cn .when { font-family: 'PP Formula Narrow'; font-weight: 400; font-size: 14.5px; color: var(--ink-3); }
+.cfg .crow.head { border: 0; min-height: 24px; font-family: var(--sans); font-weight: 700; font-size: 14.5px; color: var(--ink-3); }
+.cfg .cn { display: flex; align-items: baseline; gap: 8px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: var(--sans); font-weight: 700; font-size: 16.5px; }
+.cfg .cn .when { font-family: var(--sans); font-weight: 400; font-size: 14.5px; color: var(--ink-3); }
 .btn.pick { justify-content: space-between; width: 100%; padding: 0 8px 0 10px; }
 .btn.pick .ic { width: 14px; height: 14px; color: var(--ink-3); }
 .dbody .form { padding: 0; max-width: none; }
@@ -687,7 +687,7 @@ kbd { font: 400 13.5px/1 'PT Serif', Georgia, serif; display: inline-flex; align
 /* The rail: three groups parted by thin rules, a » before a quick access entry and a # before a pinned tag; the module's count sits in the page title */
 .nav .rule { border-top: 1px solid var(--line); margin: 8px 4px; }
 .nav .nav-item .hash { font-size: 16px; }
-.page-title h1 .count { margin-left: 6px; font-family: 'PP Formula Narrow'; font-weight: 600; font-size: 15px; color: var(--ink-3); letter-spacing: 0; }
+.page-title h1 .count { margin-left: 6px; font-family: var(--sans); font-weight: 700; font-size: 15px; color: var(--ink-3); letter-spacing: 0; }
 
 /* The answer box reads in PT Serif like the question above it */
 .dbody textarea.answer { font-family: 'PT Serif', Georgia, serif; font-weight: 400; font-size: 17px; }

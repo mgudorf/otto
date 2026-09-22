@@ -197,7 +197,7 @@ One doc per module, `docs/<module>/CLAUDE.md`: the owner's requirements, `## Bui
 
 ## UI
 
-The window is the shell the owner approved as `docs/design/otto-next.html`, built into the app: one dense list per module with a detail pane beside it, tags on every row and cross-module tag pages, a search bar whose tokens narrow every list, a command palette that also holds the agent's skills, the agent as a collapsible drawer, a point-at-anything mode, and Graph as a map of every tag whose selection is those search tokens. It is plain ES modules and one stylesheet: no framework, no build step, nothing fetched from the network at runtime.
+The window is the shell the owner approved, built into the app: one dense list per module with a detail pane beside it, tags on every row and cross-module tag pages, a search bar whose tokens narrow every list, a command palette that also holds the agent's skills, the agent as a collapsible drawer, a point-at-anything mode, and Graph as a map of every tag whose selection is those search tokens. It is plain ES modules and one stylesheet: no framework, no build step, nothing fetched from the network at runtime.
 
 ### Frame contract
 
@@ -359,3 +359,15 @@ Expected: the settings the preview showed are either editable here or are boot v
 
 Fix: the owner picks which ones become live. Each then needs a key `PUT /api/settings` accepts, a field on `/api/shell` and a row in the pane. A per-task or per-skill pick needs more than that: `Claude._choice` reads `modules.<name>.model|effort` only, so the runner has to look for the narrower key first.
 
+### Two weights carry what six widths and nine weights carried
+
+- Kind: defect
+- Where: `app/static/styles.css`, the type block and the module rules under it
+- Found: 2026-09-20, purging PP Formula from the shell
+- Status: open, needs a decision
+
+What happens: the type block told roles apart by width (Narrow, SemiCondensed, Condensed, SemiExtended, Extended) and by nine weights. PT Serif ships four cuts, 400 and 700 upright and italic. Every rule that named a width now names `var(--sans)` and every weight on those rules is 400 or 700, so rules that used to differ render alike. Thirty-six rules elsewhere in the file still ask for `font-weight: 500` or `600`; the browser resolves 500 down to 400 and 600 up to 700, so a 500 that used to sit a step above the body text now sits level with it. The rail, tags, dates, labels and card titles are where the step is gone.
+
+Expected: a label, a title and a body line are still told apart at a glance, without reading the words.
+
+Fix: the owner's call, because every way out is a design decision. Either size, colour and letter-spacing carry the steps that width carried, or each remaining 500 and 600 is ruled 400 or 700 on purpose, or a second face returns for the chrome.
