@@ -15,4 +15,3 @@ data/*.log
 data/*.log.*
 data/exports/
 data/workspace/
-app/.chrome-profile/
