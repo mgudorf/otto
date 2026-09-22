@@ -74,14 +74,9 @@ def chrome_path() -> str:
 
 
 def open_window(config: Config) -> None:
-    """Google Chrome in app mode on its own profile; no first-run, default-browser or sync prompts."""
-    profile = config.root / "app" / ".chrome-profile"
-    profile.mkdir(exist_ok=True)
+    """Google Chrome in app mode on the owner's own profile: a link the page opens lands in their browser, signed in."""
     subprocess.Popen(
-        [
-            chrome_path(), f"--app={config.url}/", f"--user-data-dir={profile}",
-            "--no-first-run", "--no-default-browser-check", "--disable-sync",
-        ],
+        [chrome_path(), f"--app={config.url}/"],
         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True,
     )

@@ -13,7 +13,6 @@ MANIFEST = Manifest(
     schedules=(Schedule(task="reap", every="5m", resource="science"), Schedule(task="due", every="5m")),
     agent=Agent(
         placeholder="Ask about the notebook…",
-        skills=("inspect-cell", "run", "explain-output", "refactor", "files"),
         read_tools=("science_files", "science_notebook", "science_cell", "science_kernels"),
         write_tools=("science_run", "science_set_cell", "science_insert_cell", "science_new"),
         builtins=("Write", "Edit"),

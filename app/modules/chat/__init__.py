@@ -11,7 +11,6 @@ MANIFEST = Manifest(
     facet="chats",
     agent=Agent(
         placeholder="Ask anything…",
-        skills=("web", "files"),
         builtins=("Write", "Edit"),
     ),
 )

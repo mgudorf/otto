@@ -11,7 +11,7 @@ Otto is a Python 3.14 daemon plus a disposable browser window. The daemon keeps 
 | Piece | What it is |
 |---|---|
 | Daemon | FastAPI + uvicorn on `127.0.0.1:8765`, started detached under `pythonw`, logging to `data/daemon.log` (rotated at 1 MB, three kept); loopback only, no authentication |
-| Window | Google Chrome in app mode on its own profile in `app/.chrome-profile/`, first-run, default-browser and sync prompts off; its title bar and taskbar button show the Otto icon, which Chrome takes from the shell's favicon `app/static/otto.ico`. The app never touches Microsoft Edge |
+| Window | Google Chrome in app mode on the owner's own profile: a window of the Chrome they already run, so every link the page opens lands in that browser, signed in, as a new tab. Its title bar and taskbar button show the Otto icon, which Chrome takes from the shell's favicon `app/static/otto.ico`. It is not a process of Otto's, so nothing that ends Otto's processes may match it, or it ends the owner's browser. The app never touches Microsoft Edge |
 | Store | one SQLite file `data/otto.db` in WAL mode, platform and module tables together, every table named `<module>_<name>` (`app_` for the platform), timestamps as UTC ISO strings. At boot, before any schema runs, `app/migrate.py` renames an older database's tables to the current names: a backup into `data/backups/` first, then one transaction, refused when a new name already holds a table with rows. After the schemas, `MODULE_RENAMES` rewrites the rows that still name a module by an old name, behind its own backup (`tests/test_migrate.py`) |
 | LLM | the Claude Code CLI (2.1.263) headless under the owner's claude.ai Max login; no API key exists anywhere in the app |
 | Frontend | static ES modules and one stylesheet, no framework: `core.js` holds the state and renders the feed and the open item, `brain.js` the brain, `drawer.js` the agent, `sql.js` the query editor, `shell.js` the frame and the keyboard; `styles.css` is the approved design and `fonts.css` declares the vendored PT Serif and Geist Mono cuts. marked, KaTeX and highlight.js are vendored for markdown, LaTeX and code; no build step, no Node, nothing fetched from the network at runtime |
@@ -23,7 +23,7 @@ Run: `Otto.exe` at the repo root, tracked in git, is how Otto is opened: it runs
 app/__main__.py   launcher: open | setup | build | status | daemon
 app/build.py      otto.png -> app/static/otto.ico (the window's icon) -> Otto.exe (the launcher under it): PowerShell with System.Drawing scales the logo, the .NET Framework C# compiler builds the exe
 app/daemon.py     app factory, lifespan, detached start, port wait, restart
-app/api.py        platform routes: health, restart, shell, tags, items, verb, tasks, jobs, events, settings, data, sessions; event_stream for any broadcast key
+app/api.py        platform routes: health, restart, shell, tags, verb, tasks, jobs, events, settings, data, sessions; event_stream for any broadcast key
 app/config.py     config.toml -> typed Config; every key required, missing keys fail at boot
 app/store.py      SQLite connection, settings, cursors, events, backup;  app/schema.sql: platform tables (app_*)
 app/migrate.py    RENAMES, every name a table has had, and the boot step that renames an older database's tables, backup first
@@ -115,7 +115,7 @@ Every run is one CLI process with the prompt on stdin and `--output-format strea
 
 System prompt: `app/modules/agent_base.md` (shared rules) + the module's `agent.md` + a Current state block from the module's `context(store, registry)` hook, rendered fresh every turn.
 
-`otto` is the drawer's agent and no package: `app/api.py` builds a `Module` for it whose tools are the union of every enabled module's `read_tools`, `write_tools` and `builtins`, whose prompt is every enabled module's `agent.md` in manifest order, and whose Current state is Home's `context` hook, so one turn can reach any module. Its `context_label` names the modules it can see (`test_otto_is_the_one_agent`). The per-module session routes still answer; the page calls only `otto`'s.
+`otto` is the drawer's agent and no package: `app/api.py` builds a `Module` for it whose tools are the union of every enabled module's `read_tools`, `write_tools` and `builtins`, whose prompt is every enabled module's `agent.md` in manifest order (each opens with what its module is; `agent_base.md` alone says who the agent is), and whose Current state is Home's `context` hook, so one turn can reach any module. Its `context_label` names the modules it can see (`test_otto_is_the_one_agent`). The per-module session routes still answer; the page calls only `otto`'s.
 
 Budget: when a task run starts, `app_llm_runs` rows of the local day with `budgeted = 1` and status `running`, `done` or `failed` are counted against `max_sessions`; the run then writes its own `running` row before the CLI spawns and updates it to `done` or `failed` after, so concurrent runs see each other; a refusal writes a `skipped` row and the runner records the job `skipped`.
 
@@ -126,16 +126,16 @@ Sessions: `app_sessions(id, module, opened_at, closed_at, title, tags, cli_start
 | `new_session(store, module)` | opens one |
 | `pane_turn(st, mod, text, prompt)` | a module route's turn of the drawer: the module's newest open session, or a new one when none is open, gets `text` shown as the owner's turn and `prompt` sent to the CLI |
 | `start_turn(st, mod, sid, started, text, prompt, key, replay, on_done)` | stores the owner's words (`text`), marks the session busy (a count of queued and running turns per session id; `idle` goes out at zero) and queues a `session` job on resource `session:<sid>` with `prompt` for the CLI, so one session's turns serialize and different sessions run concurrently |
-| `tag_session(st, mod, sid, key, close)` | queues a `oneshot` whose `{"title", "tags"}` is written to the row (fallback: first user line, no tags), sets `closed_at` only when `close` is true, then event `closed` or `tagged` and a `tagged` broadcast; Graph reads `app_sessions.tags` |
+| `tag_session(st, mod, sid, key, close)` | queues a `oneshot` whose `{"title", "tags"}` is written to the row (fallback: first user line, no tags), sets `closed_at` only when `close` is true and the session is still in `st.session_closing` (a reopen since the `/clear` takes it out), then event `closed` or `tagged` and a `tagged` broadcast; Graph reads `app_sessions.tags` |
 
 | Route | What it does |
 |---|---|
 | `GET /api/session/<module>` | the module's open sessions, oldest first, each labelled with its title once tagged, until then its first user line |
 | `GET /api/session/<module>/<id>` | one session with its turns and busy state |
 | `POST /api/session/<module>/new` | opens an empty session, so a file can be attached before the first message |
-| `POST /api/session/<module>/send` | `{text, id?, files?}`: no `id` opens a new session; an unknown or closed one is a 404. `files` names what Chat's `upload/<id>` put in the session's folder, `data/workspace/chat/<id>/`: the CLI gets the text plus a trailer naming their paths, the transcript the text alone, and a name not in the folder, or files with no `id`, is a 400. `/clear` with an `id` tags and closes that one; any other message starting with `/` goes to the CLI unchanged, so Claude Code commands and skills work from the drawer |
+| `POST /api/session/<module>/send` | `{text, id?, files?}`: no `id` opens a new session; an unknown or closed one is a 404. `files` names what Chat's `upload/<id>` put in the session's folder, `data/workspace/chat/<id>/`: the CLI gets the text plus a trailer naming their paths, the transcript the text alone, and a name not in the folder, or files with no `id`, is a 400. `/clear` with an `id` tags and closes that one; anything else is the turn, sent to the CLI as typed |
 | `POST /api/session/<module>/<id>/title` | renames the tab, and the name outranks the tagger's |
-| `POST /api/session/<module>/<id>/reopen` | a closed session opens again, keeping its turns and its tags |
+| `POST /api/session/<module>/<id>/reopen` | a closed session opens again, keeping its turns and its tags. Inside the window between `/clear` and the tagger's write it cancels the close instead, so the tab stays and the session is tagged but never closed; Chat's `reopen` verb does the same |
 | `GET /api/session/<module>/<id>/events` | the stream on key `<module>:<id>`: `user`, `model`, `delta` (text as it is written, never stored; the drawer ignores it), `tool`, `tool_result`, `result`, `error`, `idle`, `tagged` |
 
 Chat's rows are every conversation, whichever agent held it, so a session opened under `otto` and closed becomes a chats row. A first turn that fails retires its session row so the next turn starts clean. A resumed turn the CLI answers with `error_during_execution`, no turns and stderr `No conversation found with session ID` (`ClaudeError.lost_transcript`) is re-sent under the same id as a new session, with the caller's `replay` preamble when one was given, after a `system` turn `resumed from Otto's record`.
@@ -148,7 +148,7 @@ A module is a package `app/modules/<name>/`. The registry imports every package;
 
 | File | Obligation |
 |---|---|
-| `__init__.py` | `MANIFEST = Manifest(name, title, hue, icon (SVG inner markup, 20x20), order, schedules=(Schedule(task, every "60s\|15m\|24h", resource, llm),), agent=Agent(placeholder, skills, read_tools, write_tools, builtins), facet="entry")`. `facet` is the module's immutable tag: the one `fixed` tag every row of it carries, which decides the row's group in the feed, its hue and its mark. A module without one (Home, Graph, Feedback) lists no rows and holds no lobe on the brain, and is still listed by `/api/shell` with `facet: null` so its hue and icon resolve. `builtins` are CLI tools beyond the read set, given to session turns only. Optionally `setup(config)`, called once at build after every schema is applied (a raise records the module in `app_module_errors` and drops it), and `async shutdown()`, awaited at lifespan exit after the drain, for a module holding process resources |
+| `__init__.py` | `MANIFEST = Manifest(name, title, hue, icon (SVG inner markup, 20x20), order, schedules=(Schedule(task, every "60s\|15m\|24h", resource, llm),), agent=Agent(placeholder, read_tools, write_tools, builtins), facet="entry")`. `facet` is the module's immutable tag: the one `fixed` tag every row of it carries, which decides the row's group in the feed, its hue and its mark. A module without one (Home, Graph, Feedback) lists no rows and holds no lobe on the brain, and is still listed by `/api/shell` with `facet: null` so its hue and icon resolve. `builtins` are CLI tools beyond the read set, given to session turns only. Optionally `setup(config)`, called once at build after every schema is applied (a raise records the module in `app_module_errors` and drops it), and `async shutdown()`, awaited at lifespan exit after the drain, for a module holding process resources |
 | `schema.sql` | the module's tables, every one named `<module>_<name>` and every index and trigger after its table (`test_tables_are_named_after_their_module`), applied at boot (optional; `Store.migrate` only creates, so a column added to or renamed on an existing table is the module's `setup` to do, a table that changes its name is a line in `app/migrate.py` `RENAMES`, and a module that changes its name a line in `MODULE_RENAMES`) |
 | `tasks.py` | `async def <task>(ctx)` per schedule; `ctx.store` (read), `ctx.commit(cursor=...)` (the only write), `ctx.log`, `ctx.event`, `ctx.run_task(prompt, tools)`; return a string, or `Skipped("why")`; a `BudgetExceeded` out of `run_task` needs no catch, the runner records it as skipped |
 | `routes.py` | `router = APIRouter(prefix="/api/<name>")` with `GET item/{id}` and `POST action/{verb}` (through `runner.run_action`), plus hooks `rows(store, limit) -> [ROW]`, `queue(store) -> [ROW]` (everything still waiting on the owner, each with `waits`), `item(store, id)`, `numbers(store) -> {value, label}`, `today(store) -> rows`, `context(store, registry) -> str`. Route handlers must not share a hook's name |
@@ -240,7 +240,7 @@ The window is one page: the brain, the feed, the open item and the agent drawer 
 | Token | Value |
 |---|---|
 | Themes | Rainbow and Dark, both dark, switched from the header or the program menu and kept in `otto-look`. `--m` is the open item's facet hue; Rainbow mixes it into every surface, Dark holds the tint at nothing. There is no light theme |
-| Colour | the facet's hue on a group card's left border and its ground, and on the send button (`--accent`, the hue mixed toward the ink so it is never white on dark); `--danger` carries a destructive button and a late stamp. A hovered row deepens its own ground and leaves its neighbours theirs |
+| Colour | the facet's hue on a group card's left border and its ground, on the facet's own tag chip, and on the send button (`--accent`, the hue mixed toward the ink so it is never white on dark); `--danger` carries a destructive button and a late stamp. A hovered row deepens its own ground and leaves its neighbours theirs |
 | Type | PT Serif everywhere, chrome and reading text alike, Geist Mono for code and for a notebook, script, table or routine title. `fonts.css` declares all 6 vendored cuts with the `ascent-override` / `descent-override` that centre text on its capitals, so a glyph sits level with the icon beside it |
 | Rows | `--rowh` 42px, three columns: the checkbox that picks it, the title with its snip, and the right-hand cell |
 | Dates | `MM-DD-YYYY`, bare: a date carries no word before it, and a stamp shows the time only for something that arrived today. `ui.time_format` decides 24-hour or 12-hour |
@@ -277,11 +277,13 @@ A verb runs through `POST /api/verb`, which finds the module's own `/action/{ver
 
 One agent. A tab per open conversation with a `+` at the head, the transcript, and a composer carrying what is being discussed as a token — the open item, or what point mode aimed at. `c` opens a conversation, `C` reopens the newest closed one through Chat's `reopen` verb, `F2` renames a tab, and closing one sends `/clear`, which names it, tags it and keeps it as a chats row. Nothing stateful lives in the DOM across a render: a draft per tab, the files attached to it, the caret and which tab is open are module state.
 
-The composer is the text over a bar, after the Claude Code panel in VS Code: attach, skills, a chip with the drawer's model and effort, and send at the far end. Attach opens the file picker, and a file dropped on the composer or pasted into it attaches the same way: it goes straight into the tab's folder through Chat's `upload/<id>`, shows as a token beside the reference, and the next turn names it to the agent. From the `+` tab, attaching first opens an empty tab through `/api/session/otto/new`, which takes the draft with it. Skills opens the palette on the agent's skills, as `/` in an empty composer does. The chip reads `default`, a model, or a model and an effort, and opens a popover of both lists, and a pick writes `tasks.otto.turn.model` or `.effort`: the same setting Settings lays out as Otto under Conversation. The clock and the Auto mode of the VS Code panel have no counterpart, since a turn here has no time budget of its own to set and the agent never asks permission.
+The composer is the text over a bar, after the Claude Code panel in VS Code: attach, a chip with the drawer's model and effort, and send at the far end. Attach opens the file picker, and a file dropped on the composer or pasted into it attaches the same way: it goes straight into the tab's folder through Chat's `upload/<id>`, shows as a token beside the reference, and the next turn names it to the agent. From the `+` tab, attaching first opens an empty tab through `/api/session/otto/new`, which takes the draft with it. The chip reads `default`, a model, or a model and an effort, and opens a popover of both lists, and a pick writes `tasks.otto.turn.model` or `.effort`: the same setting Settings lays out as Otto under Conversation. The clock and the Auto mode of the VS Code panel have no counterpart, since a turn here has no time budget of its own to set and the agent never asks permission.
 
 ### Tags
 
-`app_tags(module, item_id, tag)` holds the owner's tags on any module's row; Second Brain keeps `second_brain_tags`, which its own tools read and write, and `app.store.tags_for` reads both, so a tag means the same thing everywhere. `GET /api/tags` lists them with their counts, `POST /api/tags/add` and `/remove` write them. A row's `fixed` is its facet and nothing else: it cannot be edited, and a facet's name is refused as a tag to give.
+`app_tags(module, item_id, tag)` holds the owner's tags on any module's row; Second Brain keeps `second_brain_tags`, which its own tools read and write, and `app.store.tags_for` reads both, so a tag means the same thing everywhere. `GET /api/tags` lists them with their counts, `POST /api/tags/add` and `/remove` write them. A row's `fixed` is its facet and nothing else: it cannot be edited, and a facet's name is refused as a tag to give. Under an open row five tags show, then `+N`; the facet's chip wears its hue and the owner's tags are neutral.
+
+A tag an agent writes is one word. `app.store.word_tags` lowercases, keeps a tag only when it is a single run of letters and digits, and drops repeats. The tools (`newsfeed_search_add`, `newsfeed_tag`, `second_brain_add`, `second_brain_tag`) refuse a list naming the first tag that is not one word, so the agent retries with words; a one-shot (the session tagger, the newsfeed nightly, the feedback filing) drops what fails, since nothing retries it. The owner's own tags through `/api/tags/add` are not held to it.
 
 Selection is an intersection, never a path. `S.tokens` is the one set: a tag picked on the brain, typed into the search bar or clicked on a row is the same token, and adding one narrows the feed. One facet at a time — picking a second replaces the first, and the brain zooms into that facet's cluster.
 
@@ -293,11 +295,11 @@ A figure of dots turning slowly inside a dotted chamber, one lobe per facet, eac
 
 `?` opens the one list of keys; no control anywhere else names its own. `h` `l` (`←` `→`) step between the brain, the feed, the page and the drawer; `j` `k` (`↓` `↑`) move inside one; `↵` opens what the keyboard stands on, and moving never opens. In the drawer `j` `k` walk the `+`, each tab and then the composer. `1`–`9` toggle the pinned tags. `x` picks a row, `t` tags it, `a` asks about it, `n` starts an entry in the drawer, `e` edits, `Del` deletes, `p` and `r` are the modes, `o` is point mode, `/` or `Ctrl+K` the palette, `Ctrl+Space` the search bar and `Ctrl+Shift+Space` clears it, `Alt+←` and `Alt+→` walk history, `Esc` always leaves one layer, and `Ctrl+↵` in the query editor runs the SQL.
 
-The palette holds the open item's own verbs first, then the frame's actions, the agent's skills (typing `/` shows only those), the facets, the tags and matching rows.
+The palette holds the open item's own verbs first, then the frame's actions, the facets, the tags and matching rows.
 
 ### History and refresh
 
-The tokens, the open item and the mode are one history entry each (`pushState`), so the mouse's back and forward buttons walk the page's states; `?open=<id>` and `?tag=<tag>` open a link on a row or a tag. The feed refreshes on `ui.refresh_seconds`, read afresh before each wait so a change on Settings holds from the next refresh, and after every verb; a refresh waits while anything is being typed into. Static files go out `Cache-Control: no-cache`.
+The tokens, the open item and the mode are one history entry each (`pushState`), so the mouse's back and forward buttons walk the page's states; `?open=<id>` and `?tag=<tag>` open a link on a row or a tag. The feed refreshes on `ui.refresh_seconds`, read afresh before each wait so a change on Settings holds from the next refresh, and after every verb; a refresh waits while anything is being typed into. `/api/feed` carries the daemon's revision, and a refresh that sees one other than the window booted under reloads the window, so a daemon restarted on new code is never driven by the code before it. Static files go out `Cache-Control: no-cache`.
 
 ### Point mode
 
@@ -345,19 +347,6 @@ A switch is the task's own `app_tasks.enabled`, the one its routine row's Pause 
 - Each module's own departures are the `Departures` row of its doc's `## Built` table.
 
 ## Patches
-
-### Reopening a chat inside the tagging window finds it still open
-
-- Kind: defect
-- Where: `app/api.py` (`session_send` `/clear`, `session_reopen`), `app/static/drawer.js` (`closeChat`, `reopenChat`, `openConversation`)
-- Found: 2026-09-20, building the agent drawer
-- Status: open
-
-What happens: closing a tab posts `/clear`, which returns as soon as the tagging one-shot is submitted; the row is closed only when that run finishes, seconds later. The drawer removes the tab at once. Pressing `C` inside that window reopens a session that was never closed: the route answers 200, the tab comes back, and then the tagger's close lands and the tab disappears again on the next sync.
-
-Expected: reopening always returns a tab that stays, whether or not the tagger has finished.
-
-Fix: either the drawer holds the reopen until the close settles (it already knows the session is being tagged, since `tagged` arrives on the stream), or the platform can cancel a queued close so a reopen inside the window supersedes it. The second is the smaller surface and keeps the drawer free of daemon timing.
 
 ### A notebook's cells cannot be edited or run one at a time
 
@@ -423,107 +412,3 @@ What happens: Development 3 names `app/static/shell.js` "an import and the `PAGE
 Expected: the file every change is held to describes the code as it is.
 
 Fix: Layout 3 takes the file list of this doc's Files table, and Development 3 drops `shell.js` from the seams, since no module adds a line to it any more.
-
-### The window keeps running the code it booted with
-
-- Kind: defect
-- Where: `app/static/shell.js` (`boot`), `app/api.py` (`/api/shell` `rev`)
-- Found: 09-21-2026, writing the one page's doc
-- Status: open
-
-What happens: `boot` fetches `/api/shell` once and never looks at `rev` again, and the refresh asks only for `/api/feed`. When the launcher restarts the daemon on a code change, an open window goes on running the JavaScript it loaded, against a daemon that may answer differently. Nothing says the window is stale.
-
-Expected: the window reloads itself once when the daemon reports a revision other than the one it booted under.
-
-Fix: the revision has to reach the refresh — either `load()` re-fetches `/api/shell` and compares, or `/api/feed` carries `rev` beside its items. One reload, once, as the old shell did.
-
-### The facet tag is coloured, and twelve show where the rule says five
-
-- Kind: defect
-- Where: `app/static/styles.css` (`.tag.fixed`, `.token.tag.fixed`), `app/static/core.js` (`tagEl`, `revealEl`)
-- Found: 09-21-2026, writing the one page's doc
-- Status: open, needs a decision
-
-What happens: a facet's tag is drawn in its module's hue — tinted ground, coloured ink, coloured ring, bold — while the owner's own tags are neutral, so the two systems do not look alike and colour lands somewhere other than a card's left border and a primary button. The summary under an open row shows twelve tags before `+N`. Both are version 36 of the preview, ported verbatim.
-
-Expected: UI rules 3 and 4 — tags are neutral and one system, five then `+N`, and colour is the module's hue on a card's left border and on a primary button, nothing else.
-
-Fix: one rule and one number, if the rules win: `.tag.fixed` drops to the neutral ground with its mark carrying the facet, and `revealEl` asks for five. The preview the owner approved does it the other way, so which gives way is theirs to say.
-
-### Nine modules still serve the list the old pages asked for
-
-- Kind: defect
-- Where: `GET left` in the `routes.py` of chat, database, education, email, finance, graph, newsfeed, science and second_brain; `app/api.py` (`GET /api/items`)
-- Found: 09-21-2026, writing the one page's doc
-- Status: open
-
-What happens: each of the nine still builds the grouped, paged list its page used to draw, and `/api/items` still merges every module's rows by tag. The page asks for neither: it asks for `/api/feed` twice and `/api/{module}/item/{id}` when a row opens. The routes are carried, tested and merged for nothing, and a module changing its rows has two shapes to keep in step instead of one.
-
-Expected: the daemon serves what the page asks for.
-
-Fix: delete `left` from the nine and its tests with it, keeping whatever grouping logic `rows` still needs. `/api/items` is the older cross-module route and `/api/feed` supersedes it; it goes the same way unless a tool is found to be reading it.
-
-### The artboard is still the twelve-page app
-
-- Kind: gap
-- Where: `docs/design/Personal Dashboard App.dc.html`, `docs/design/support.js`
-- Found: 09-21-2026, writing the one page's doc
-- Status: open
-
-What happens: `docs/design/` is the stated source for hues, icons and each page's shape, and what it holds is the imported artboard of the rail, twelve pages, a detail pane and a per-module agent. The hues and the marks still match the app; nothing about its shape does.
-
-Expected: the artboard is the app, since the owner reads it as the app and not as an import.
-
-Fix: the approved one-page design replaces the import in `docs/design/`, and the repo's `CLAUDE.md` line describing it as "each page's LEFT and MIDDLE shape" follows it.
-
-### Open in Gmail, and every link the page opens, lands in a browser that is not mine
-
-- Kind: defect
-- Where: `app/__main__.py` (`open_window`); the openers are `app/static/core.js` (`away`) and the email reader's body links
-- Found: 09-21-2026, the owner pressing Open in Gmail
-- Status: open, owner decision
-
-What happens: the window is Chrome in app mode on its own profile (`app/.chrome-profile/`, `--user-data-dir`), which is a second browser with its own cookies, sign-ins, extensions and history. `Open in Gmail`, a link's `Open`, Database's `Export` and every link inside an email body are opened by the page itself with `window.open`, and a page can only open into its own profile, so they land in that second browser. Nothing about it goes through the daemon. Gmail opens on the right account only because it was signed into that profile once, and it looks like another machine because, to Chrome and to Google, it is one.
-
-Expected: a link opens in the Chrome I already use, as a new tab in the window I am working in, with Gmail signed in and carrying all its state. Reusing the one tab that already shows Gmail is not something Chrome or Gmail offers without an extension; a new tab in that window is the available target.
-
-Fix: drop `--user-data-dir` from `open_window`, and with it `--no-first-run`, `--no-default-browser-check` and `--disable-sync`, which exist only to quiet a fresh profile and would switch sync off in the real one. The app window then belongs to the default profile: Chrome hands it to the running instance and everything the page opens lands in the main browser, body links included; the change checks that the taskbar button still carries the Otto icon. The alternative keeps the profile and routes `open`, `link` and `export` through the daemon, which starts Chrome with the url and no profile flag; it is more code, leaves email body links in the second browser, and is only worth it if the isolated profile is wanted for its own sake. `app/.chrome-profile/` is dead either way and can be deleted.
-
-### An agent's tag is one word
-
-- Kind: roadmap
-- Where: `app/store.py` (beside `tag_key`); the agent tag paths `app/api.py` `tag_session` (its prompt), `app/modules/newsfeed/tasks.py` `clean_tags` and the nightly prompt, `app/modules/newsfeed/tools.py` `newsfeed_tag` and `newsfeed_search_add`, `app/modules/newsfeed/agent.md`, `app/modules/feedback/routes.py` (the filing prompt) and `app/modules/feedback/agent.md`, `app/modules/second_brain/tools.py` `second_brain_add` and `second_brain_tag`
-- Found: 09-21-2026, the owner seeing `#probability and statistics` and `#estimation and inference` on a row
-- Status: open
-
-What happens: no path an agent writes a tag through holds it to one word. The session tagger asks for "topic identifiers", the newsfeed nightly for "one to three short lowercase words" (readable as one three-word tag), Feedback for "identifiers", and Second Brain's tools take whatever list they are given; `tag_key` only trims and lowercases. Every store today holds single words, so the rule has held by luck, and the row the owner saw is Education's (its own entry).
-
-Expected: a tag an agent gives is one word: letters and digits, no space and no hyphen, so the rule cannot be dodged by joining words. Any number of tags may be given. The owner's own tags through `/api/tags/add` are not in scope.
-
-Fix: one helper next to `tag_key` that lowercases, keeps only a tag that is a single run of letters and digits, and drops repeats; every path above passes its tags through it. A tool answers with an error naming the offending tag, so the agent retries with words; a one-shot (session tagger, newsfeed nightly, feedback filing) drops what fails, since nothing retries it. Each prompt and `agent.md` line says "one word each, as many as fit". One test per path gives a two-word tag and expects it refused or dropped.
-
-### Every skill in the palette is a name no session knows
-
-- Kind: bug
-- Where: `Agent(skills=…)` in the `__init__.py` of chat, database, education, email, finance, graph, home, newsfeed, science and second_brain; `app/static/shell.js` (`SKILLS`, the palette's Skills group); `app/claude.py` (`_args`, `--setting-sources ""`); the `POST /api/session/<module>/send` row of this doc
-- Found: 09-21-2026, the owner running `/today` in the drawer
-- Status: open, needs a decision
-
-What happens: the palette offers 34 skills, and each one sends `/<name> ` to the CLI as the turn. None of them is defined anywhere: they are the artboard's decorative chips, carried into the manifests, and no skill file backs any of them. The CLI also runs with `--setting-sources ""`, so it would not load a skill file if one existed. It answers `Unknown command: /today`, and every other name fails the same way: `today`, `where-to-look`, `recall`, `tag`, `add`, `suggest`, `searches`, `question-gen`, `quiz`, `explain`, `plan`, `triage`, `summarize`, `flag`, `nl-to-sql`, `explain-plan`, `schema`, `neighbors`, `link`, `merge`, `prune`, `totals`, `monthly`, `history`, `web`, `files`, `inspect-cell`, `run`, `explain-output`, `refactor`. `SKILLS` lists them per module, so `/recall`, `/tag`, `/add` and `/files` show twice. This doc's `send` row says Claude Code skills work from the drawer; no skill of the owner's can, for the same reason.
-
-Expected: a skill in the palette does what its name says.
-
-Fix: the owner's call between two shapes. Either each kept name becomes a prompt file its module ships, and `session_send` swaps a leading `/<name>` for that text before the turn, so the CLI stays sandboxed and needs no setting source; a name without a file is dropped. Or the `skills` field, the palette's Skills group and the `send` row's claim go, and the drawer takes plain sentences only. Either way the palette lists a name once.
-
-### The one agent is told it is ten agents
-
-- Kind: defect
-- Where: `app/api.py` (`_otto`, the joined prompt), every `app/modules/*/agent.md`, `app/modules/home/agent.md` in particular
-- Found: 09-21-2026, tracing why `/today` failed
-- Status: open
-
-What happens: `_otto` joins every enabled module's `agent.md` under `agent_base.md`, so the drawer's single session is told "You are the Otto agent", then "You are the Home agent… You have no tools", "When something needs a module's own agent… say which module to open; do not pretend to do it", then "You are the Database agent", "You are the Email agent" and so on. Home's lines date from a pane per module. The drawer session has every module's tools, so they contradict what it can do.
-
-Expected: one agent with one identity; each module's share says what the module holds and its rules, not who the agent is.
-
-Fix: each `agent.md` opens with what its module is ("Email is a mirror of…") instead of "You are the X agent"; `agent_base.md`'s `{module}` line already names the agent for a module's own session (Chat, Education's pane). Home's "no tools" and "say which module to open" lines go.

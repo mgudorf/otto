@@ -15,7 +15,6 @@ MANIFEST = Manifest(
     schedules=(Schedule(task="rebuild", every="15m", resource="graph"),),
     agent=Agent(
         placeholder="Curate the graph…",
-        skills=("neighbors", "link", "merge", "prune"),
         read_tools=("graph_nodes", "graph_neighbors", "graph_items"),
         write_tools=("graph_link", "graph_unlink", "graph_merge", "graph_prune", "graph_restore"),
     ),

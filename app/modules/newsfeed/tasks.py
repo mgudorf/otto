@@ -10,10 +10,9 @@ import json
 from datetime import date, datetime, timedelta
 
 from app.runner import Skipped
-from app.store import now_iso
+from app.store import now_iso, word_tags
 
 SEEN = 100          # entries listed back to the model per search, newest first, so a url is never proposed twice
-TAG_CHARS = 24      # a tag longer than this is cut; the chips are one word each
 
 
 def local_today() -> str:
@@ -35,15 +34,8 @@ def parse_array(raw: str) -> list:
 
 
 def clean_tags(values) -> list[str]:
-    """Lowercased, trimmed, cut at TAG_CHARS, in order without repeats; anything that is not a list of strings is ignored."""
-    if not isinstance(values, (list, tuple)):
-        return []
-    out: list[str] = []
-    for v in values:
-        tag = str(v).strip().lower()[:TAG_CHARS] if isinstance(v, (str, int, float)) else ""
-        if tag and tag not in out:
-            out.append(tag)
-    return out
+    """The tags a run wrote, one word each; what is not is dropped, since nothing retries a nightly."""
+    return word_tags(values)[0]
 
 
 def a_date(value) -> str | None:
@@ -102,7 +94,7 @@ def prompt(store, s: dict, today: str) -> tuple[str, list[int]]:
         ' "summary": one or two sentences on why it matters to the owner,'
         ' "date": "YYYY-MM-DD" when it happens on a day, else "", "time": "HH:MM" when the listing gives one, else "",'
         ' "follow_up": "YYYY-MM-DD" when the owner should check back on it (a deadline, a release, a decision), else "",'
-        ' "tags": one to three short lowercase words, "follows": the id it follows up on, else null}.',
+        ' "tags": one word each, letters and digits only, as many as fit, "follows": the id it follows up on, else null}.',
         "An empty array is a fine answer when nothing new and concrete turned up.",
     ]
     return "\n".join(lines), [r["id"] for r in due]

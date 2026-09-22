@@ -92,17 +92,6 @@ def _rows(store: Store, entries: list[dict]) -> list[dict]:
     return rows_out
 
 
-def _group_by_day(rows: list[dict]) -> list[dict]:
-    groups: list[dict] = []
-    for row in rows:
-        label = _day(row["when"])
-        if not groups or groups[-1]["label"] != label:
-            groups.append({"label": label, "count": 0, "rows": []})
-        groups[-1]["rows"].append(row)
-        groups[-1]["count"] += 1
-    return groups
-
-
 def _like(term: str) -> str:
     """A typed word as a needle: % , _ and the escape itself stand for themselves."""
     return "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
@@ -155,25 +144,6 @@ def searches(store: Store) -> list[dict]:
         " FROM newsfeed_searches s ORDER BY s.created_at, s.id"
     )
     return [{**r, "id": f"{SEARCH}{r['id']}", "tags": tags_of(store, "search", r["id"])} for r in found]
-
-
-@router.get("/left")
-def left(request: Request, query: str = "", chip: str = "All", limit: int = ROW_LIMIT) -> dict:
-    """The typed words and the chip narrow the whole feed; the page raises `limit` until `more` goes false."""
-    store: Store = request.app.state.store
-    limit = max(1, limit)
-    chip = chip if chip in CHIPS else "All"
-    where, params = _search(query)
-    where.append(CHIPS[chip])
-    sql_where = "WHERE " + " AND ".join(where)
-    total = store.scalar(f"SELECT COUNT(*) FROM newsfeed_items {sql_where}", tuple(params))
-    entries = store.query(f"SELECT * FROM newsfeed_items {sql_where} ORDER BY found_at DESC, id DESC LIMIT ?", (*params, limit))
-    return {
-        "groups": _group_by_day(_rows(store, entries)),
-        "chips": list(CHIPS),
-        "chip": chip,
-        "more": total > limit,
-    }
 
 
 @router.get("/blank")
@@ -323,7 +293,7 @@ def queue(store: Store) -> list[dict]:
 
 
 def rows(store: Store, limit: int = ROW_LIMIT) -> list[dict]:
-    """Every entry still listed, newest first; the tag intersection and the feed's Recent read these."""
+    """Every entry still listed, newest first; the feed's Recent reads these."""
     entries = store.query(
         f"SELECT * FROM newsfeed_items WHERE {LISTED} ORDER BY found_at DESC, id DESC LIMIT ?",
         (max(1, min(limit, 1000)),),

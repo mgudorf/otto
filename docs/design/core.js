@@ -1,16 +1,13 @@
 // Core: state, DOM helpers, the search bar and its tokens, the feed, the open item as a card of what it relates to and a
 // page of what it says, the layouts, the verbs a facet allows, tags, and the frames the other parts fill. The brain, the
 // drawer, point mode and the shell register here.
-import { get, post, q, inflight } from './api.js';
-
-// The shape of the app, answered once by the daemon: every module by name, the facets in the order the feed groups them,
-// and which module owns each. They are filled in place, so every part that imported them stays in step.
-export const MODS = {}, FIXED_MOD = {}, ORDER = [], FIXED_ORDER = [], ITEMS = [], CATALOG = [];
+import { MODS, ORDER, ITEMS, FIXED_ORDER, FIXED_MOD } from './data.js';
+export { MODS, ORDER, ITEMS, FIXED_ORDER, FIXED_MOD };
 
 export const S = {
   mode: 'Priority', tokens: [], q: '', open: null, cursor: -1, zone: 'feed', gcursor: -1, picked: new Set(), tagsOpen: new Set(), qtoggle: new Set(), view: 'brain',
   edit: null, nav: 'open', chat: 'open', point: false, pointRef: null,
-  pins: [],   // plain tags given a numbered callout of their own on the brain
+  pins: ['hyperbolic-geometry', 'thesis'],   // plain tags given a callout of their own on the brain
   // Shares of the width. The big panel, the brain on the left or the page on the right, takes what the cards and the drawer leave.
   layout: { feed: 30, drawer: 20, turn: 20 },   // turn: minutes per revolution of the brain, 0 holds it still
 };
@@ -43,10 +40,7 @@ export const I = {
   up: '<path d="M6 12l4-4 4 4"></path>', down: '<path d="M6 8l4 4 4-4"></path>', check: '<path d="M4 10l4 4 8-8"></path>',
   tag: '<path d="M3 3h6l8 8-6 6-8-8z"></path><circle cx="6.5" cy="6.5" r="1"></circle>',
   layout: '<rect x="3" y="4" width="14" height="12" rx="2"></rect><path d="M8 4v12M13 4v12"></path>',
-  target: '<circle cx="4.5" cy="10" r="2.6"></circle><path d="M8.7 7v6M11.3 7v6"></path><circle cx="15.5" cy="10" r="2.6"></circle>',
-  sliders: '<path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle>',
-  plus: '<path d="M10 4v12M4 10h12"></path>',
-  file: '<path d="M6 3h5l4 4v10H6z"></path><path d="M11 3v4h4"></path>',
+  target: MODS.otto.icon,
 };
 let toastT;
 export function toast(msg) { const t = $('#toast'); if (!t) return; t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2000); }
@@ -54,30 +48,21 @@ export function toast(msg) { const t = $('#toast'); if (!t) return; t.textConten
 // ---- facets, types, dates, tags -----------------------------------------------------------------------
 const NEUTRAL = '#8B92A1';
 export const modOf = (id) => MODS[id] || { id, title: id, hue: NEUTRAL, icon: '' };
-export const hue = (m) => modOf(m && typeof m === 'object' ? m.id : m).hue;   // a name, a module, or nothing yet
+export const hue = (m) => modOf(typeof m === 'string' ? m : m.id).hue;
 export const isFixed = (t) => FIXED_MOD[t] !== undefined;
 export const fixedIcon = (t) => modOf(FIXED_MOD[t] || 'otto').icon;
 export const markIcon = (i) => modOf(i.module).icon;
 export const itemOf = (id) => ITEMS.find((i) => String(i.id) === String(id)) || null;
 export const currentItem = () => (S.open === null ? null : itemOf(S.open));
-const day = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const TODAY = day(new Date()), YESTERDAY = day(new Date(Date.now() - 864e5));
+const TODAY = '2026-09-20', YESTERDAY = '2026-09-19';
 export const dayLabel = (s) => { const [y, m, d] = String(s).slice(0, 10).split('-'); return `${m}-${d}-${y}`; };
 export const relDay = (s) => { const d = String(s).slice(0, 10); return d === TODAY ? 'Today' : d === YESTERDAY ? 'Yesterday' : dayLabel(d); };
-// One clock for the whole page, so the owner's 12-hour setting reaches every time shown.
-export const clock = (s) => {
-  const hm = String(s).slice(11, 16);
-  if (!S.shell || S.shell.settings['ui.time_format'] !== '12h') return hm;
-  const [h, m] = hm.split(':').map(Number);
-  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`;
-};
+export const clock = (s) => String(s).slice(11, 16);
 export const stamp = (s) => (String(s).slice(0, 10) === TODAY ? clock(s) : dayLabel(s));
 export const tagsOf = (i) => [...(i.fixed || []), ...(i.tags || [])];
-// What the feed holds, topped up with every other tag the daemon knows, so the search bar offers more than one page of rows.
 export function allTags() {
   const n = {};
   for (const i of ITEMS) for (const t of tagsOf(i)) n[t] = (n[t] || 0) + 1;
-  for (const c of CATALOG) if (!n[c.tag]) n[c.tag] = c.count;
   return Object.entries(n).map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
 }
 const tagOn = (t) => S.tokens.some((k) => k.kind === 'tag' && k.value === t);
@@ -93,14 +78,13 @@ export function tagList(i, { max = 4, lg = false } = {}) {
 }
 
 // ---- the parts that register --------------------------------------------------------------------------
-let drawer = null, pointer = null, brain = null, shell = null, sql = null;
+let drawer = null, pointer = null, brain = null, shell = null;
 export const call = (obj, name, ...args) => (obj && typeof obj[name] === 'function' ? obj[name](...args) : undefined);
 export function registerDrawer(impl) { drawer = impl; }
 export function registerPoint(impl) { pointer = impl; }
 export function registerBrain(impl) { brain = impl; }
 export function registerShell(impl) { shell = impl; }
-export function registerSql(impl) { sql = impl; }
-export const parts = () => ({ drawer, pointer, brain, shell, sql });
+export const parts = () => ({ drawer, pointer, brain, shell });
 export function openDrawer() { if (S.chat !== 'open') { S.chat = 'open'; renderTop(); renderChat(); } }
 export function toggleChat() { S.chat = S.chat === 'open' ? 'closed' : 'open'; renderTop(); renderChat(); }
 // Brain mode is the brain on the left of the cards; Inspect mode is the page on the right of them. `[` swaps them.
@@ -116,7 +100,7 @@ export function togglePoint(on) {
 export const dark = () => document.documentElement.dataset.look === 'dark';
 export function setLook(t) {
   if (t === 'dark') document.documentElement.dataset.look = 'dark'; else delete document.documentElement.dataset.look;
-  try { localStorage.setItem('otto-look', t); } catch { /* private window */ }
+  try { localStorage.setItem('otto-preview-look', t); } catch { /* private window */ }
   renderAll();
 }
 
@@ -127,44 +111,8 @@ export function applyLayout() {
   app.style.gridTemplateColumns = `minmax(0, ${inspect ? 0 : big}fr) minmax(0, ${L.feed}fr) minmax(0, ${inspect ? big : 0}fr) minmax(0, ${drawerShare}fr)`;
   app.dataset.view = S.view;
 }
-export function savePins() { try { localStorage.setItem('otto-pins', JSON.stringify(S.pins)); } catch { /* private window */ } }
-export function saveLayout() { try { localStorage.setItem('otto-layout', JSON.stringify(S.layout)); } catch { /* private window */ } }
-
-
-// ---- what the daemon says -------------------------------------------------------------------------------
-// The shell is the facets: every module that carries one lists rows, takes a place on the brain and heads a group in the
-// feed. Modules without one (the feed's own, the graph, feedback) never appear.
-export async function loadShell() {
-  const sh = await get('/api/shell');
-  Object.assign(MODS, { otto: { id: 'otto', title: 'Otto', hue: NEUTRAL, icon: I.target } });
-  ORDER.length = 0; FIXED_ORDER.length = 0;
-  for (const m of sh.modules.filter((m) => m.enabled !== false).sort((a, b) => a.order - b.order)) {
-    MODS[m.name] = { id: m.name, title: m.title, hue: m.hue, icon: m.icon };
-    ORDER.push(m.name);
-    if (m.facet) { FIXED_ORDER.push(m.facet); FIXED_MOD[m.facet] = m.name; }
-  }
-  S.shell = sh;
-}
-// Every module's rows in one list: what waits carries `waits` and ranks Priority, everything else is Recent. Both modes
-// read this one set, so narrowing never costs a round trip and the brain always sees every tag the feed holds.
-const key = (r) => `${r.module}/${r.id}`;
-export async function load() {
-  const [recent, waiting] = await Promise.all([get(q('/api/feed', { mode: 'recent', limit: 200 })), get(q('/api/feed', { mode: 'priority' }))]);
-  if (S.shell && recent.rev && recent.rev !== S.shell.rev) { location.reload(); return; }   // the daemon restarted on new code; this page is the old
-  const by = new Map();
-  for (const r of recent.items) by.set(key(r), r);
-  for (const r of waiting.items) { const had = by.get(key(r)); if (had) had.waits = r.waits; else by.set(key(r), r); }
-  for (const i of ITEMS) { const fresh = by.get(key(i)); if (fresh && i.full) Object.assign(fresh, i, { tags: fresh.tags, waits: fresh.waits }); }   // keep what a page already fetched
-  ITEMS.splice(0, ITEMS.length, ...by.values());
-  S.synced = new Date();
-  try { const cat = await get('/api/tags'); CATALOG.splice(0, CATALOG.length, ...cat); } catch { /* the feed's own tags will do */ }
-  renderAll();
-}
-// A row says what the row shows; the page needs the whole item, which only the module that owns it can answer for.
-async function fill(i) {
-  if (!i || i.full) return;
-  try { Object.assign(i, await get(`/api/${i.module}/item/${encodeURIComponent(i.id)}`), { full: true }); renderPage(); renderFeed(); } catch { /* the row is all there is */ }
-}
+export function savePins() { try { localStorage.setItem('otto-preview-pins', JSON.stringify(S.pins)); } catch { /* private window */ } }
+export function saveLayout() { try { localStorage.setItem('otto-preview-layout', JSON.stringify(S.layout)); } catch { /* private window */ } }
 
 // ---- tokens: the search bar's grammar, which narrows the feed and lights the brain -------------------------
 export const itemText = (i) => [i.title, i.snip, i.body, i.status, ...tagsOf(i)].filter(Boolean).join(' ').toLowerCase();
@@ -188,7 +136,7 @@ export const newest = (a, b) => ((a.when || '') < (b.when || '') ? 1 : -1);
 export function visible() {
   let list = ITEMS.filter(matches);
   if (S.mode === 'Priority') list = list.filter((i) => i.waits).sort((a, b) => a.waits - b.waits);
-  else list = list.sort(newest);   // an undated row sorts last rather than falling out
+  else list = list.filter((i) => i.when).sort(newest);
   return list;
 }
 export function groupsOf(list) {
@@ -281,7 +229,6 @@ export function select(id, { scroll = true } = {}) {
   S.edit = null;
   S.cursor = listRows().findIndex((r) => r.dataset.id === String(S.open));
   remember(true); renderAll();
-  if (S.open !== null) fill(itemOf(S.open));
   if (scroll && S.open !== null) { const el = $(`#feed .card.mod[data-id="${S.open}"]`); if (el) el.scrollIntoView({ block: 'nearest' }); }
   const page = $('#page'); if (page) page.scrollTop = 0;
 }
@@ -291,7 +238,7 @@ export function flipPick(id) { const k = String(id); if (S.picked.has(k)) S.pick
 export function setEdit(id) { S.edit = id; if (id !== null && S.open !== id) S.open = id; if (id !== null) S.view = 'inspect'; renderAll(); const ta = $('#page .editor textarea'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }
 function commitEdit(item, value) {
   const v = value.trim();
-  if (v && v !== item.title) { item.title = v; doVerb(item, 'edit', null, { force: true, value: v }); }
+  if (v && v !== item.title) { item.title = v; toast('Saved'); call(drawer, 'note', item, 'edited'); }
   S.edit = null; renderAll();
 }
 
@@ -308,46 +255,63 @@ export function removeItem(id) {
 export function addItem(item) { ITEMS.unshift(item); renderAll(); return item; }
 let seq = 100;
 export const nextId = (p) => `${p}${seq++}`;
-// A verb runs on the daemon: the module that owns the item decides what it does and says what happened, which is what
-// the drawer records. A few verbs never leave the browser, because they open something here rather than change anything.
-const away = (i) => {
-  const url = i.href || i.url;
-  if (!url) { toast('Nothing to open'); return null; }
-  window.open(url, '_blank', 'noopener');
-  return null;
-};
-const HERE = {
-  open: away, link: away, export: away,
-  edit: (i) => { setEdit(i.id); return null; },
-  answer: () => { askAgent(); return null; },
-  explain: () => { sendToAgent('Explain the part I am on without giving the answer.'); return null; },
-  update: () => { askAgent('update the amount to '); return null; },
-  due: () => { askAgent('set the date to '); return null; },
-};
-// `anchor` is where a confirmation opens; `value` is what a verb that takes one was given.
-export async function doVerb(item, verb, anchor, { force = false, value } = {}) {
+// Runs a verb and says what happened, for the drawer's tool line. `anchor` is where a confirmation opens.
+export function doVerb(item, verb, anchor, { force = false } = {}) {
   if (!item) return null;
-  if (verb === 'reopen' && item.type === 'conversation') { call(drawer, 'openConversation', item); return null; }   // a conversation reopens in the drawer
-  if (HERE[verb]) return HERE[verb](item);
   const label = verbLabel(item, verb);
   if (DESTRUCTIVE.has(verb) && !force) {
     const at = anchor || $('#page .plate h2') || $(`#feed .row[data-id="${item.id}"]`) || $('#feed');
-    confirmPop(at, `${label}?`, async () => { const said = await doVerb(item, verb, null, { force: true }); if (said) call(drawer, 'note', item, said); });
+    confirmPop(at, `${label}?`, () => { const r = doVerb(item, verb, null, { force: true }); if (r) call(drawer, 'note', item, r); });
     return null;
   }
-  try {
-    const r = await post('/api/verb', { module: item.module, id: item.id, verb, value });
-    if (r.url) window.open(r.url, '_blank', 'noopener');
-    if (r.removes) removeItem(item.id);
-    await load();
-    if (r.said) toast(r.said);
-    return r.said || null;
-  } catch (e) { toast(e.message); return null; }
+  const gone = (what) => { removeItem(item.id); toast(what); return what; };
+  switch (verb) {
+    case 'archive': return gone('Archived; the tag page still finds it.');
+    case 'trash': return gone('Moved to Gmail’s trash.');
+    case 'dismiss': return gone('Dismissed; it will not be proposed again.');
+    case 'forget': return gone('Forgotten.');
+    case 'delete': return gone('Deleted.');
+    case 'later': return gone('Set aside; it returns when something changes.');
+    case 'do': { removeItem(item.id); addItem({ id: nextId('f'), module: 'finance', type: 'ledger', title: 'Transfer to checking', snip: 'from the decision', when: '2026-09-20T09:41', tags: ['recurring', 'tuition'], fixed: ['finance'], amount: '$300.00', due: '2026-09-24', kv: [['Cadence', 'once'], ['Note', 'Savings to checking 4471 before rent clears.']], hist: [['09-20-2026', '$300.00']], verbs: [['update', 'Update amount'], ['due', 'Set date'], ['end', 'End'], ['edit', 'Edit'], ['forget', 'Forget']] }); toast('Transfer filed as an entry'); return 'Filed the transfer as an entry due 09-24; the decision is closed.'; }
+    case 'star': item.starred = !item.starred; renderFeed(); return item.starred ? 'Starred.' : 'Unstarred.';
+    case 'unread': item.unread = true; item.dim = false; renderFeed(); return 'Marked unread.';
+    case 'read': item.unread = false; item.dim = true; renderFeed(); return 'Marked read.';
+    case 'open': case 'link': toast('Opens in a new tab from the app'); return 'Opened.';
+    case 'accept': item.status = 'accepted'; item.waits = null; item.dim = true; renderAll(); return 'Accepted; it stays as read.';
+    case 'done': item.done = true; item.waits = null; item.verbs = [['reopen', 'Reopen'], ['forget', 'Forget']]; renderAll(); return 'Done; it stays on the list, struck through.';
+    case 'reopen': if (item.type === 'conversation') { call(drawer, 'openConversation', item); return 'Reopened in the drawer.'; } item.done = false; item.verbs = [['done', 'Done'], ['edit', 'Edit'], ['forget', 'Forget']]; renderAll(); return 'Reopened.';
+    case 'answer': askAgent(); return null;
+    case 'explain': sendToAgent('Explain the part I am on without giving the answer.'); return null;
+    case 'complete': item.pct = 100; item.done = true; item.waits = null; renderAll(); return 'Completed.';
+    case 'run': if (item.type === 'routine') { item.when = '2026-09-20T09:41'; item.late = false; item.waits = null; item.right = item.snip; item.kv = item.kv.map(([k, v]) => (k === 'Last run' ? [k, '09-20-2026 09:41'] : k === 'Last result' ? [k, 'ok'] : [k, v])); renderAll(); return 'Ran now; the next run keeps its time.'; }
+      if (item.cells) { const last = item.cells[item.cells.length - 1]; last.out = item.type === 'notebook' ? '[2.002, 2.031, 2.089, …] 64 values, none infinite' : '{"lr": 0.0001, "clip": 10}\n{"lr": 0.0001, "clip": 20}\n{"lr": 0.0003, "clip": 10}\n{"lr": 0.0003, "clip": 20}'; last.err = false; } item.right = 'ran 09:41'; item.status = 'idle, 09-20-2026 09:41'; renderAll(); return 'Ran every cell; the boundary sample now stops short of the circle.';
+    case 'pause': item.paused = true; item.dim = true; item.right = 'paused'; item.verbs = [['resume', 'Resume'], ['run', 'Run now']]; renderAll(); return 'Paused; the daemon skips it until it is resumed.';
+    case 'resume': item.paused = false; item.dim = false; item.right = item.snip; item.verbs = [['run', 'Run now'], ['pause', 'Pause']]; renderAll(); return 'Resumed.';
+    case 'restart': item.status = 'restarted, 09-20-2026 09:41'; renderAll(); return 'Kernel restarted; state is gone.';
+    case 'shutdown': item.status = 'no kernel'; renderAll(); return 'Kernel shut down.';
+    case 'schedule': item.right = 'every 1 d at 06:00'; item.verbs = item.verbs.map(([v, l]) => (v === 'schedule' ? ['unschedule', 'Unschedule'] : [v, l])); renderAll(); return 'Scheduled every day at 06:00.';
+    case 'unschedule': item.right = ''; item.verbs = item.verbs.map(([v, l]) => (v === 'unschedule' ? ['schedule', 'Schedule'] : [v, l])); renderAll(); return 'Unscheduled.';
+    case 'update': askAgent('update the amount to '); return null;
+    case 'due': askAgent('set the date to '); return null;
+    case 'end': item.ended = true; item.dim = true; item.waits = null; renderAll(); return 'Ended; the history stays.';
+    case 'edit': setEdit(item.id); return null;
+    case 'query': askAgent(`query ${item.title}: `); return null;
+    case 'export': toast('Export downloads from the app'); return 'Exported as CSV.';
+    case 'load': toast('Loaded into the query box in the app'); return 'Loaded.';
+    default: toast(`${label}: not wired in this preview`); return null;
+  }
+}
+// Sets an amount or a date the agent was told; the mock reads the number or the date out of the sentence.
+export function applyValue(item, text) {
+  const money = text.match(/\$?\s?(\d[\d,]*(?:\.\d{1,2})?)/), date = text.match(/(\d{2})-(\d{2})-(\d{4})/);
+  if (/date/.test(text) && date) { item.due = `${date[3]}-${date[1]}-${date[2]}`; item.late = false; renderAll(); return `Date set to ${date[0]}.`; }
+  if (money) { const v = Number(money[1].replace(/,/g, '')); item.amount = v.toLocaleString('en-US', { style: 'currency', currency: 'USD' }); (item.hist = item.hist || []).unshift(['09-20-2026', item.amount]); renderAll(); return `Amount set to ${item.amount}; the old one stays in the history.`; }
+  return null;
 }
 
 // ---- popovers: tags and confirmations --------------------------------------------------------------------------
 export function closePops() { const p = $('#tagPop'); if (p) p.remove(); }
-export function place(pop, anchor, w = 280) {
+function place(pop, anchor, w = 280) {
   if (!pop.isConnected) document.body.append(pop);
   const r = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : { left: innerWidth / 2 - w / 2, top: innerHeight / 2 - 40, bottom: innerHeight / 2 - 40 };
   const hgt = pop.offsetHeight;
@@ -376,10 +340,7 @@ export function openTagPop(anchor, items) {
   };
   const apply = (t, on) => {
     if (isFixed(t)) { toast('A facet’s name is not a tag you can give'); return; }
-    for (const i of items) {
-      if (on) { i.tags = i.tags.filter((x) => x !== t); post('/api/tags/remove', { module: i.module, id: i.id, tag: t }).catch((e) => toast(e.message)); }
-      else if (!tagsOf(i).includes(t)) { i.tags.push(t); post('/api/tags/add', { module: i.module, id: i.id, tags: [t] }).catch((e) => toast(e.message)); }
-    }
+    for (const i of items) { if (on) i.tags = i.tags.filter((x) => x !== t); else if (!tagsOf(i).includes(t)) i.tags.push(t); }
     renderAll(); draw();
   };
   inp.addEventListener('input', draw);
@@ -403,7 +364,6 @@ export function renderTop() {
   $('#themeBtn').replaceChildren(icon(dark() ? I.sun : I.moon));
   $('#themeBtn').title = dark() ? 'Rainbow' : 'Dark';
   $('#chatBtn').setAttribute('aria-pressed', S.chat === 'open');
-  const pt = $('#pulseText'); if (pt) pt.textContent = S.synced ? `synced ${String(S.synced.getHours()).padStart(2, '0')}:${String(S.synced.getMinutes()).padStart(2, '0')}` : 'starting';
   $('#navBtn').setAttribute('aria-pressed', S.view === 'brain');
   $('#app').dataset.chat = S.chat;
   const cur = currentItem();
@@ -478,18 +438,13 @@ function editorEl(i) {
   ta.addEventListener('blur', () => { if (S.edit === i.id) commitEdit(i, ta.value); });
   return h('div', { class: 'editor' }, ta);
 }
-// A table's columns, each with its type and what it promises.
-const colsEl = (i) => h('div', { class: 'cols' }, ...(i.cols || []).flatMap(([n, t, c]) => [h('span', null, n), h('span', { class: 'ty' }, t), h('span', null, c)]));
-// What slides out under the open row: its tags, its summary (an agent will write these), a table's schema or a saved
-// query's SQL, and the items it is linked to.
+// What slides out under the open row: its tags, its summary (an agent will write these), and the items it is linked to.
 let revealed = null;
 function revealEl(i) {
   const first = revealed !== String(i.id);
   const body = [];
-  if (tagsOf(i).length) body.push(h('div', { class: 'tagline' }, ...tagList(i, { max: 5, lg: true })));
+  if (tagsOf(i).length) body.push(h('div', { class: 'tagline' }, ...tagList(i, { max: 12, lg: true })));
   if (i.summary) body.push(h('div', { class: 'gist' }, i.summary));
-  if (i.type === 'table') body.push(colsEl(i));
-  else if (i.type === 'query' && i.sql) body.push(h('pre', { class: 'sqltext' }, i.sql));
   body.push(relatedEl(i));
   const wrap = h('div', { class: `reveal${first ? '' : ' open'}` }, h('div', { class: 'summary', 'data-id': i.id }, ...body));
   if (first) { revealed = String(i.id); requestAnimationFrame(() => requestAnimationFrame(() => wrap.classList.add('open'))); }
@@ -533,7 +488,8 @@ export function contentEl(i) {
       for (const c of i.cells || []) body.push(h('div', { class: 'cell' }, h('span', { class: `g${c.run ? ' run' : ''}` }, c.g), h('div', null, h('pre', { html: c.code }), c.out ? h('div', { class: `out${c.err ? ' err' : ''}` }, c.out) : null)));
       break;
     case 'conversation': body.push(h('div', { class: 'excerpt' }, ...(i.turns || []).map(([role, text]) => h('div', { class: `turn ${role}` }, role === 'model' ? h('p', null, text) : text)))); break;
-    case 'table': case 'query': body.push(call(sql, 'editor', i)); break;   // the schema is in the summary under the row; the page is the editor
+    case 'table': body.push(h('div', { class: 'cols' }, ...(i.cols || []).flatMap(([n, t, c]) => [h('span', null, n), h('span', { class: 'ty' }, t), h('span', null, c)]))); break;
+    case 'query': body.push(h('div', { class: 'cell' }, h('span', { class: 'g' }, ''), h('pre', null, i.sql || ''))); break;
     default: if (!editing) body.push(i.body ? proseEl(i.body) : h('div', { class: 'prose' }, h('p', null, i.title)));
   }
   return body;

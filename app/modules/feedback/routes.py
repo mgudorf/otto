@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 
 from app.config import ROOT
 from app.modules.feedback.queue import open_counts
-from app.store import Store, now_iso
+from app.store import Store, now_iso, word_tags
 
 router = APIRouter(prefix="/api/feedback")
 
@@ -36,7 +36,7 @@ def _prompt(row: dict) -> str:
         "", "The owner's words:", "```", row["text"], "```", "",
         "File this note. Reply with only a JSON object: "
         '{"kind": "bug" | "defect" | "gap" | "roadmap", "title": "<at most 10 words>", '
-        '"summary": "<one sentence, at most 140 characters>", "tags": [<2 to 5 lowercase identifiers>], '
+        '"summary": "<one sentence, at most 140 characters>", "tags": [<one word each, letters and digits only, as many as fit>], '
         '"ref": "<existing docs/ path this belongs in, or null>", "draft": "<markdown body for that file>"}',
     ]
     return "\n".join(lines)
@@ -67,7 +67,7 @@ def _filer(st, fid: int):
             title, summary, draft = (str(data.get(k) or "").strip() for k in ("title", "summary", "draft"))
             if not (title and summary and draft):
                 raise ValueError("title, summary and draft are required")
-            tags = [str(t)[:40] for t in data.get("tags") or []][:8]
+            tags = word_tags(data.get("tags") or [])[0][:8]
             ref = str(data["ref"]).strip() if data.get("ref") else None
         except Exception as e:
             with ctx.commit() as conn:

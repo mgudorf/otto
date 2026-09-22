@@ -3,7 +3,7 @@
 // the reply arrives over a stream. Ending a conversation tags it and files it under the chats facet, where it becomes a
 // row like any other.
 import { S, ITEMS, $, h, put, icon, I, toast, modOf, hue, select, renderChat, registerDrawer, parts, call, load, closePops } from './core.js';
-import { leaveComposer, openPalette } from './shell.js';
+import { leaveComposer } from './shell.js';
 import { get, post, sse, upload } from './api.js';
 import { md } from './md.js';
 import { pickOf, saveSettings } from './settings.js';
@@ -137,7 +137,6 @@ function onKey(e) {
   if (e.key === 'ArrowUp' && !e.target.value.slice(0, e.target.selectionStart).includes('\n')) { e.preventDefault(); e.target.blur(); leaveComposer(); return; }
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!e.target.value.trim()) { e.target.blur(); return; } send(); }
   if (e.key === 'Escape') e.target.blur();
-  if (e.key === '/' && !e.target.value) { e.preventDefault(); openPalette('/'); }
 }
 // The + comes first, then the open sessions: a new chat is always the first thing in the strip.
 function tabStrip() {
@@ -178,7 +177,7 @@ function openModelPop(anchor) {
   pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8))}px`;
   pop.style.top = `${Math.max(8, r.top - pop.offsetHeight - 6)}px`;
 }
-// Text above, the bar under it: attach, skills, the drawer's model and effort, send. A file dropped or pasted attaches too.
+// Text above, the bar under it: attach, the drawer's model and effort, send. A file dropped or pasted attaches too.
 function composer() {
   const r = refOf(), files = attached[sid] || [];
   const dropped = (e) => [...((e.dataTransfer || e.clipboardData || {}).files || [])];
@@ -190,7 +189,6 @@ function composer() {
   h('textarea', { id: 'composer', 'aria-label': 'Message', onkeydown: onKey, onpaste: (e) => { const fs = dropped(e); if (fs.length) { e.preventDefault(); attach(fs); } } }),
   h('div', { class: 'bar' },
     h('button', { class: 'tool', title: 'Attach files', onclick: pickFiles }, icon(I.plus)),
-    h('button', { class: 'tool', title: 'Skills', onclick: () => openPalette('/') }, icon(I.slash)),
     h('button', { class: 'chip', title: 'Model and effort', 'data-tagbtn': '1', onclick: (e) => openModelPop(e.currentTarget) }, modelLabel()),
     h('span', { class: 'spacer' }),
     h('button', { class: 'send', title: 'Send', onclick: send }, icon(I.up))));

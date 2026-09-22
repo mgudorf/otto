@@ -128,12 +128,11 @@ def test_graph_routes(config):
         async with client_for(app) as c:
             for tags in (["Python", "sqlite"], ["python"]):
                 assert (await c.post("/api/second_brain/action/capture", json={"kind": "note", "text": "x", "tags": tags})).status_code == 200
-            assert (await c.get("/api/graph/left")).json()["groups"][0]["count"] == 0
+            assert (await c.get("/api/graph/graph")).json()["totals"]["nodes"] == 0
             job = app.state.runner.submit("graph.rebuild", "graph", "graph", "scheduled", tasks.rebuild)
             assert await job.done == "2 nodes, 1 edges"
-            left = (await c.get("/api/graph/left")).json()
-            assert [r["id"] for r in left["groups"][0]["rows"]] == ["python", "sqlite"] and left["groups"][0]["rows"][0]["count"] == 2
-            assert left["more"] is False and "leading" not in left["groups"][0]["rows"][0]
+            nodes = (await c.get("/api/graph/graph")).json()["nodes"]
+            assert [n["tag"] for n in nodes] == ["python", "sqlite"] and nodes[0]["count"] == 2
             g = (await c.get("/api/graph/graph?query=sql")).json()
             assert [n["tag"] for n in g["nodes"]] == ["sqlite"] and g["edges"] == [] and g["totals"] == {"nodes": 2, "edges": 1}
             assert g["built_at"] == app.state.store.cursor("graph.rebuild")
@@ -198,7 +197,7 @@ def test_system_lists_its_routines(config):
 
 
 def test_otto_is_every_agent_at_once(config):
-    """One agent behind the drawer: its tools, skills and prompt are the union of the enabled modules', and a module
+    """One agent behind the drawer: its tools and prompt are the union of the enabled modules', and a module
     switched off takes its own out of the union."""
 
     async def main():
@@ -214,7 +213,6 @@ def test_otto_is_every_agent_at_once(config):
 
             s = (await c.get("/api/session/otto")).json()
             assert s["sessions"] == [] and s["agent"]["cmd"] == "claude · otto"
-            assert s["agent"]["skills"] == list(otto.manifest.agent.skills) and "link" in s["agent"]["skills"]
             assert s["context_label"] == ", ".join(m.manifest.title for m in agents)   # what is open, not a count
 
             assert (await c.put("/api/settings", json={"modules.newsfeed.enabled": False})).status_code == 200

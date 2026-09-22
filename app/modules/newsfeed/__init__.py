@@ -12,7 +12,6 @@ MANIFEST = Manifest(
     schedules=(Schedule(task="run", every="24h", resource="newsfeed", llm=True),),
     agent=Agent(
         placeholder="Ask the feed…",
-        skills=("recall", "searches", "add", "tag"),
         read_tools=("newsfeed_search", "newsfeed_get", "newsfeed_searches"),
         write_tools=("newsfeed_search_add", "newsfeed_tag"),
     ),

@@ -13,7 +13,6 @@ MANIFEST = Manifest(
     ),
     agent=Agent(
         placeholder="Ask about the inbox…",
-        skills=("triage", "summarize", "flag"),
         read_tools=("email_search", "email_get", "email_triage"),
         write_tools=("email_flag",),
     ),

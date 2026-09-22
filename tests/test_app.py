@@ -10,14 +10,14 @@ from app.config import ROOT
 from app.daemon import build
 from app.modules import Manifest, Module
 from app.store import now_iso
-from tests.conftest import fake_spawn, run
+from tests.conftest import FakeProc, fake_spawn, run
 
 INIT = json.dumps({"type": "system", "subtype": "init", "session_id": "s1", "tools": ["mcp__otto__second_brain_search"]})
 TOOL = json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "mcp__otto__second_brain_search", "input": {"query": "x"}}]}})
 TOOL_OK = json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "[]"}]}})
 TEXT = json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Nothing about that yet."}]}})
 RESULT = json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "Nothing about that yet.", "session_id": "s1"})
-CLOSE = json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": '{"title": "Search for x", "tags": ["second_brain", "search"]}', "session_id": "s2"})
+CLOSE = json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": '{"title": "Search for x", "tags": ["brain", "search", "two words"]}', "session_id": "s2"})
 
 
 def client_for(app):
@@ -81,6 +81,7 @@ def test_second_brain_end_to_end(config):
             assert [r["id"] for r in (await c.get("/api/feed?mode=recent&q=SQLite")).json()["items"]] == [mid]
             assert [r["id"] for r in (await c.get("/api/feed?mode=recent&tags=reading")).json()["items"]] == [mid]
             assert (await c.get("/api/feed?mode=sideways")).status_code == 400
+            assert (await c.get("/api/feed?mode=recent")).json()["rev"] == app.state.rev   # a refresh learns of a restart from this
             item = (await c.get(f"/api/second_brain/item/{mid}")).json()
             assert item["tags"] == ["note", "reading"] and item["verbs"] == [["forget", "Forget"]]
             assert (await c.post("/api/second_brain/action/tag", json={"id": mid, "tags": ["books"]})).json()["tags"] == ["books", "reading"]
@@ -162,7 +163,7 @@ def test_session_turn_and_clear(config):
             assert r.json() == {"cleared": True}
             await settle(app)
             row = app.state.store.one("SELECT * FROM app_sessions WHERE id = ?", (sid,))
-            assert row["closed_at"] and row["title"] == "Search for x" and json.loads(row["tags"]) == ["second_brain", "search"]
+            assert row["closed_at"] and row["title"] == "Search for x" and json.loads(row["tags"]) == ["brain", "search"]
             assert calls[3]["args"][calls[3]["args"].index("--max-turns") + 1] == "2"
             assert calls[3]["args"][calls[3]["args"].index("--model") + 1] == "haiku" and "--effort" not in calls[3]["args"]   # the tagger's job, not the turn's
             assert [t["id"] for t in (await c.get("/api/session/second_brain")).json()["sessions"]] == [sid2]
@@ -175,7 +176,7 @@ def test_session_turn_and_clear(config):
 
 
 def test_otto_is_the_one_agent(config):
-    """One drawer, not a pane per module: its tools, skills and prompt are the union of every enabled module's, its
+    """One drawer, not a pane per module: its tools and prompt are the union of every enabled module's, its
     tabs are its own, and a module that brings no agent is still a 404."""
     calls = []
 
@@ -186,7 +187,6 @@ def test_otto_is_the_one_agent(config):
             pane = (await c.get("/api/session/otto")).json()
             assert pane["sessions"] == []
             assert {"Entry", "Email", "Database"} <= set(pane["context_label"].split(", "))
-            assert {"recall", "triage", "nl-to-sql"} <= set(pane["agent"]["skills"])
             sid = (await c.post("/api/session/otto/send", json={"text": "what is waiting?"})).json()["session"]
             await settle(app)
             args = calls[0]["args"]
@@ -250,7 +250,7 @@ def test_session_rename_outranks_the_tagger(config):
             await c.post("/api/session/second_brain/send", json={"text": "/clear", "id": sid})
             await settle(app)
             row = app.state.store.one("SELECT * FROM app_sessions WHERE id = ?", (sid,))
-            assert row["title"] == "the x thread" and json.loads(row["tags"]) == ["second_brain", "search"]
+            assert row["title"] == "the x thread" and json.loads(row["tags"]) == ["brain", "search"]
         await app.state.runner.drain(1)
         app.state.store.close()
 
@@ -273,7 +273,7 @@ def test_session_reopen_keeps_its_tags(config):
             r = await c.post(f"/api/session/second_brain/{sid}/reopen")
             assert r.status_code == 200, r.text
             back = r.json()
-            assert back["session"]["closed_at"] is None and json.loads(back["session"]["tags"]) == ["second_brain", "search"]
+            assert back["session"]["closed_at"] is None and json.loads(back["session"]["tags"]) == ["brain", "search"]
             assert [t["role"] for t in back["turns"]] == ["user", "model"] and back["busy"] is False
             assert [(t["id"], t["label"]) for t in (await c.get("/api/session/second_brain")).json()["sessions"]] == [(sid, "Search for x")]
             assert (await c.post("/api/session/second_brain/nope/reopen")).status_code == 404
@@ -417,7 +417,7 @@ def test_system_lists_its_routines(config):
 
 FILED = json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": "s3", "result": json.dumps({
     "kind": "bug", "title": "Forget leaves the inspector open", "summary": "Forgetting an item should clear the inspector.",
-    "tags": ["second_brain", "bug", "inspector"], "ref": None, "draft": "# Forget leaves the inspector open\n\n- Where: second_brain item\n",
+    "tags": ["entry", "bug", "inspector", "two words"], "ref": None, "draft": "# Forget leaves the inspector open\n\n- Where: second_brain item\n",
 })})
 NOT_JSON = json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": "s4", "result": "I could not classify this."})
 
@@ -450,7 +450,7 @@ def test_feedback_end_to_end(config):
             recent = (await c.get("/api/feedback/recent?page=second_brain")).json()
             assert recent["page"] == "second_brain" and recent["rows"][0]["status"] == "filed" and recent["rows"][0]["kind"] == "bug"
             row = (await c.get("/api/feedback/list")).json()[0]
-            assert row["id"] == fid and row["text"] == "forget should also clear the inspector" and row["item_id"] == "7" and row["tags"] == ["second_brain", "bug", "inspector"]
+            assert row["id"] == fid and row["text"] == "forget should also clear the inspector" and row["item_id"] == "7" and row["tags"] == ["entry", "bug", "inspector"]
             assert row["draft"].startswith("# Forget") and row["ref"] is None and row["job_id"]
             args = calls[0]["args"]
             assert "otto-read" in args[args.index("--mcp-config") + 1] and "--no-session-persistence" in args
@@ -488,6 +488,39 @@ def test_feedback_end_to_end(config):
         app = build(config)
         row = app.state.store.one("SELECT status, error FROM feedback_items WHERE text = 'orphan'")
         assert row == {"status": "failed", "error": "daemon restarted"}
+        app.state.store.close()
+
+    run(main())
+
+
+def test_reopen_inside_the_tagging_window_cancels_the_close(config):
+    """A tab closed and reopened before the tagger has written stays open: it is tagged, never closed."""
+    import asyncio
+
+    gate = asyncio.Event()
+
+    async def held(args, cwd, env):
+        await gate.wait()
+        return FakeProc([CLOSE])
+
+    async def main():
+        app = build(config, spawn_fn=fake_spawn([INIT, TEXT, RESULT]))
+        await app.state.runner.start()
+        async with client_for(app) as c:
+            sid = (await c.post("/api/session/second_brain/send", json={"text": "anything about x?"})).json()["session"]
+            await settle(app)
+            app.state.claude.spawn = held
+            assert (await c.post("/api/session/second_brain/send", json={"text": "/clear", "id": sid})).json() == {"cleared": True}
+            r = await c.post(f"/api/session/second_brain/{sid}/reopen")
+            assert r.status_code == 200 and r.json()["session"]["closed_at"] is None, r.text
+            gate.set()
+            await settle(app)
+            row = app.state.store.one("SELECT * FROM app_sessions WHERE id = ?", (sid,))
+            assert row["closed_at"] is None and row["title"] == "Search for x" and json.loads(row["tags"]) == ["brain", "search"]
+            assert [t["id"] for t in (await c.get("/api/session/second_brain")).json()["sessions"]] == [sid]
+            verbs = [e["verb"] for e in (await c.get("/api/events?module=second_brain")).json()["events"]]
+            assert "tagged" in verbs and "closed" not in verbs
+        await app.state.runner.drain(1)
         app.state.store.close()
 
     run(main())

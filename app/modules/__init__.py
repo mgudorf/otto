@@ -72,7 +72,6 @@ class Schedule:
 @dataclass(frozen=True)
 class Agent:
     placeholder: str
-    skills: tuple[str, ...] = ()       # named in the palette, which sends them to the drawer
     read_tools: tuple[str, ...] = ()   # MCP tool names on the read server
     write_tools: tuple[str, ...] = ()  # MCP tool names on the full server only
     builtins: tuple[str, ...] = ()     # CLI built-ins beyond the read set (Write, Edit) on session turns; tasks never get them
@@ -108,7 +107,7 @@ class Module:
     context: Callable[[Any, Any], str] | None   # (store, registry) -> text for the agent's system prompt
     register_tools: Callable[..., None] | None
     prompt: str | None
-    rows: Callable[[Any, int], list[dict]] | None = None   # (store, limit) -> ROWs newest first; /api/items and the feed
+    rows: Callable[[Any, int], list[dict]] | None = None   # (store, limit) -> ROWs newest first; the feed's Recent
     setup: Callable[[Any], None] | None = None          # (config) at build, for modules holding process resources
     shutdown: Callable[[], Awaitable[None]] | None = None  # awaited when the daemon stops
 

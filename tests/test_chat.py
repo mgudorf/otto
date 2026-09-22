@@ -53,7 +53,7 @@ def test_chat_conversation_lifecycle(config):
             shell = (await c.get("/api/shell")).json()
             facets = {m["name"]: m["facet"] for m in shell["modules"]}
             chat = next(m for m in shell["modules"] if m["name"] == "chat")
-            assert chat["facet"] == "chats" and chat["agent"]["skills"] == ["web", "files"]
+            assert chat["facet"] == "chats"
             assert facets["home"] is None and facets["graph"] is None   # a backend module carries no facet and lists no rows
             assert (await c.post("/api/chat/send", json={"text": "  "})).status_code == 400
             r = await c.post("/api/chat/send", json={"text": "save a note about x"})
@@ -90,22 +90,20 @@ def test_chat_conversation_lifecycle(config):
             await c.post("/api/chat/send", json={"id": sid, "text": "and add a heading"})
             await settle(app)
             assert "--resume" in calls[2]["args"] and st.store.scalar("SELECT COUNT(*) FROM app_jobs WHERE task = 'chat.tag'") == 1
-            # every conversation has its own resource; the list orders by last activity and searches the turns
+            # every conversation has its own resource; the rows order by last activity
             sid2 = (await c.post("/api/chat/send", json={"text": "something else"})).json()["id"]
             await settle(app)
             resources = {j["resource"] for j in st.store.query("SELECT resource FROM app_jobs WHERE task = 'chat.turn'")}
             assert resources == {f"session:{sid}", f"session:{sid2}"}
-            left = (await c.get("/api/chat/left")).json()
-            assert left["more"] is False and [r["title"] for r in left["groups"][0]["rows"]] == ["something else", "Notes about x"]
-            tagged = left["groups"][0]["rows"][1]
+            listed = rows_hook(st.store, 10)
+            assert [r["title"] for r in listed] == ["something else", "Notes about x"]
+            tagged = listed[1]
             assert tagged == {
                 "id": sid, "module": "chat", "title": "Notes about x", "when": tagged["when"],
                 "fixed": ["chats"], "tags": ["notes", "chat"], "type": "conversation",
                 "verbs": [["reopen", "Reopen"], ["delete", "Delete"]],
             }
-            assert [r["id"] for r in rows_hook(st.store, 10)] == [sid2, sid]   # the ROWs /api/items and the feed read
-            assert [r["id"] for r in (await c.get("/api/chat/left?query=heading")).json()["groups"][0]["rows"]] == [sid]
-            assert (await c.get("/api/chat/left?query=zzz")).json()["groups"] == []
+            assert [r["id"] for r in listed] == [sid2, sid]   # the ROWs the feed reads
             n = next(n for n in (await c.get("/api/home/numbers")).json() if n["module"] == "chat")
             assert n["value"] == 2 and n["label"] == "conversations"
             # delete is the only removal: row, turns and folder, and the browser asks for it through the one front door
@@ -115,7 +113,7 @@ def test_chat_conversation_lifecycle(config):
             assert r.status_code == 200 and r.json() == {"ok": True, "said": "deleted something else", "removes": True}, r.text
             assert st.store.one("SELECT id FROM app_sessions WHERE id = ?", (sid2,)) is None
             assert st.store.scalar("SELECT COUNT(*) FROM app_session_turns WHERE session_id = ?", (sid2,)) == 0
-            assert not (config.data.workspace / "chat" / sid2).exists() and len((await c.get("/api/chat/left")).json()["groups"][0]["rows"]) == 1
+            assert not (config.data.workspace / "chat" / sid2).exists() and len(rows_hook(st.store, 10)) == 1
             assert (await c.get(f"/api/chat/item/{sid2}")).status_code == 404
             # a scheduled run through the same seam never gets the write built-ins
             st.claude.config = dataclasses.replace(config, nightly=dataclasses.replace(config.nightly, window="00:00-23:59"))
@@ -220,7 +218,6 @@ def test_otto_is_every_agent_at_once(config):
         async with client_for(app) as c:
             pane = (await c.get("/api/session/otto")).json()
             assert pane["sessions"] == [] and pane["agent"]["cmd"] == "claude · otto"
-            assert {"web", "files", "triage", "quiz"} <= set(pane["agent"]["skills"])
             assert "Email" in pane["context_label"] and "Entry" in pane["context_label"]
             r = await c.post("/api/session/otto/send", json={"text": "what waits?"})
             assert r.status_code == 200, r.text

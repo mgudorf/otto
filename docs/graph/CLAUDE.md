@@ -13,7 +13,7 @@ Graph carries no facet and has no `rows` hook: a tag is how items are found, not
 | Sources | every tag on a Second Brain item, every tag the owner wrote on any module's row in `app_tags`, and every tag on a session, open or closed (a Chat conversation is tagged after its first turn; its time is `closed_at` or else `opened_at`), lowercased and stripped, so `GRADient` and `gradient` are one node. The rebuild knows which module each tag came from and `graph_nodes` does not keep it. Graph never writes those tables |
 | Tables | `graph_nodes(tag, count, items, sessions, last_seen)` and `graph_edges(a, b, kind cooccur\|link, weight, note)`, both replaced whole on each rebuild; the curation overlays `graph_merges`, `graph_pruned` and `graph_links` survive it. A curated link whose end is pruned is dropped at rebuild and a merged end is remapped; merges stay one level deep and a cycle is refused |
 | Setup | `setup(config)` renames `graph_nodes.memories`, the column a database from before 2026-09-17 has, to `items`; the next rebuild fills it |
-| Routes | `left` (tags by count with a `count` field, search, page), `graph` (every node the query matches with the owner's tags on it, the edges among them, build time and whole-table totals), `item/{tag}` (one tag as a ROW with `fixed` empty). Every moment a route returns is the owner's wall clock; the tables hold UTC. No `action`: nothing here is a verb |
+| Routes | `graph` (every node the query matches with the owner's tags on it, the edges among them, build time and whole-table totals), `item/{tag}` (one tag as a ROW with `fixed` empty). Every moment a route returns is the owner's wall clock; the tables hold UTC. No `action`: nothing here is a verb |
 | Hooks | `numbers` (nodes), `item`, `context` (totals, the ten largest tags, merges, prunes, curated link count). No `rows` and no `queue` |
 | Tools | read: `graph_nodes`, `graph_neighbors`, `graph_items` (a tag's Second Brain items and sessions, aliases included); write: `graph_link` (both ends must be nodes), `graph_unlink` (curated links only), `graph_merge`, `graph_prune`, `graph_restore`, each in one transaction with the rebuild and each writing an event |
 | Schedule | `graph.rebuild` every 15m, plain SQL and no LLM, resource `graph`; the cursor `graph.rebuild` is served as `built_at`. It runs `build.rebuild`, which every write tool also runs inside its own transaction: tags on the same item become a `cooccur` edge weighted by shared items, a curated link an edge of weight 1 |
@@ -23,7 +23,7 @@ Graph carries no facet and has no `rows` hook: a tag is how items are found, not
 ### The brain does not read the graph
 
 - Kind: gap
-- Where: `app/static/brain.js` (the tag nodes, built from `ITEMS`), `app/modules/graph/routes.py` (`left`, `graph`, `numbers`), `app/api.py` (the `/api/brain` route that was not built)
+- Where: `app/static/brain.js` (the tag nodes, built from `ITEMS`), `app/modules/graph/routes.py` (`graph`, `numbers`), `app/api.py` (the `/api/brain` route that was not built)
 - Found: 09-21-2026, the one-page change
 - Status: open
 

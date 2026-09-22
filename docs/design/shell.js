@@ -1,9 +1,7 @@
-// Shell: the zones and the keyboard, the command palette, the key list, the program menu, history, the grips, and boot.
+// Shell: the zones and the keyboard, the command palette, the key list, the layout setting, history, the grips, and boot.
 import { S, ITEMS, ORDER, $, h, put, icon, I, toast, modOf, hue, allTags, itemText, visible, listRows, select, currentItem, itemOf, renderAll, renderFeed, renderTop, renderPanel,
   addToken, clearTokens, setMode, remember, restore, doVerb, DESTRUCTIVE, flipPick, pickedItems, openTagPop, closePops, setEdit, bindOmni, setLook, dark, tokenText,
-  askAgent, openDrawer, toggleChat, toggleView, togglePoint, applyLayout, saveLayout, call, parts, registerShell, isFixed, loadShell, load } from './core.js';
-import { post, inflight } from './api.js';
-import { openSettings, closeSettings } from './settings.js';
+  askAgent, openDrawer, toggleChat, toggleView, togglePoint, applyLayout, saveLayout, call, parts, registerShell, isFixed } from './core.js';
 
 // ---- sections: the brain, the feed, the page, the drawer; h l step between them, j k move inside one, ↵ acts on the place ------
 const ZONES = () => (S.view === 'inspect' ? (currentItem() ? ['feed', 'page', 'drawer'] : ['feed', 'drawer']) : ['graph', 'feed', 'drawer']);
@@ -52,7 +50,6 @@ const deleteVerb = (i) => (i.verbs || []).map(([v]) => v).find((v) => ['delete',
 function bindKeys() {
   document.addEventListener('keydown', (e) => {
     const inField = ['INPUT', 'TEXTAREA'].includes(e.target.tagName);
-    if (!$('#setScrim').hidden) { if (e.key === 'Escape') closeSettings(); return; }   // Settings holds the keyboard while it is open
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') { e.preventDefault(); toggleChat(); if (S.chat === 'open') { askAgent(); atComposer(); } return; }
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'Space') { e.preventDefault(); clearTokens(); return; }
@@ -118,24 +115,27 @@ function bindKeys() {
   });
 }
 
-// ---- the palette: the open item's verbs first, then the frame's actions, the facets, tags and items ---------------------------
+// ---- the palette: the open item's verbs first, then the frame's actions, one agent's skills, the facets, tags and items ---------
 let palCursor = 0;
+const SKILLS = [['quiz', 'education'], ['explain', 'education'], ['triage', 'email'], ['recall', 'second_brain'], ['suggest', 'second_brain'], ['totals', 'finance'], ['run', 'science'], ['schema', 'database'], ['searches', 'newsfeed'], ['neighbors', 'otto']];
 function paletteRows(q) {
   q = q.toLowerCase();
   const cur = currentItem();
   const verbs = cur ? (cur.verbs || []).filter(([, l]) => !q || l.toLowerCase().includes(q)).map(([v, l]) => ({ group: 'Actions', label: l, svg: modOf(cur.module).icon, c: hue(cur.module), danger: DESTRUCTIVE.has(v), run: () => doVerb(cur, v) })) : [];
+  const skills = SKILLS.filter(([s]) => !q || `/${s}`.includes(q)).map(([s, m]) => ({ group: 'Skills', label: `/${s}`, c: hue(m), svg: I.chat, run: () => askAgent(`/${s} `) }));
+  if (q.startsWith('/')) return skills;
   const pins = S.tokens.filter((t) => t.kind === 'tag' && !isFixed(t.value)).map((t) => [S.pins.includes(t.value) ? `Unpin #${t.value} from the brain` : `Pin #${t.value} to the brain`, () => call(parts().brain, 'togglePin', t.value)]);
   const acts = [
     ...pins, ['Point at anything', () => togglePoint(true)], ['Ask about it', askAgent],
     ['New chat', () => { openDrawer(); call(parts().drawer, 'newChat'); }], ['Close the chat', () => call(parts().drawer, 'closeChat')],
     ['Priority', () => setMode('Priority')], ['Recent', () => setMode('Recent')],
-    ['Settings', openSettings], ['Brain or inspect', () => toggleView()], ['Toggle agent drawer', toggleChat], ['Toggle theme', () => setLook(dark() ? 'rainbow' : 'dark')], ['Keyboard shortcuts', openHelp],
-  ].filter(([l]) => !q || l.toLowerCase().includes(q)).map(([label, run]) => ({ group: 'Actions', label, svg: label === 'Settings' ? I.sliders : I.cmd, run }));
-  const gotos = ORDER.filter((m) => m !== 'otto').map(modOf).filter((m) => !q || m.title.toLowerCase().includes(q))
-    .map((m) => ({ group: 'Go to', label: m.title, c: m.hue, svg: m.icon, sub: `@${m.title.toLowerCase()}`, run: () => addToken('mod', m.id) }));
+    ['Settings', openLayoutPop], ['Brain or inspect', () => toggleView()], ['Toggle agent drawer', toggleChat], ['Toggle theme', () => setLook(dark() ? 'rainbow' : 'dark')], ['Keyboard shortcuts', openHelp],
+  ].filter(([l]) => !q || l.toLowerCase().includes(q)).map(([label, run]) => ({ group: 'Actions', label, svg: label === 'Settings' ? I.layout : I.cmd, run }));
+  const gotos = [...ORDER.filter((m) => m !== 'otto').map(modOf), modOf('activity'), modOf('settings')].filter((m) => !q || m.title.toLowerCase().includes(q))
+    .map((m) => ({ group: 'Go to', label: m.title, c: m.hue, svg: m.icon, sub: ORDER.includes(m.id) ? `@${m.title.toLowerCase()}` : '', run: () => (ORDER.includes(m.id) ? addToken('mod', m.id) : toast(`${m.title} is unchanged and not in this preview`)) }));
   const tags = allTags().filter((t) => !q || t.tag.includes(q.replace('#', ''))).slice(0, 6).map((t) => ({ group: '', label: `#${t.tag}`, svg: I.tag, run: () => addToken('tag', t.tag) }));
   const items = q.length > 1 ? ITEMS.filter((i) => itemText(i).includes(q)).slice(0, 8).map((i) => ({ group: '', label: i.title, c: hue(i.module), svg: modOf(i.module).icon, run: () => { if (S.mode === 'Priority' && !i.waits) setMode('Recent'); select(i.id); } })) : [];
-  return [...verbs, ...acts.slice(0, q ? 8 : 4), ...gotos, ...tags, ...items];
+  return [...verbs, ...acts.slice(0, q ? 8 : 4), ...skills.slice(0, q ? 8 : 3), ...gotos, ...tags, ...items];
 }
 export function openPalette(q) { const sc = $('#paletteScrim'); sc.hidden = false; palCursor = 0; const inp = $('#palInput'); inp.value = q || ''; inp.focus(); renderPalette(); }
 function closePalette() { $('#paletteScrim').hidden = true; }
@@ -160,11 +160,27 @@ const KEYS = [
   ['Display Mode Toggle', '['], ['Agent Panel Toggle', ']'], ['Command Palette', '/'], ['Point Mode', 'o'],
   ['Search', 'Ctrl+Space'], ['Clear Search', 'Ctrl+Shift+Space'], ['Next Suggestion', '↓'], ['Previous Suggestion', '↑'], ['Pick Suggestion', '↵'],
   ['New Session', 'c'], ['Reopen Session', 'C'], ['Select Session', '↵'], ['Rename Session', 'F2'], ['Close Session', 'Del'],
-  ['Send', '↵'], ['New Line', 'Shift+↵'], ['Run Query', 'Ctrl+↵'], ['Back', 'Alt+←'], ['Forward', 'Alt+→'], ['Shortcuts', '?'],
+  ['Send', '↵'], ['New Line', 'Shift+↵'], ['Back', 'Alt+←'], ['Forward', 'Alt+→'], ['Shortcuts', '?'],
 ];
 export function openHelp() {
   put($('#helpBox'), h('h3', null, 'Keyboard, everywhere'), h('div', { class: 'grid' }, ...KEYS.map(([l, k]) => h('div', null, l, h('span', null, h('kbd', null, k))))));
   $('#helpScrim').hidden = false;
+}
+
+// ---- settings: the shares Brain mode and Inspect mode give each part, and the brain's turn; the app's Settings page will hold these
+function openLayoutPop() {
+  closePops();
+  const L = S.layout;
+  const field = (label, key, min, max) => {
+    const inp = h('input', { type: 'number', min: String(min), max: String(max), value: String(L[key]), 'aria-label': label, onkeydown: (e) => e.stopPropagation(), oninput: () => { const v = Number(inp.value); if (v >= min && v <= max) { L[key] = v; applyLayout(); saveLayout(); } } });
+    return h('div', { class: 'frow' }, h('span', null, label), inp);
+  };
+  const pop = h('div', { class: 'pop layout', id: 'tagPop' },
+    h('div', { class: 'ph' }, 'Layout'), field('Cards', 'feed', 15, 60), field('Drawer', 'drawer', 10, 40),
+    h('div', { class: 'ph' }, 'Brain'), field('Minutes per turn', 'turn', 0, 600));
+  document.body.append(pop);
+  const r = $('#palBtn').getBoundingClientRect(); pop.style.left = `${Math.max(8, Math.min(r.left - 240, innerWidth - 310))}px`; pop.style.top = `${r.bottom + 6}px`;
+  $('input', pop).focus();
 }
 
 // ---- the program menu, under the name in the header: the paths to Settings and the app's own chores ---------------------------
@@ -173,15 +189,15 @@ function openAppMenu() {
   const brand = $('#brand');
   const row = (label, svg, run) => h('div', { class: 'pi', onclick: () => { closePops(); run(); } }, icon(svg), h('span', null, label));
   const pop = h('div', { class: 'pop menu', id: 'tagPop', role: 'menu' },
-    row('Settings', I.sliders, openSettings),
-    row('Activity', modOf('system').icon, () => addToken('tag', 'routine')),
+    row('Settings', modOf('settings').icon, openLayoutPop),
+    row('Activity', modOf('activity').icon, () => toast('Activity is unchanged and not in this preview')),
     h('div', { class: 'rule' }),
-    row('Back up now', I.check, () => post('/api/data/backup').then((r) => toast(`Backed up, ${Math.round(r.size_bytes / 1e6)} MB`)).catch((e) => toast(e.message))),
-    row('Export', I.up, () => post('/api/data/export').then((r) => toast(`Exported to ${r.path}`)).catch((e) => toast(e.message))),
+    row('Back up now', I.check, () => toast('Backed up to data/backups (in the app)')),
+    row('Export', I.up, () => toast('Export writes to data/exports (in the app)')),
     h('div', { class: 'rule' }),
     row('Keyboard shortcuts', I.cmd, openHelp),
     row(dark() ? 'Rainbow' : 'Dark', dark() ? I.sun : I.moon, () => setLook(dark() ? 'rainbow' : 'dark')),
-    row('About Otto', I.target, () => toast(`Otto, one page. Revision ${(S.shell || {}).rev || '?'}.`)));
+    row('About Otto', I.target, () => toast('Otto, one page. A preview of the overhaul, 09-20-2026.')));
   document.body.append(pop);
   const r = brand.getBoundingClientRect(); pop.style.left = `${Math.max(8, r.left)}px`; pop.style.top = `${r.bottom + 6}px`;
   brand.setAttribute('aria-expanded', 'true');
@@ -208,13 +224,12 @@ function pageDrag(e) { drag(e, (ev) => { S.layout.feed = Math.round(Math.max(15,
 registerShell({ chatDrag, navDrag, pageDrag, paintZones });
 
 // ---- boot ---------------------------------------------------------------------------------------------------------------
-// Nothing is drawn until the daemon has said what the facets are: the feed groups by them and the brain is built on them.
-export async function boot() {
+export function boot() {
   try {
-    if (localStorage.getItem('otto-look') === 'dark') document.documentElement.dataset.look = 'dark';
-    const L = JSON.parse(localStorage.getItem('otto-layout') || 'null');
+    if (localStorage.getItem('otto-preview-look') === 'dark') document.documentElement.dataset.look = 'dark';
+    const L = JSON.parse(localStorage.getItem('otto-preview-layout') || 'null');
     if (L && ['feed', 'drawer'].every((k) => typeof L[k] === 'number')) S.layout = { turn: 20, feed: L.feed, drawer: L.drawer, ...(typeof L.turn === 'number' ? { turn: L.turn } : {}) };
-    const P = JSON.parse(localStorage.getItem('otto-pins') || 'null');
+    const P = JSON.parse(localStorage.getItem('otto-preview-pins') || 'null');
     if (Array.isArray(P)) S.pins = P.filter((t) => typeof t === 'string');
   } catch { /* private window */ }
   $('#themeBtn').addEventListener('click', () => setLook(dark() ? 'rainbow' : 'dark'));
@@ -239,20 +254,10 @@ export async function boot() {
   });
   window.addEventListener('popstate', (e) => restore(e.state));
   bindOmni(); bindKeys();
-  inflight.listeners.add((n) => { const d = $('#pulseDot'); if (d) d.classList.toggle('busy', n > 0); });
   // A link can open on an item or a tag: ?open=<id>, ?tag=<tag>.
   try { const q = new URLSearchParams(location.search); if (q.get('tag')) S.tokens.push({ kind: 'tag', value: q.get('tag') }); if (q.get('open')) { S.open = q.get('open'); S.view = 'inspect'; } } catch { /* no location */ }
-  try { await loadShell(); } catch (e) { toast(`The daemon did not answer: ${e.message}`); }
   renderAll();
   paintZones();
   remember(false);
   call(parts().brain, 'start', $('#brain'));
-  await load();
-  call(parts().drawer, 'start');
-  // Each wait reads the setting afresh, so a change on Settings holds from the next refresh on.
-  const every = () => Math.max(5, Number((S.shell && S.shell.settings && S.shell.settings['ui.refresh_seconds']) || 30)) * 1000;
-  const tick = () => setTimeout(() => { if (!typing()) load(); tick(); }, every());
-  tick();
 }
-// A refresh redraws everything, so it waits while something is being typed into.
-const typing = () => { const a = document.activeElement; return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA'); };
