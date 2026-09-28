@@ -62,12 +62,13 @@ def test_newsfeed_end_to_end(config):
             store.execute("INSERT INTO newsfeed_tags(kind, ref, tag) VALUES ('item', ?, 'game')", (b,))
 
             listed = app.state.registry.get("newsfeed").rows(store, 200)
-            assert [r["id"] for r in listed] == [a, b]
+            assert [r["id"] for r in listed] == [b, a]                                              # by their date, latest first: a night three days off above a find of the 8th
             rows = {r["id"]: r for r in listed}
             assert rows[a]["title"] == "Acme is hiring" and rows[a]["type"] == "article" and rows[a]["dim"] is False
             assert rows[a]["snip"] == "jobs" and len(rows[a]["when"]) == 16                      # the search it came from, and the day found in the owner's clock
             assert rows[a]["kv"] == [["Search", "jobs, every 1 d"], ["Link", "acme.example"]]
-            assert ["Happens", _md(3)] in rows[b]["kv"]
+            assert rows[b]["when"] == f"{_day(3)}T19:00" and ["Happens", _md(3)] in rows[b]["kv"]   # the row's date is the day it happens
+            assert any(k == "Found" for k, _ in rows[b]["kv"]) and all(k != "Found" for k, _ in rows[a]["kv"])   # the day found moves under the row only when another date leads
             assert rows[b]["fixed"] == ["newsfeed"] and rows[b]["tags"] == ["game"]   # newsfeed is the only fixed tag; what a run wrote narrows as a plain one
             assert (await c.post("/api/tags/add", json={"module": "newsfeed", "id": a, "tags": ["Remote"]})).json()["tags"] == ["remote"]
             assert [r["id"] for r in (await c.get("/api/feed?mode=recent&tags=remote")).json()["items"]] == [a]   # the owner's tags, through the rows hook
@@ -78,7 +79,7 @@ def test_newsfeed_end_to_end(config):
             blank = (await c.get("/api/newsfeed/blank")).json()
             assert blank["open"] == 2 and blank["searches"][0]["id"] == f"s{sid}" and blank["searches"][0]["open"] == 2 and blank["searches"][0]["tags"] == ["work"]
             waiting = (await c.get("/api/feed?mode=priority")).json()["items"]
-            assert [(r["module"], r["id"]) for r in waiting] == [("newsfeed", a), ("newsfeed", b)]   # newest found first
+            assert [(r["module"], r["id"]) for r in waiting] == [("newsfeed", b), ("newsfeed", a)]   # the nearest date leads: three days ahead before a find weeks old
             assert [r["waits"] for r in waiting] == [1, 2]                                          # the feed ranks what every queue handed it
             assert next(n for n in (await c.get("/api/home/numbers")).json() if n["module"] == "newsfeed")["value"] == 2
 
@@ -105,7 +106,8 @@ def test_newsfeed_end_to_end(config):
             assert s["type"] == "article" and s["fixed"] == ["newsfeed"] and s["snip"] == "every 1 d"
             assert ["Found", "2, 0 waiting"] in s["kv"] and s["verbs"] == [["kill", "Kill"]]
             assert (await c.post("/api/newsfeed/action/kill", json={"id": a})).status_code == 400
-            assert (await c.post("/api/newsfeed/action/kill", json={"id": f"s{sid}"})).json() == {"id": f"s{sid}"}
+            killed = (await c.post("/api/verb", json={"module": "newsfeed", "id": f"s{sid}", "verb": "kill"})).json()
+            assert killed == {"ok": True, "said": "killed jobs", "removes": True}                 # a kill drops its row, as a dismiss does
             assert (await c.get(f"/api/newsfeed/item/s{sid}")).status_code == 404
             orphan = (await c.get(f"/api/newsfeed/item/{a}")).json()
             assert orphan["snip"] == "" and all(k != "Search" for k, _ in orphan["kv"])

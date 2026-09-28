@@ -98,16 +98,19 @@ def test_registry_picks_up_queue_hook(tmp_path: Path, monkeypatch):
 
 def test_tags_are_one_system(store):
     """A tag written on any module's row reads back through one helper; Second Brain keeps its own table, so its
-    tools still see what the page wrote. Spelling is normalised on the way in."""
-    store.migrate((ROOT / "app" / "modules" / "second_brain" / "schema.sql").read_text("utf-8"))
+    tools still see what the page wrote, and a tag a Newsfeed run wrote counts in the catalog. Spelling is normalised on the way in."""
+    for name in ("second_brain", "newsfeed"):
+        store.migrate((ROOT / "app" / "modules" / name / "schema.sql").read_text("utf-8"))
     store.execute("INSERT INTO second_brain_items(id, kind, text, created_at, updated_at) VALUES (1, 'note', 'x', '2026-09-18', '2026-09-18')")
     add_tags(store, "second_brain", 1, ["Thesis", " causal "])
     add_tags(store, "email", "18f2a", ["THESIS", "tax"])
+    store.execute("INSERT INTO newsfeed_tags(kind, ref, tag) VALUES ('item', 7, 'tax')")
     assert store.query("SELECT tag FROM second_brain_tags ORDER BY tag") == [{"tag": "causal"}, {"tag": "thesis"}]
     assert tags_for(store, "second_brain", [1])[1] == ["causal", "thesis"]
     assert tags_for(store, "email", ["18f2a"])["18f2a"] == ["tax", "thesis"]
-    assert [t["tag"] for t in all_tags(store)] == ["thesis", "causal", "tax"]
+    assert [t["tag"] for t in all_tags(store)] == ["tax", "thesis", "causal"]
     assert next(t for t in all_tags(store) if t["tag"] == "thesis")["modules"] == ["email", "second_brain"]
+    assert next(t for t in all_tags(store) if t["tag"] == "tax")["modules"] == ["email", "newsfeed"]
     assert remove_tag(store, "email", "18f2a", "Tax") and not remove_tag(store, "email", "18f2a", "tax")
     assert tags_for(store, "email", ["18f2a"])["18f2a"] == ["thesis"]
 

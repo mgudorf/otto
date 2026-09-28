@@ -19,16 +19,17 @@ A ROW:
   id       unique within the module; may be prefixed ("s12", "query:12") or a path
   module   str
   title    str
-  when     ISO-8601, or None for an undated row
+  when     ISO-8601 on the owner's wall clock: the day it happens or is due when it has one, else when it arrived;
+           None for an undated row
   fixed    [facet] — exactly one element, the module's facet, never the item's kind
   tags     from app.store.tags_for: the owner's own tags, editable
   type     which renderer the page uses (note, task, email, question, notebook, ledger, table, conversation, …)
   verbs    [[verb, "Label"], …] what the module allows on this row, in the order the owner should see them
   waits    int on a queue row, lower first; None elsewhere
   …extras  per type: snip, unread, dim, done, starred, late, due, right, amount, pct, summary, related, taggable
-A kind worth filtering on is a plain tag, not `fixed`. A verb named trash, dismiss, forget, delete, archive, later or
-end removes the row: the browser asks before running it, and the row then leaves every list that presents it (queue,
-today and the agent's context) while staying in its table, so no task suggests it again.
+A kind worth filtering on is a plain tag, not `fixed`. A verb named trash, dismiss, forget, delete, archive, later,
+end or kill removes the row: the browser asks before running it, and the row then leaves every list that presents it
+(queue, today and the agent's context) while staying in its table, so no task suggests it again.
 
 There is one page and one agent. /api/feed groups every module's rows by facet, /api/brain draws their tags, and
 POST /api/verb runs a row's verb through the module's own /api/<module>/action/<verb>.

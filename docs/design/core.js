@@ -58,7 +58,7 @@ const TODAY = '2026-09-20', YESTERDAY = '2026-09-19';
 export const dayLabel = (s) => { const [y, m, d] = String(s).slice(0, 10).split('-'); return `${m}-${d}-${y}`; };
 export const relDay = (s) => { const d = String(s).slice(0, 10); return d === TODAY ? 'Today' : d === YESTERDAY ? 'Yesterday' : dayLabel(d); };
 export const clock = (s) => String(s).slice(11, 16);
-export const stamp = (s) => (String(s).slice(0, 10) === TODAY ? clock(s) : dayLabel(s));
+export const stamp = (s) => (String(s).slice(0, 10) !== TODAY ? dayLabel(s) : String(s).length > 10 ? clock(s) : 'Today');   // a day with no time of its own
 export const tagsOf = (i) => [...(i.fixed || []), ...(i.tags || [])];
 export function allTags() {
   const n = {};
@@ -243,7 +243,7 @@ function commitEdit(item, value) {
 }
 
 // ---- verbs: what a facet allows on an item; a destructive one asks first ----------------------------------------------
-export const DESTRUCTIVE = new Set(['trash', 'dismiss', 'forget', 'delete', 'restart', 'shutdown', 'end', 'unschedule']);
+export const DESTRUCTIVE = new Set(['trash', 'dismiss', 'forget', 'delete', 'restart', 'shutdown', 'end', 'unschedule', 'kill']);
 export const verbLabel = (item, verb) => ((item.verbs || []).find(([v]) => v === verb) || [verb, verb])[1];
 export function removeItem(id) {
   const i = ITEMS.findIndex((x) => String(x.id) === String(id));

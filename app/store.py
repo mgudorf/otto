@@ -139,8 +139,10 @@ class Store:
 
 # ---- tags ------------------------------------------------------------------------------------
 # One tag system across every module. Second Brain keeps second_brain_tags, because its own tools read and write it;
-# every other module's tags live in app_tags. Both are read together, so a tag means the same thing everywhere.
+# every other module's tags live in app_tags. Both are read together, and the catalog counts newsfeed_tags beside them,
+# so a tag means the same thing everywhere.
 SECOND_BRAIN = "second_brain"
+NEWSFEED = "newsfeed"
 
 
 def tag_key(tag: str) -> str:
@@ -204,14 +206,17 @@ def remove_tag(store: Store, module: str, item_id, tag: str) -> bool:
 
 
 def all_tags(store: Store) -> list[dict]:
-    """Every tag in use: {tag, count, modules}, the widest first. count is the rows carrying it, across modules."""
+    """Every tag in use: {tag, count, modules}, the widest first. count is the rows carrying it, across modules,
+    a nightly run's tags in newsfeed_tags counted with the owner's."""
     rows = store.query(
         "SELECT module, tag, COUNT(DISTINCT item_id) AS n FROM ("
         "  SELECT module, CAST(item_id AS TEXT) AS item_id, lower(trim(tag)) AS tag FROM app_tags"
         "  UNION ALL"
         "  SELECT ?, CAST(item_id AS TEXT), lower(trim(tag)) FROM second_brain_tags"
+        "  UNION ALL"
+        "  SELECT ?, CASE kind WHEN 'search' THEN 's' || ref ELSE CAST(ref AS TEXT) END, lower(trim(tag)) FROM newsfeed_tags"
         ") WHERE tag <> '' GROUP BY tag, module",
-        (SECOND_BRAIN,),
+        (SECOND_BRAIN, NEWSFEED),
     )
     out: dict[str, dict] = {}
     for r in rows:
