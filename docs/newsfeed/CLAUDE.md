@@ -27,28 +27,15 @@
 ### A standing search is nowhere in the app
 
 - Kind: gap
-- Where: `app/modules/newsfeed/routes.py` (`rows`, `searches`, `_search_item`)
-- Found: 2026-09-20, porting the page to the new shell; widened 09-21-2026 by the one-page change
+- Where: `app/modules/newsfeed/routes.py` (`rows`, `searches`, `_search_item`, `_get_search`)
+- Found: 2026-09-20, porting the page to the new shell; widened 09-21-2026 by the one-page change and 09-22-2026 by the stale-code audit
 - Status: open
 
-What happens: `rows` returns entries only, so no list the browser draws contains a search. `blank` still serves them, `item/s<id>` still answers for one and nothing asks. Only the agent, through `newsfeed_searches`, can say what Otto is watching for, how often it runs, when it runs next, or that a run whose reply carried no JSON array has been leaving `bad reply: …` in `last_result` night after night. `kill` therefore has nothing to fire at, and a search cannot be tagged from the app.
+What happens: `rows` returns entries only, so no list the browser draws contains a search. `blank` still serves them, `item/s<id>` still answers for one and nothing asks. Only the agent, through `newsfeed_searches`, can say what Otto is watching for, how often it runs, when it runs next, or that a run whose reply carried no JSON array has been leaving `bad reply: …` in `last_result` night after night. `kill` therefore has nothing to fire at, and a search cannot be tagged from the app. `_get_search` serves only `_search_item`, `kill` and the unreachable `tag` and `untag`, so it has no reachable caller until the searches are listed.
 
 Expected: requirement 3 — the searches are listed, each killable from there. A search that failed says so on its own row.
 
 Fix: `rows` emits the searches beside the entries, either as rows of the `newsfeed` facet marked by their type or behind the facet's own second mode, with `last_result` on the row when it starts with `bad`. Tagging one is a decision first: a search's tags ride onto every entry its next run brings back, so either the platform's tag routes gain a per-module hook that writes `newsfeed_tags` for an `s<id>`, or a search's own tags become ordinary `app_tags` that do not ride onto its entries, which changes what tagging a search means for the run, the tools and the agent's context.
-
-### Open link goes nowhere
-
-- Kind: bug
-- Where: `app/modules/newsfeed/routes.py` (`_verbs`, `ACTIONS`), `app/api.py` (`POST /api/verb`), `app/static/core.js` (`doVerb`'s `r.url`)
-- Found: 09-21-2026, the one-page change
-- Status: open
-
-What happens: every entry with a url offers the verb `link`, labelled Open link. `ACTIONS` has no `link`, so the verb posts to `POST /api/verb`, reaches `action/link` and comes back as the toast `unknown action link`. `doVerb` opens a tab when the answer carries a `url`, and `/api/verb` never returns one, so no verb in any module can open a link.
-
-Expected: Open link opens the entry's url.
-
-Fix: `/api/verb` answers with the row's `url` for a verb the module declares as a link, or the browser handles `link` itself from the `url` already on the row, as it handles `edit` and `query`. The second needs no round trip and is the smaller change.
 
 ### Kill neither asks nor removes
 
@@ -88,3 +75,16 @@ What happens: the live database was already converted, yet `python -m app.module
 Expected: code that has done its one job is deleted; git keeps it.
 
 Fix: delete `migrate.py`, `__main__.py` and the test; the old Business, Social and Search tables are dropped only when the owner asks in words.
+
+### The chips' filters outlived the chips
+
+- Kind: defect
+- Where: `app/modules/newsfeed/routes.py` (`CHIPS`, `LISTED`), `app/modules/newsfeed/tasks.py` (`search_tags`)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: `CHIPS` keeps the All, Open and Accepted filters the page's chips used; only All is read, as `LISTED`, and the chips are gone. `tasks.search_tags` is `routes.tags_of(store, "search", id)` written out again, with the kind fixed.
+
+Expected: one condition for what is listed, and one reader of a search's tags.
+
+Fix: `LISTED` holds the one condition and `CHIPS` goes; the task calls `tags_of`.

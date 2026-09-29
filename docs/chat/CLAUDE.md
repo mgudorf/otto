@@ -42,3 +42,16 @@ What happens: the upload is an action on resource `session:<id>`, the same lock 
 Expected: a file can be handed to a conversation while it is busy, or the wait is visible.
 
 Fix: the lock is there so that the turn and the upload cannot both invent a name in the folder. Either the upload takes a lock of its own on the folder rather than the session, which makes it independent of the turn, or the caller is told the file is waiting. The first is the daemon's call about what the session lock protects.
+
+### Chat's own conversation routes have no caller
+
+- Kind: defect
+- Where: `app/modules/chat/routes.py` (`new`, `send`, `files/{sid}`, `file/{sid}/{name}`, `events/{sid}`, `_key`, `_create` and the imports only they use; the item's `busy` and `files`; `_reopen`'s `removes`), `tests/test_chat.py` (`test_chat_replays_lost_transcript`, most of `test_chat_upload_and_files` and `test_chat_conversation_lifecycle`)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: the drawer talks to `/api/session/otto/*` and attaches through `upload/{sid}`, so Chat's own `new`, `send` and `events` repeat the platform's session routes for no caller, and nothing lists or downloads a conversation's files. The item answers `busy` and `files` and the page reads neither, so `_files` walks the folder on every open for nothing. `_reopen` answers `removes: true`, which `/api/verb` discards. This doc's Built rows still list the routes.
+
+Expected: Chat serves its rows, its verbs and the upload; the platform serves the conversation.
+
+Fix: delete them, and their tests. `_replay` and `[chat] replay_chars` move to the drawer's send rather than going (the platform entry "A conversation the command-line tool lost cannot be recovered").

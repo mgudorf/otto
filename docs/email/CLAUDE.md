@@ -92,12 +92,25 @@ Fix: a verb the facet serves rather than a row's — the palette lists the open 
 ### Reading a message no longer marks it read
 
 - Kind: defect
-- Where: `app/modules/email/routes.py` (`item_route`), `[email] read_on_open` in `config.toml`
-- Found: 09-21-2026, the one-page change
+- Where: `app/modules/email/routes.py` (`item_route`), `[email] read_on_open` in `config.toml` and `Email` in `app/config.py`
+- Found: 09-21-2026, the one-page change; corrected 09-22-2026, the stale-code audit
 - Status: open
 
-What happens: `read_on_open` is on, and the page that acted on it is gone. Opening a message fetches `item/{id}`, which writes nothing to Gmail, so a message read in Otto stays unread there and in the counter, and the setting now describes nothing.
+What happens: `read_on_open` is on, and the page that acted on it is gone. Opening a message fetches `item/{id}`, which writes nothing to Gmail, so a message read in Otto stays unread there and in the counter. No code reads the setting any more; only a test sets it.
 
 Expected: what the setting says: opening an unread message marks it read in Gmail, once per message.
 
-Fix: `item_route` posts `read` for an unread message when the knob is on, which puts the rule where the message is actually opened and takes `read_on_open` out of `left`'s answer; or the knob goes.
+Fix: `item_route` posts `read` for an unread message when the knob is on, which puts the rule where the message is actually opened; or the knob goes from `config.toml` and `Email`.
+
+### Action shapes, list filters and joins nothing uses
+
+- Kind: defect
+- Where: `app/modules/email/routes.py` (`_resolve`'s `ids` and `filter` shapes, `rows`' `chip` and `query` and the `CHIPS` guard, `SELECT`'s joins to `email_triage` and `email_bodies`), `app/modules/email/tasks.py` (the `email.triage` cursor), `email_triage.ts`, `tests/test_email.py` (`test_email_actions_take_one_id_or_many`, the filter and chip calls in `test_email_actions`)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: an action arrives through `/api/verb` with one `id`, and no tool posts actions, so `_resolve`'s lists of ids and its filter shape run only in tests; the Built rows above keep them "for the API and the agent", and neither can reach them. Home calls `rows(store, limit)`, so `chip` and `query` are never passed. Every list query, the feed's 200-row read on each refresh among them, joins triage and bodies for `priority`, which nothing reads, and `attachments`, which only `item` reads before it queries the bodies again. The `email.triage` cursor and `email_triage.ts` are written and never read.
+
+Expected: an action names one message, and the list reads the messages.
+
+Fix: `_resolve` takes `id` alone, `rows` drops its filters, `SELECT` reads `email_messages` alone and `item` takes the attachments from its own bodies query; the cursor and those tests go.

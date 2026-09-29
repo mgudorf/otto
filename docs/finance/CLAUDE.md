@@ -23,11 +23,11 @@
 ### Nothing can add or change an entry
 
 - Kind: gap
-- Where: `app/modules/finance/routes.py` (`action/capture`, `action/update`, `action/due`), `app/modules/finance/tools.py` (no write tools), `app/static/core.js` (`HERE.update`, `HERE.due`)
-- Found: 09-21-2026, the one-page change
+- Where: `app/modules/finance/routes.py` (`action/capture`, `action/update`, `action/due` and the checks, `to_cents`, `to_date`, `CADENCES` and `InvalidOperation` only they use; the item's `due_on`), `app/modules/finance/tools.py` (no write tools), `app/static/core.js` (`HERE.update`, `HERE.due`)
+- Found: 09-21-2026, the one-page change; widened 09-22-2026, the stale-code audit
 - Status: open
 
-What happens: capture had a box on the Finance page and update and due had popups over their buttons; both went with the page. `capture` now has no caller at all, and `update` and `due` are verbs the browser answers itself, opening the drawer with `update the amount to ` for the agent to finish — but the manifest declares no write tools, so the agent cannot carry that sentence out either. The ledger can only be read.
+What happens: capture had a box on the Finance page and update and due had popups over their buttons; both went with the page. `capture` now has no caller at all, and `update` and `due` are verbs the browser answers itself, opening the drawer with `update the amount to ` for the agent to finish — but the manifest declares no write tools, so the agent cannot carry that sentence out either. The ledger can only be read. The three actions' checks, the amount and date parsers and the cadence list serve no one meanwhile, and the item's `due_on`, the date the Set date box edited, is sent and never read.
 
 Expected: an amount can be recorded and changed from the app.
 
@@ -45,3 +45,16 @@ What happens: the browser now asks before running `end`, but nothing can take it
 Expected: an irreversible change can be undone.
 
 Fix: add a `resume` action that clears `ended_at`, and offer it on an ended entry in place of `end`. That also decides whether the entry's amount rejoins the totals and its next due starts projecting again, which is why it is filed rather than fixed.
+
+### A note does not find its entry, and the blank state serves no one
+
+- Kind: defect
+- Where: `app/modules/finance/routes.py` (the row's `note`, `_row`'s docstring, `blank`, `LABELS`), `tests/test_finance.py` (the `blank` calls)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: the row carries `note`, and the page never reads it: the search narrows on the title, the snip, the body, the status and the tags. So, against `_row`'s docstring and this doc's Rows row, typing a word from a note finds nothing; the note shows only among the open entry's fields. `blank` and the kind labels it served went with the page, and nothing requests it.
+
+Expected: a word from a note finds the entry.
+
+Fix: the note goes into the row's `snip`, which the search reads; `blank` and `LABELS` go.

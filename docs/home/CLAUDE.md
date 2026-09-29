@@ -36,14 +36,14 @@ Newsfeed runs every search the agent recorded, each on its own nights, one budge
 
 - Kind: gap
 - Where: `app/modules/home/routes.py` (`numbers_route`), `app/static/core.js` (`loadShell`, `load`)
-- Found: 09-21-2026, the one-page change
+- Found: 09-21-2026, the one-page change; corrected 09-22-2026, the stale-code audit
 - Status: open
 
-What happens: `GET /api/home/numbers` still answers, and no file under `app/static/` asks for it. The brand menu was to show what each facet holds; it shows the modules and not their numbers, so every module's `numbers` hook is computed for nobody.
+What happens: `GET /api/home/numbers` still answers, and no file under `app/static/` asks for it; only the tests of seven modules call it. The brand menu was to show what each facet holds; it shows the modules and not their numbers. The `numbers` hooks themselves are not idle: Home's `context`, the drawer's Current state, reads every faceted module's on each turn, so only the owner never sees them.
 
-Expected: the one number a module reports is shown somewhere, or the hook goes.
+Expected: the one number a module reports is shown somewhere, or the route goes.
 
-Fix: have the brand menu read `/api/home/numbers` beside the facets it already lists, or drop the route and the `numbers` hook from the contract. The first is the smaller change and keeps the owner's one sanctioned counts strip.
+Fix: have the brand menu read `/api/home/numbers` beside the facets it already lists, or drop the route; the `numbers` hooks stay either way, for the agent. The first is the smaller change and keeps the owner's one sanctioned counts strip.
 
 ### The Gmail consent row cannot be opened
 
@@ -70,3 +70,16 @@ What happens: the feed lists rows from every module at once. `load` keys the mer
 Expected: a row is identified by its module and its id together, so two modules' rows never stand in for each other.
 
 Fix: key the selection and the picked set the way `load` already keys the merge — `S.open` holds `module/id`, `itemOf` and `pid` match on both, and `select` takes the row rather than its id.
+
+### The feed filters by tag and text that the page never sends
+
+- Kind: defect
+- Where: `app/modules/home/routes.py` (`feed_route`'s `tags` and `q`, `_keeps`, the module docstring); the filtered feed calls in `tests/test_app.py`, `test_newsfeed.py`, `test_chat.py`, `test_email.py`, `test_finance.py`, `test_education.py` and `test_database.py`
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: `load` asks `/api/feed` for `mode` and `limit` only and narrows the rows it holds in the browser, so the daemon's own narrowing by tag and typed text runs for the tests alone. The module docstring still describes the feed as narrowed by tag and by typed text.
+
+Expected: one place narrows the feed.
+
+Fix: drop `tags`, `q` and `_keeps` and the tests' filtered calls; the browser's `matches` is the narrowing.

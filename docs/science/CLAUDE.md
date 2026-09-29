@@ -76,3 +76,51 @@ What happens: a run's chunks are held in memory and written to `science_script_r
 Expected: pressing Run shows the run happening.
 
 Fix: two halves. The daemon keeps a running script's chunks where a read can reach them — appended to `science_script_runs.output` as they land, or a buffer beside `state.scripts` — and `item()` hands back the run in flight in place of the last finished one. The page subscribes to `/api/science/events` for the open file and re-reads the item when a run ends.
+
+### Code nothing reaches
+- Kind: defect
+- Where: `app/modules/science/routes.py` (`blank`, the `new` verb with `_new` and `RESOURCE`), `runs.py` (`run_file`'s `publish`), `notebook.py` (`tree`'s folder nodes, `scan`'s `name` and `size`, the `id`, `index` and `type` of `cells`), `kernels.py` (`Kernel.started_at`), `science_schedules.last_run` and `last_result`, `science_script_runs.started_at` and `finished_at`, `tests/test_science.py` (the `blank` and `new` calls)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: nothing requests `blank`, and no row offers `new`; the agent's `science_new` makes files without it. The `due` task, `run_file`'s one caller, never passes a `publish`. `tree` builds folder nodes, folders first and named in order, only for `scan` to flatten them and sort by time, and nothing reads `scan`'s `name` or `size` or the `id`, `index` and `type` of a cell (the tests read `id` and `type`). `Kernel.started_at`, a schedule's `last_run` and `last_result`, and a script run's start and finish times are written and never read. This doc's Routes row lists `blank` and says the four edit verbs and `new` answer the agent's tools, which never call them.
+
+Expected: Science serves what the feed, the verbs, the tools and the clock use.
+
+Fix: delete them and their tests; `scan` becomes one flat walk returning the id, the extension and the time.
+
+### Science rows carry UTC times
+- Kind: bug
+- Where: `app/modules/science/notebook.py` (`mtime_iso`), `app/modules/science/routes.py` (`rows`, `item`, `today`)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: a file's `when` is its modification time in UTC, and the contract asks for the owner's wall clock, which every other module sends. The feed reads the first sixteen characters, so a Science row shows a time four hours ahead of the owner's clock (five in winter), shows tomorrow's date late in the evening, and sorts that far out of place in Recent.
+
+Expected: a file's time is the owner's.
+
+Fix: `mtime_iso` gives local time, as the other modules' `_when` do.
+
+### A deleted scheduled file fails on every run and cannot be unscheduled
+- Kind: bug
+- Where: `app/modules/science/tasks.py` (`due`), `app/modules/science/routes.py` (`_unschedule`, `_verbs`), `app/modules/science/tools.py`
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: `due` books a schedule's next slot and then runs the file. A file that was deleted or renamed fails, and its next slot is already booked, so it fails at every interval for good. Unschedule is a verb on the file's row, a missing file has no row, and no tool unschedules, so only a statement in the query editor removes it.
+
+Expected: a schedule whose file is gone stops.
+
+Fix: `due` drops a schedule whose file is missing, with an event saying so.
+
+### The kernel list names a notebook by its bare file name
+- Kind: bug
+- Where: `app/modules/science/tools.py` (`science_kernels`)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: `science_kernels` gives each kernel's `id` as the file's bare name, while every other Science tool takes the path under the root. For a notebook in a folder the agent gets an id that the other tools answer with "no file".
+
+Expected: the id the kernel list gives is one the other tools take.
+
+Fix: the id is the path relative to the root.

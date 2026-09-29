@@ -351,11 +351,11 @@ A switch is the task's own `app_tasks.enabled`, the one its routine row's Pause 
 ### A notebook's cells cannot be edited or run one at a time
 
 - Kind: gap
-- Where: `app/static/core.js` (`contentEl`, the `notebook` and `script` cases), `app/modules/science/routes.py` (`EDIT_ACTIONS`, `KERNEL_ACTIONS`, `/api/science/events`)
-- Found: 09-21-2026, writing the one page's doc
+- Where: `app/static/core.js` (`contentEl`, the `notebook` and `script` cases), `app/modules/science/routes.py` (`EDIT_ACTIONS`, `KERNEL_ACTIONS`, `/api/science/events`, `_run`'s one-cell branch)
+- Found: 09-21-2026, writing the one page's doc; widened 09-22-2026, the stale-code audit
 - Status: open
 
-What happens: the page draws each cell's code and its last output and nothing more. A cell cannot be typed into, added, moved, deleted or run by itself, and a running cell's output never arrives, because the page subscribes to no module stream. A whole file still runs, and the kernel is still steered, through the row's verbs: Run, Interrupt, Restart kernel, Shut down kernel, Schedule. `set_cell`, `set_cells`, `insert_cell` and `delete_cell` are served and unreachable.
+What happens: the page draws each cell's code and its last output and nothing more. A cell cannot be typed into, added, moved, deleted or run by itself, and a running cell's output never arrives, because the page subscribes to no module stream. A whole file still runs, and the kernel is still steered, through the row's verbs: Run, Interrupt, Restart kernel, Shut down kernel, Schedule. `set_cell`, `set_cells`, `insert_cell` and `delete_cell` are served and unreachable. So is `_run`'s one-cell branch, which waits on an `index` that `/api/verb` never carries, and `_set_cell` and `_insert_cell` repeat what the `science_set_cell` and `science_insert_cell` tools already do without them.
 
 Expected: the cells are the editor — command and edit modes, the JupyterLab keys, every change written straight to the file, and a run's output arriving as it is produced.
 
@@ -364,20 +364,20 @@ Fix: the `notebook` and `script` renderers become an editor, with the caret and 
 ### A question is answered in the drawer, not on the part it belongs to
 
 - Kind: gap
-- Where: `app/static/core.js` (`contentEl`, the `question` case), `app/modules/education/routes.py` (`POST /action/answer`, `_verbs`)
-- Found: 09-21-2026, writing the one page's doc
+- Where: `app/static/core.js` (`contentEl`, the `question` case), `app/modules/education/routes.py` (`POST /action/answer`, `_verbs`), `app/api.py` (`pane_turn`)
+- Found: 09-21-2026, writing the one page's doc; widened 09-22-2026, the stale-code audit
 - Status: open
 
 What happens: the `question` renderer draws the prompt and each part as a card that folds open, and the next ungraded part reads `answer in the drawer`. There is no box on the part and no verb that opens one, so the only way to answer is a typed turn, which Education's own entry says is stored nowhere.
 
 Expected: the answer is typed on the part it belongs to and sent from there, and the grade comes back on that card.
 
-Fix: the `question` renderer grows a box per ungraded part, its half-typed text in module state so a refresh cannot throw it away, posting `{id, n, answer}` to `/api/education/action/answer`, which already briefs the tutor and clears the old grade. The send key belongs in the `?` overlay.
+Fix: the `question` renderer grows a box per ungraded part, its half-typed text in module state so a refresh cannot throw it away, posting `{id, n, answer}` to `/api/education/action/answer`, which already briefs the tutor and clears the old grade. The send key belongs in the `?` overlay. The route hands its turn to `pane_turn`, which opens a session under `education`, and the drawer lists only `otto`'s, so the brief and the grade would land in a tab the owner never sees: the turn must go to the drawer's open tab. `pane_turn` has no other caller.
 
 ### The daemon's own log has no home
 
 - Kind: gap
-- Where: `app/static/shell.js` (`openAppMenu`), `app/api.py` (`/api/events`, `/api/jobs`)
+- Where: `app/static/shell.js` (`openAppMenu`), `app/api.py` (`/api/events`, `/api/jobs`, `/api/jobs/{job_id}`, none of which has a caller)
 - Found: 09-21-2026, writing the one page's doc
 - Status: open, needs a decision
 
@@ -400,27 +400,27 @@ Expected: the rows the feed asks for are one setting the owner can see and chang
 
 Fix: `load` asks for `ui.page_size` rows per module and Settings shows it under General; the live value of 40 would cut Recent from 200 rows per facet to 40 on the day it lands, and the search bar narrows only the rows in hand, so how many to hold is the owner's call. Otherwise the key leaves `UI_KEYS`, the seed, `[ui]` and `Ui`.
 
-### The repo's CLAUDE.md still describes the twelve-page frontend
+### The repo's CLAUDE.md, README and skills still describe the twelve-page frontend
 
 - Kind: defect
-- Where: `CLAUDE.md` (Development 3, Layout 3)
-- Found: 09-21-2026, recovering Settings
+- Where: `CLAUDE.md` (UI 5, Development 3, Layout 3), `README.md` (Open items), `.claude/skills/sync-architecture/SKILL.md` (step 2), `.claude/skills/feature-flow/SKILL.md` (step 6)
+- Found: 09-21-2026, recovering Settings; widened 09-22-2026, the stale-code audit
 - Status: open
 
-What happens: Development 3 names `app/static/shell.js` "an import and the `PAGES` map" as a shared seam, and Layout 3 lists `pages/<name>.js`, `rows.js`, `session.js`, `feedback.js`, `module_settings.js` and Preact and htm under `vendor/`. None of these exist since the one page: the frontend is `core.js`, `shell.js`, `brain.js`, `drawer.js`, `point.js`, `settings.js`, `api.js` and `md.js`, and `shell.js` has no `PAGES` map.
+What happens: Development 3 names `app/static/shell.js` "an import and the `PAGES` map" as a shared seam, and Layout 3 lists `pages/<name>.js`, `rows.js`, `session.js`, `feedback.js`, `module_settings.js` and Preact and htm under `vendor/`. None of these exist since the one page: the frontend is `core.js`, `shell.js`, `brain.js`, `drawer.js`, `point.js`, `settings.js`, `api.js` and `md.js`, and `shell.js` has no `PAGES` map. UI 5 and Development 3 still speak of the rail and rail order, and there is no rail. The sync-architecture skill routes a change by `app/static/pages/<name>.js`, and feature-flow's merge step keeps the seams "in rail order". The README's Open items table lists a Database problem (no confirm, no backup, no CSV export) that the query editor has fixed; Database's doc holds no patch behind it.
 
 Expected: the file every change is held to describes the code as it is.
 
-Fix: Layout 3 takes the file list of this doc's Files table, and Development 3 drops `shell.js` from the seams, since no module adds a line to it any more.
+Fix: Layout 3 takes the file list of this doc's Files table, and Development 3 drops `shell.js` from the seams, since no module adds a line to it any more. UI 5 drops the rail, "rail order" becomes manifest order in Development 3 and feature-flow, sync-architecture routes by `app/static/*.js` and this doc's Files table, and the README row goes.
 
 ### A tag lives in one of six stores
 
 - Kind: defect
 - Where: `app/store.py` (`tags_for`, `add_tags`, `remove_tag`, `all_tags` and their `SECOND_BRAIN` branches), `app/schema.sql` (the `app_tags` comment); `second_brain_tags` in `app/modules/second_brain/tools.py` and `routes.py` (`_tag`, `_untag`); `newsfeed_tags` in `app/modules/newsfeed/routes.py` (`_written`, `_tag`, `_untag`, `tags_of`), `tasks.py` and `tools.py`; `education_questions.tags` in `app/modules/education/routes.py` (`_tags`, `_row_tags`) and `questions.py` (`clean_tags`, `tags_of`); `app_sessions.tags` in `app/api.py` (`tag_session`) and `app/modules/chat/routes.py` (`_tags`); `feedback_items.tags` in `app/modules/feedback/routes.py` and `agent.md`; `app/modules/graph/build.py` (`SOURCES`) and `app/modules/graph/agent.md`
-- Found: 09-21-2026, the owner asking for one notion of tag; absorbs Chat's "A conversation's own tags cannot be removed" and Education's "A question's tags live in two places", both 09-20-2026
+- Found: 09-21-2026, the owner asking for one notion of tag; absorbs Chat's "A conversation's own tags cannot be removed" and Education's "A question's tags live in two places", both 09-20-2026; widened 09-22-2026, the stale-code audit
 - Status: open
 
-What happens: the contract says a row's `tags` come from `tags_for`, and five modules keep tags somewhere else: Entry in `second_brain_tags`, Newsfeed in `newsfeed_tags`, Education in a JSON list on the question, the session tagger in a JSON list on the session, Feedback in a JSON list on the filing. Every reader knows a different subset. `tags_for`, `add_tags`, `remove_tag` and the catalog reach `app_tags` and `second_brain_tags`; Graph's rebuild reads those two and the sessions'; a row shows whatever its module merges. So the × on a tag the session tagger, a nightly run or Education's list gave does nothing and the tag is back on the next refresh, Graph never sees a Newsfeed or Education tag, the catalog misses Newsfeed's, and the tutor's context lists only Education's own. Each store cleans a tag its own way: `tag_key`, `word_tags`, Education's `clean_tags`, which does not lowercase, and inline strips in the Newsfeed and Entry routes. Feedback's prompt asks for its tags as slots, the page, the kind and the subject, which repeat the filing's own fields, and nothing but `feedback_list` reads them.
+What happens: the contract says a row's `tags` come from `tags_for`, and five modules keep tags somewhere else: Entry in `second_brain_tags`, Newsfeed in `newsfeed_tags`, Education in a JSON list on the question, the session tagger in a JSON list on the session, Feedback in a JSON list on the filing. Every reader knows a different subset. `tags_for`, `add_tags`, `remove_tag` and the catalog reach `app_tags` and `second_brain_tags`; Graph's rebuild reads those two and the sessions'; a row shows whatever its module merges. So the × on a tag the session tagger, a nightly run or Education's list gave does nothing and the tag is back on the next refresh, Graph never sees a Newsfeed or Education tag, the catalog misses Newsfeed's, and the tutor's context lists only Education's own. Each store cleans a tag its own way: `tag_key`, `word_tags`, Education's `clean_tags`, which does not lowercase, and inline strips in the Newsfeed and Entry routes. Feedback's prompt asks for its tags as slots, the page, the kind and the subject, which repeat the filing's own fields, and nothing but `feedback_list` reads them. Three of the module writers have no caller at all: Entry's and Newsfeed's `tag` and `untag` actions and Education's `tags` action, which no row offers and the browser never posts, since its tags go through `/api/tags/add` and `/remove`. They go rather than being rewritten, and with Education's `tags` go `clean_tags` and `TAG_CHARS`.
 
 Expected: one table holds every tag on every row, whoever wrote it. Every writer goes through `add_tags`, an agent's tags through `word_tags` first, and every reader through `tags_for`, so the × works on every tag but a facet, and Graph, the catalog and the brain see one set.
 
@@ -464,3 +464,185 @@ What happens: nothing has opened a browser on `app/.browser-profile/` since the 
 Expected: the code names no folder that nothing creates, and the checkout holds no dead browser state.
 
 Fix: delete the folder first, by hand and with the owner's yes, since it is ignored runtime state. Then drop `.browser-profile` from `SKIP_DIRS` and its line from `.gitignore`. The order matters: the hash walks all of `app/`, so with the entry gone and the folder still there, a `.js` or `.html` file written into it would change the revision and restart the daemon.
+
+### A conversation the command-line tool lost cannot be recovered
+
+- Kind: bug
+- Where: `app/api.py` (`session_send`, `start_turn`'s `replay` and `on_done`, `REPLAYED`), `app/claude.py` (`LOST_TRANSCRIPT`, `ClaudeError.lost_transcript`), `app/modules/chat/routes.py` (`send`, `_replay`), `[chat] replay_chars`
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: when the Claude command-line tool no longer holds a conversation it answers "No conversation found", and `start_turn` can then start it again under the same id with Otto's stored transcript in front, but only when its caller passes `replay`. Chat's own `send` is the one caller that does, and nothing calls it; the drawer's `/api/session/otto/send` passes none, so a drawer conversation the tool lost fails on every turn from then on. `on_done`, which Chat's `send` used to name a conversation after its first turn, has no caller either. The Claude section of this doc describes the recovery as if every session had it.
+
+Expected: a conversation Otto kept comes back whether or not the command-line tool kept it.
+
+Fix: `session_send` passes Chat's `_replay` of the stored turns once a session has started; `_replay` and `replay_chars` move with it, and Chat's own `send` goes (Chat's entry "Chat's own conversation routes have no caller"). `on_done` goes unless a title after the first turn is wanted.
+
+### The offline suite reads the owner's Gmail token
+
+- Kind: bug
+- Where: `tests/conftest.py` (`config`), `app/modules/email/__init__.py` (`setup`), `app/modules/email/routes.py` (`queue`), `tests/test_app.py::test_feed_is_every_module_in_two_modes`
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: the `config` fixture replaces only `[data]`, so `email.client_file` and `email.token_file` still name the owner's files under `data/secrets/`. Email's `setup` hands that config to `queue`, which reads the real token's expiry and puts the consent row into Priority for the last two days of each seven-day token. `test_feed_is_every_module_in_two_modes` asserts the whole Priority list and the count of what waits, so in the primary checkout it fails two days in every seven, and it passes in a worktree, which has no `data/secrets`.
+
+Expected: the offline suite reads nothing of the owner's and passes on any day.
+
+Fix: the fixture points both files at paths under `tmp_path`; the consent row gets a test of its own that writes a token with a near expiry.
+
+### Notebook code is inserted into the page as markup
+
+- Kind: bug
+- Where: `app/static/core.js` (`contentEl`, the `notebook` and `script` cases), `app/modules/science/routes.py` (`_cells`, `_script_cells`)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: Science sends a cell's source and a script's text as they are, and the renderer sets them as HTML (`h('pre', { html: c.code })`), a shape copied from the design preview, whose sample code is already highlighted markup. So `a<b` swallows the rest of the line, `&lt;` shows as `<`, and markup inside a notebook runs in the page: a downloaded notebook carrying `<img onerror=…>` would run script inside the app, where every local route answers without authentication, `/api/database/action/write` included.
+
+Expected: code reads exactly as written and never runs in the page.
+
+Fix: set the code as text (`h('pre', null, c.code)`). The syntax colours the markup assumed were never emitted (see "Frontend code and styles nothing uses").
+
+### A question's Markdown and LaTeX show as source, and its parts by number
+
+- Kind: gap
+- Where: `app/static/core.js` (`contentEl`, the `question` case), `app/static/md.js` (`tex`), `app/static/index.html` (the KaTeX stylesheet), `app/modules/education/routes.py` (`detail`)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: `detail` sends the definitions, the premise and each part's ask as Markdown with LaTeX, and the renderer sets them as HTML unrendered, so `**bold**` and `$x^2$` show as typed and markup inside a question would run. `tex()` in `md.js` renders exactly this and nothing calls it, so KaTeX, its stylesheet and its twenty fonts load on every page and draw nothing. Each part reads `(1)` and its ask: the letter (`label`) and the `title` that `detail` sends are never read. This misses UI 5 of the repo's CLAUDE.md and Education's question format.
+
+Expected: a question body reads in PT Serif with its LaTeX rendered, and each part leads with its letter and title.
+
+Fix: the `question` case renders each block through `tex()` with raw HTML kept inert (marked passes HTML through), and heads a part with its `label` and `title`. The unused `.qbody` style is the one for the rendered body.
+
+### Editing a title can never be reached, and would not save
+
+- Kind: bug
+- Where: `app/static/core.js` (`HERE.edit`, `setEdit`, `commitEdit`, `editorEl`, the `editing` branch of `contentEl`), `app/static/shell.js` (the `e` key), `app/modules/second_brain/routes.py` (`_verbs`, `ACTIONS`)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: `e` edits only a row that offers `edit`, and no module offers it, so `e` always answers "Nothing to edit here" and the editor never opens. Were it opened, the edit would still be lost: `commitEdit` hands `edit` to `doVerb`, which finds `edit` among the verbs the browser runs itself and opens the editor again instead of posting, so the new title lives in the browser until the next refresh. This doc's open-item table promises that `e` opens an Entry note, task, quote or link for editing.
+
+Expected: `e` edits an Entry item's text, and the change is kept.
+
+Fix: Entry offers `edit` on its items and serves an `edit` action that takes `value`, and `commitEdit` posts it through `/api/verb` directly rather than through `doVerb`. If editing is not wanted, the path and the table's promise go instead.
+
+### Five modules build a Current state that no agent receives
+
+- Kind: defect
+- Where: `context` in `app/modules/chat/routes.py`, `app/modules/database/routes.py`, `app/modules/finance/routes.py`, `app/modules/graph/routes.py` and `app/modules/science/routes.py`; the `agent.md` of database, finance, graph and science; `app/modules/home/routes.py` (`context`); `app/api.py` (`_otto`)
+- Found: 09-22-2026, the stale-code audit
+- Status: open, needs a decision
+
+What happens: a module's `context` reaches a prompt only through its own nightly Claude run, a one-off run it starts, or a session of its own. Since the per-module panes went, Chat, Database, Finance, Graph and Science have none of the three, and the drawer's Current state is Home's, which gives each faceted module one counter and today's titles (Graph, with no facet, not even that). So the five hooks run for no one, while the Database, Finance, Graph and Science prompts tell the drawer to answer from "the Current state block": the tables with their columns, the ledger, the tag map, the live kernels. The agent never receives any of it.
+
+Expected: what a prompt says the agent can see is what it sees.
+
+Fix: either Home's `context` folds in these modules' own blocks, which lengthens every drawer turn, or the five hooks go with the prompt lines that promise them and the agent reads through its tools. Which is worth the prompt's length is the owner's call.
+
+### Agent prompts send the owner to screens that are gone
+
+- Kind: defect
+- Where: the `agent.md` of `app/modules/email/`, `app/modules/finance/`, `app/modules/education/`, `app/modules/science/`, `app/modules/chat/` and `app/modules/newsfeed/`; `app/modules/education/prompts/grade.md`
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: every enabled module's `agent.md` is part of the drawer's prompt on every turn, and several still describe the per-module pages. Email sends the owner to "the action bar above the Email page's list" with ctrl and shift click. Finance says "the Finance page does that" for adding or changing an entry, which nothing can do. Education has the owner answer "on the page" and press Submit, and read the grade "in the pane". Science tells the owner to refresh the page with Ctrl+Shift+R, and calls deleting cells, files and outputs the owner's action in the page, which offers none. Chat says every message names the conversation's folder, which only Chat's uncalled `send` did, so the agent saves into the workspace root. Newsfeed calls killing a search the owner's call on the page, where no search is listed.
+
+Expected: the prompt describes the app as it is: a row's verbs, the drawer, point mode.
+
+Fix: rewrite those lines against this doc's UI section. Where a promised action has no path at all (a Finance entry, a search's kill, a Science delete), the line says the agent cannot do it, until the entries that add a path land.
+
+### Point mode cannot name a question part or the title
+
+- Kind: bug
+- Where: `app/static/point.js` (`POINTABLE`, `refOf`)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: point mode names a question part by `.part` and the title by `.dbody h2`, and the one page renders neither: a part is a `.qcard`, and the title sits in `.dhead`, outside `.dbody`. Pointing at a part or the title names the item's body instead, and a heading inside an email or an article is named the title.
+
+Expected: the popover names the part or the title pointed at, as it names a paragraph.
+
+Fix: `.part` becomes `.qcard`, named by its letter, and the title check becomes `.dhead .dtitle`.
+
+### Frontend code and styles nothing uses
+
+- Kind: defect
+- Where: `app/static/core.js` (`esc`, `relDay`, `setTokens`, `addItem`, `nextId` and `seq`, `widget`, the `r.url` branch of `doVerb`, `HERE.answer`, `HERE.explain`, the `inflight` import), `app/static/shell.js` (the imports `visible`, `renderTop`, `renderPanel`, `tokenText`), `app/static/point.js` (the imports `currentItem`, `call`, `parts`), `app/static/styles.css` (`.with-tags`, `.tags-inline`, `.dbody.rel`, `.qbody`, `.part`, `.block`, `.k`, `.s`, `.n`, `.cm`), `app/static/vendor/highlight/` and its two lines in `SHA256SUMS`
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: the one page left these behind. Seven exports of `core.js` have no caller. `doVerb` opens `r.url`, which `/api/verb` never returns. `answer` and `explain` are verbs the browser would run itself, and no module offers either. Eight imports are unused. The styles serve rows that showed their tags inline (in the narrow-window query too), the old Education page's body and parts, a `.block` card, and syntax colours nothing emits. highlight.js and its Python grammar are vendored and pinned, and nothing has imported them since `pages/science.js` went; this doc's Frontend row and Dependencies table and the repo's CLAUDE.md still list them.
+
+Expected: the page carries only what it runs.
+
+Fix: delete them, and highlight.js from the docs. `.qbody` stays if the question entry puts it to use, and KaTeX stays for that entry.
+
+### Platform routes, fields and helpers nothing reaches
+
+- Kind: defect
+- Where: `app/api.py` (`GET /api/settings`, `POST /api/session/{module}/{sid}/reopen`, the session routes for any module but `otto`, `_context_label` and `context_label`, `agent.cmd` and `agent.placeholder` in `/api/session/{module}`, `claude.agents_dir`, `claude.background_jobs` and each module's `agent` in `/api/shell`, `later` in `REMOVES`, the `tag_key` import), `app/modules/__init__.py` (`Agent.placeholder`, `Module.item`, `later` and `/api/brain` in the contract docstring), the eleven manifests' `placeholder`, `app/claude.py` (`ClaudeError.subtype` and `num_turns`, the `Any` import), `tests/test_app.py` (the `second_brain` session tests, the `context_label` assertion, the `reopen` lines)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: the page reads settings from `/api/shell` and reopens a conversation through Chat's `reopen` verb, so `GET /api/settings` and the platform's `reopen` have no caller. The drawer opens only `otto`'s sessions; every other module's is opened by tests alone, and with them the non-`otto` branches of `_module` and `_context_label`. The page reads none of `context_label`, `agent.cmd`, `agents_dir`, `background_jobs` or `placeholder` (the composer carries no placeholder, per UI 1), yet every manifest with an agent must supply one. The registry loads `Module.item` and nothing calls it; each module's `item` is reached through its own route. `ClaudeError` keeps `subtype` and `num_turns` and nothing reads them. No module offers `later`, and the contract docstring says `/api/brain` draws the tags, a route that was never built (Graph's "The brain does not read the graph" proposes it).
+
+Expected: the platform serves what the page, the launcher, the tools and the clock use.
+
+Fix: delete them, move the session tests onto `otto`, and drop `placeholder` from `Agent` and the manifests. `pane_turn` stays while "A question is answered in the drawer, not on the part it belongs to" may revive `action/answer`.
+
+### Migrations with nothing left to do
+
+- Kind: defect
+- Where: `app/migrate.py` (`RENAMES`, `MODULE_RENAMES`, `rename_tables`, `rename_modules`, `rebuild_fts`) and its calls in `app/daemon.py`; `setup` in `app/modules/education/__init__.py`, `app/modules/finance/__init__.py`, `app/modules/graph/__init__.py` and `app/modules/second_brain/__init__.py`; `add_cleared_at` in `app/modules/feedback/queue.py`; Education's fallbacks for old rows (`NO_RUBRIC` and `NO_DEFINITIONS` in `grading.py`, `part_title`'s fallback in `questions.py`, `_defs(None)` in `routes.py`); the `modules.%.scheduled` fold in `app/scheduler.py` (`sync_tasks`); `tests/test_migrate.py`, `test_setup_migrates_v1`, `test_finance_due_column_added`
+- Found: 09-22-2026, the stale-code audit, against the live database opened read-only
+- Status: open, needs a decision
+
+What happens: the live database holds no table under an old name and no row naming an old module, so `rename_tables` and `rename_modules` return at their first check on every boot, and `RENAMES` still maps `search_topics` and `search_findings` onto `web_search_*`, a module that no longer exists. Every module `setup` that adds or renames columns finds them in place: Education's columns and table rebuilds, Finance's `due_on`, Graph's `memories`, Entry's `memory_id` and `memory_ids`, Feedback's `cleared_at`. No question or part lacks a title, a rubric, definitions or a topic, so Education's fallbacks fire on nothing. The `modules.%.scheduled` fold has one run left, at the next restart, and since the old switch for Entry reads off, that run pauses `second_brain.suggest`.
+
+Expected: code that has done its one job goes; git keeps it.
+
+Fix: first decide whether an old backup must still restore through the renames; this doc's Store row says `RENAMES` carries every name a table has had, which argues for keeping `migrate.py`. The module `setup` steps (Feedback's reset of notes left queued stays), the fallbacks and their tests go either way. The scheduler fold goes after the restart that runs it; switch Entry's suggestions back on in Settings then if they are wanted. Newsfeed's one-time migration has its own entry.
+
+### Deleted modules left tables, settings and folders behind
+
+- Kind: defect
+- Where: the live database (the tables `business_items`, `social_items`, `web_search_findings` and `web_search_topics`; the settings `ui.middle_max`, `ui.side_max`, `ui.start_page`, `modules.business.*`, `modules.social.*` and `modules.web_search.*`); the folders `app/modules/business/`, `memory/`, `social/` and `web_search/` in the primary checkout
+- Found: 09-22-2026, the stale-code audit, against the live database opened read-only
+- Status: open, needs the owner's word
+
+What happens: no schema declares the four tables (20, 20, 0 and 0 rows), nothing reads the settings, and `PUT /api/settings` refuses their keys. Each folder holds only compiled files of a deleted package; the registry passes over it for want of an `__init__.py`.
+
+Expected: nothing on disk or in the store belongs to a module that no longer exists.
+
+Fix: the tables are dropped through the data-migration skill, backup first, only when the owner says so in words, as Newsfeed's migration entry already requires; the settings rows go with them; the folders are deleted by hand with the owner's yes. The events, jobs and runs that name those modules are history and stay.
+
+### Unused packages, merged branches and a merged worktree
+
+- Kind: defect
+- Where: `.venv` (`google-api-python-client`, `google-auth-oauthlib` and the eleven packages installed only for them); the local branches merged into `main`; the worktree `../wt-one-page`
+- Found: 09-22-2026, the stale-code audit
+- Status: open, needs the owner's word
+
+What happens: nothing imports the Google client packages and `requirements.txt` does not list them; they date from an earlier Gmail client, and the thirteen are installed only for one another. Nineteen local branches are fully merged into `main`, and `../wt-one-page` holds one of them, `feat/one-page`, merged and clean, which feature-flow's last step should have removed.
+
+Expected: the environment is what `requirements.txt` says, and a merged branch goes with its worktree.
+
+Fix: with the owner's yes, uninstall the two packages and their orphans, `git worktree remove ../wt-one-page`, and `git branch -d` the merged branches. `feat/automations`, `feat/newsfeed-event-date` and `feat/stop-command` are in flight and stay.
+
+### Comments and docstrings still describe the pages
+
+- Kind: defect
+- Where: comments and docstrings in `app/api.py`, `app/runner.py`, `app/claude.py`, `app/config.py`, `config.toml`, `app/static/brain.js`, `app/static/md.js` and every module but System's routes; the tests `test_chat.py`, `test_database.py`, `test_education.py`, `test_email.py`, `test_finance.py`, `test_graph.py`, `test_newsfeed.py` and `test_science.py`; the Built rows of the chat, database, email, feedback, finance, graph, science and second_brain docs
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: comments across the daemon still speak of a module's page and pane, LEFT and MIDDLE, the file tree, the Activity page, the rail, chips, and a model a module picks on its page. A few say the opposite of the code: `claude.py` counts two ways to reach Claude where there are three; `brain.js` says the figure never stops, though a turn of 0 and reduced motion hold it; `education/tools.py` says the daemon passes no config. Several docs' Built rows still list the routes and panels this audit's other entries name as gone or unreachable.
+
+Expected: a comment says what the code does now.
+
+Fix: each module's cleanup rewrites its own comments and Built rows in the same commit; whatever is left after them goes in one pass.
