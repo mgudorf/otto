@@ -647,3 +647,16 @@ What happens: comments across the daemon still speak of a module's page and pane
 Expected: a comment says what the code does now.
 
 Fix: each module's cleanup rewrites its own comments and Built rows in the same commit; whatever is left after them goes in one pass.
+
+### The suite reads the live Gmail token
+
+- Kind: bug
+- Where: `tests/conftest.py` (`config`), `app/config.py` (`token_file` and `client_file` resolved under the checkout's root), `app/modules/email/routes.py` (`queue`)
+- Found: 09-28-2026, merging the dated-rows change
+- Status: open
+
+What happens: the `config` fixture moves the database and the workspace into `tmp_path` and leaves `email.token_file` where `config.toml` puts it, under the checkout. In the primary checkout that is the owner's live `data/secrets/token.json`, so once its consent is within `consent_warn_days` of ending, Email's `queue` hands every app-level test a consent row in Priority. Five tests that pin Priority's exact rows and ranks then fail there and only there: `test_feed_is_every_module_in_two_modes`, `test_education_end_to_end`, `test_newsfeed_end_to_end`, `test_newsfeed_feed_and_verbs` and `test_done_and_suggestion_actions`. The same tree passes in a worktree, which has no `data/secrets`. Seen with the consent expired on 09-25-2026.
+
+Expected: the suite runs offline against nothing of the owner's; one tree gives one result in every checkout.
+
+Fix: the `config` fixture points `email.token_file` and `email.client_file` into `tmp_path`, so no test ever sees a live token.
