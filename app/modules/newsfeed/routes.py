@@ -6,13 +6,13 @@ Nothing here creates a search: that is the agent's newsfeed_search_add. Every wr
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from html import escape
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
-from app.store import Store, iso, now, now_iso, parse, tags_for
+from app.store import Store, iso, now_iso, parse, tags_for
 
 router = APIRouter(prefix="/api/newsfeed")
 
@@ -34,6 +34,11 @@ def _day(when: str) -> str:
     return f"{m}-{d}-{y}"
 
 
+def _stamp(r: dict) -> str:
+    """The row's date: the day it happens, else the day to come back to it, else the moment it was found."""
+    return r["starts_at"] or r["follow_up_at"] or _when(r["found_at"])
+
+
 def _written(store: Store, ids: list[int]) -> dict[int, list[str]]:
     """The tags a run wrote on an entry, its search's among them; the owner's `untag` drops any of them."""
     out: dict[int, list[str]] = {i: [] for i in ids}
@@ -53,6 +58,8 @@ def _kv(r: dict, search: dict | None) -> list[list[str]]:
         kv.append(["Happens", _day(r["starts_at"])])
     if r["follow_up_at"]:
         kv.append(["Follow-up", _day(r["follow_up_at"])])
+    if r["starts_at"] or r["follow_up_at"]:
+        kv.append(["Found", _day(_when(r["found_at"]))])
     return kv
 
 
@@ -65,7 +72,7 @@ def _verbs(r: dict) -> list[list[str]]:
 
 
 def _rows(store: Store, entries: list[dict]) -> list[dict]:
-    """Entries as ROWs of type `article`: the headline, the day found, its tags, and what the page reads."""
+    """Entries as ROWs of type `article`: the headline, the date that matters to it, its tags, and what the page reads."""
     if not entries:
         return []
     ids = [r["id"] for r in entries]
@@ -78,7 +85,7 @@ def _rows(store: Store, entries: list[dict]) -> list[dict]:
             "id": r["id"],
             "module": "newsfeed",
             "title": r["text"],
-            "when": _when(r["found_at"]),
+            "when": _stamp(r),
             "fixed": [FACET],
             "tags": sorted({*written[r["id"]], *mine.get(r["id"], [])}),
             "type": "article",
@@ -287,18 +294,20 @@ def today(store: Store) -> list[dict]:
 
 
 def queue(store: Store) -> list[dict]:
-    """Every entry still waiting on a yes or no, however old; `waits` is the days it has stood, so tonight's lead."""
+    """Every entry still waiting on a yes or no, however old; `waits` is the days between today and the row's date,
+    so tonight's finds and the soonest events lead."""
     entries = store.query("SELECT * FROM newsfeed_items WHERE status = 'open' ORDER BY found_at DESC, id DESC")
-    return [{**row, "waits": (now() - parse(e["found_at"])).days} for row, e in zip(_rows(store, entries), entries)]
+    today = date.today()
+    return [{**row, "waits": abs((date.fromisoformat(row["when"][:10]) - today).days)} for row in _rows(store, entries)]
 
 
 def rows(store: Store, limit: int = ROW_LIMIT) -> list[dict]:
-    """Every entry still listed, newest first; the feed's Recent reads these."""
+    """The most recently found entries still listed, by their date, latest first; the feed's Recent reads these."""
     entries = store.query(
         f"SELECT * FROM newsfeed_items WHERE {LISTED} ORDER BY found_at DESC, id DESC LIMIT ?",
         (max(1, min(limit, 1000)),),
     )
-    return _rows(store, entries)
+    return sorted(_rows(store, entries), key=lambda r: r["when"], reverse=True)
 
 
 def context(store: Store, registry) -> str:

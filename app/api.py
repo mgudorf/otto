@@ -152,7 +152,7 @@ def tags_remove(request: Request, body: dict = Body(...)) -> dict:
 # ---- verbs ------------------------------------------------------------------------------------
 # One front door so the browser has a single call. The modules keep their own action routes; this finds the one the
 # named module offers and runs it, and reports what the module itself said about it.
-REMOVES = {"trash", "dismiss", "forget", "delete", "archive", "later", "end"}
+REMOVES = {"trash", "dismiss", "forget", "delete", "archive", "later", "end", "kill"}
 
 
 def _action(request: Request, module: str):
