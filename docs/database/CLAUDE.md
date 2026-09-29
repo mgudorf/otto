@@ -21,4 +21,54 @@
 
 ## Patches
 
-None open.
+### Routes and a query mode nothing reaches
+
+- Kind: defect
+- Where: `app/modules/database/routes.py` (`blank`, `table/{name}`, the per-module `rows` total in `_modules`), `app/modules/database/query.py` (`execute`, the `ddl` and `statements` fields of `_drive`'s answer), `database_queries.created_at`, `tests/test_database.py` (`test_execute_writes`, the `blank` and `table` calls)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: the editor runs SQL through `read`, `write` and `explain`, and nothing requests `blank` or `table/{name}`. `execute`, the read-write drive that once ran and wrote together, is left with one caller, `explain`, which hands it a single `EXPLAIN QUERY PLAN` that the read-only connection runs as well; its write, DDL and commit-by-statement behaviour, and the `ddl` and `statements` it reports, reach only `test_execute_writes`. `_modules` sums rows per module for a list that went with the page, and a saved query's `created_at` is written and never read. The Execution and Routes rows above still describe `execute`, `blank` and `table/{name}`.
+
+Expected: one read path, one write path, and the routes the page calls.
+
+Fix: `explain` runs through `read`; `execute`, its two fields, the two routes, the sum and their tests go.
+
+### A write whose script has its own BEGIN always fails
+
+- Kind: bug
+- Where: `app/modules/database/query.py` (`write`, `statements`)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: `write` opens a transaction and then runs the owner's statements one by one, `BEGIN` and `COMMIT` among them, so a script that brackets itself stops at "cannot start a transaction within a transaction" and rolls back. The docstring says the script lands whole "whatever the owner's own BEGIN said", and `execute`'s advised writing `BEGIN` and `COMMIT`.
+
+Expected: a script with its own `BEGIN` and `COMMIT` runs as one transaction, like any other.
+
+Fix: `write` drops a leading `BEGIN` and a trailing `COMMIT` or `END` before driving the rest inside its own transaction.
+
+### The store's size reads MB from 1 GB up to 1 TB
+
+- Kind: bug
+- Where: `app/modules/database/routes.py` (`_human`)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: after the loop has divided three times the number is in gigabytes, and the last line calls it GB only from 1024 up, so a 2.5 GB store reads "2.5 MB". The label reaches the agent through `numbers`. The store is far below 1 GB, so nothing shows it yet.
+
+Expected: the unit matches the number.
+
+Fix: the last line labels the number GB.
+
+### A saved query's row carries the caption "saved"
+
+- Kind: defect
+- Where: `app/modules/database/routes.py` (`_query_row`)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: every saved query shows " · saved" after its name, a caption its type and its place in the feed already say, against UI 1 of the repo's CLAUDE.md.
+
+Expected: the name alone.
+
+Fix: drop the `snip`, and the Rows row above says so.

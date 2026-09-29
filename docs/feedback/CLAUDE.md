@@ -19,4 +19,54 @@ A `feedback` control in the header of every page records a change the owner want
 
 ## Patches
 
-None open.
+### Feedback filed on anything but a row can never be listed
+
+- Kind: bug
+- Where: `app/modules/feedback/queue.py` (`SHELL_PAGES`, `names`, the `pages/<module>.js` match), `app/static/point.js` (`feedback`), `.claude/skills/feedback-queue/SKILL.md`, `README.md` (the module names for `feedback`), `app/modules/feedback/agent.md`
+- Found: 09-22-2026, the stale-code audit, against the live database opened read-only
+- Status: open
+
+What happens: point mode files a note on anything that is not a row under the page `otto`. The queue tool accepts the module names, `app`, and the retired `activity` and `settings`, so `list otto` stops as unknown and `list app` does not match `otto`. Both open notes in the live database carry `otto`, and `/feedback-queue` can neither show nor clear them. The skill, the README and the filer's prompt still name the two retired pages, and the tool still matches patches that name `pages/<module>.js`, a folder that is gone.
+
+Expected: every note the owner files is listed under the doc it belongs to.
+
+Fix: `names` takes `otto` in place of `activity` and `settings` and reads it as the platform doc, as it read those two; the `pages/` match goes; the skill, the README and `agent.md` follow.
+
+### Point mode's label and quote never reach the filer
+
+- Kind: bug
+- Where: `app/static/point.js` (`feedback`), `app/modules/feedback/routes.py` (`add`, `ITEM_TEXT_CHARS`, the selected-item block of the filing prompt), `feedback_items.item_text`
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: the popover names what was pointed at down to the paragraph and shows the quote, and the note it sends carries only `{module, id}`, or no item at all for anything but a row. `add` stores the item's `text` as `item_text`, which nothing sends any more, so every note has none: the filer learns a module and an id, or the page `otto`, beside the owner's words.
+
+Expected: the filer reads what the owner pointed at.
+
+Fix: `feedback` sends `ref.label` and `ref.quote` as the item's text, for a row and for everything else.
+
+### The filer's orders sit in every drawer prompt
+
+- Kind: defect
+- Where: `app/modules/feedback/__init__.py` (the manifest's `agent`), `app/modules/feedback/agent.md`, `app/api.py` (`_agents`), `tests/test_app.py::test_otto_is_the_one_agent`
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: Feedback declares an agent so its filing run has a prompt and tools, and `_agents` folds every declared agent into the drawer. So every drawer turn's prompt carries the filer's orders, "You write no files" and "Reply with only the JSON object the note asks for. No prose before or after it", beside Chat's and Science's leave to write files and answer in prose. Feedback has no facet, so Settings offers no switch that would take it out.
+
+Expected: the drawer's prompt holds what the drawer's agent does.
+
+Fix: the filing rules move into the note the filing run already builds, and `agent.md` keeps only what Feedback is; or `_agents` skips a module whose agent serves only a one-off run.
+
+### Routes and columns nothing reaches
+
+- Kind: defect
+- Where: `app/modules/feedback/routes.py` (the `retry` verb, `GET recent` and `RECENT`, `GET list`), `feedback_items.filed_at` and `job_id`, `tests/test_app.py::test_feedback_end_to_end`
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: the header panel that listed a page's notes and retried a failed one went with the pages. Feedback has no rows, so no row offers `retry`, and nothing requests `recent` or `list`; `filed_at` and `job_id` are written for `list` alone. A filing that fails therefore stays failed with no way to retry it. This doc's Built section still describes the header control, `page=False`, the rail and the panel.
+
+Expected: a failed filing can be retried, and nothing is served for no one.
+
+Fix: `retry` gets a place (the queue tool could offer it on a failed note); `recent`, `list` and the two columns go; the Built section is rewritten for point mode.

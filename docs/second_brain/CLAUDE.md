@@ -45,3 +45,29 @@ What happens: `Accept` and `Dismiss` on a suggestion both do the same thing, sta
 Expected: accepting an action item leaves the owner with the item, presumably a `task` row carrying the suggestion's text and a link to the items it came from.
 
 Fix: decide whether `accept` writes a `task` row (text from the suggestion, tagged from `item_ids`) and returns its id so the page can open it; if it does, the event says which item it created, and `Dismiss` stays a bare status stamp. Options weighed on 2026-09-17: Accept creates a `task` item tagged from its sources (recommended); Accept prefills a capture; the suggestion stays under Review until done; leave as is (chosen for now).
+
+### Code nothing reaches
+
+- Kind: defect
+- Where: `app/modules/second_brain/routes.py` (`blank`), `app/modules/second_brain/tasks.py` (the `second_brain.suggest` cursor), `second_brain_suggestions.item_ids`, `tests/test_second_brain.py` (the `blank` calls, the cursor assertion, the unused `JobFailed` import)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: nothing requests `blank`. The suggest run writes a cursor nothing reads. Every suggestion stores the ids of the items it came from, and nothing reads them either: `second_brain_suggestions` lists suggestions without them, and a suggestion row carries no `related`. The Tools row above says the drawer is the only way to capture; point mode's Capture posts `action/capture` too.
+
+Expected: Entry serves what the feed, the verbs, the tools and the clock use.
+
+Fix: `blank`, the cursor and the import go. `item_ids` stays for "Accepting a suggestion records the decision and nothing else", which would read it; meanwhile it can become the row's `related`, so a suggestion's sources show under it.
+
+### A suggestion's page is empty under its title
+
+- Kind: bug
+- Where: `app/static/core.js` (`contentEl`, the `suggestion` case), `app/modules/second_brain/routes.py` (`_suggestion_item`)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: the renderer draws a suggestion's `body`, and no suggestion carries one, so the page shows the text in its head and nothing below. The platform doc's table says a suggestion is drawn as its prose.
+
+Expected: the suggestion reads as prose on its page.
+
+Fix: `_suggestion_item` sends the text as `body`, escaped, the way Newsfeed sends a summary.

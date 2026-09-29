@@ -23,11 +23,11 @@ Graph carries no facet and has no `rows` hook: a tag is how items are found, not
 ### The brain does not read the graph
 
 - Kind: gap
-- Where: `app/static/brain.js` (the tag nodes, built from `ITEMS`), `app/modules/graph/routes.py` (`graph`, `numbers`), `app/api.py` (the `/api/brain` route that was not built)
-- Found: 09-21-2026, the one-page change
+- Where: `app/static/brain.js` (the tag nodes, built from `ITEMS`), `app/modules/graph/routes.py` (`graph` and its `_match`, `numbers`, `context`), `app/modules/graph/tasks.py` (the `graph.rebuild` cursor), `app/api.py` (the `/api/brain` route that was not built)
+- Found: 09-21-2026, the one-page change; corrected 09-22-2026, the stale-code audit
 - Status: open
 
-What happens: the brain places every tag it draws from the rows the feed is holding, so it sees only the tags on the two hundred newest rows and the queue, and it knows nothing of how tags relate. The map that does know — `graph_nodes` and `graph_edges`, rebuilt every fifteen minutes — reaches the browser through nothing: `/api/graph` and `/api/graph/left` have no caller, `/api/brain` does not exist, and `numbers` is no longer read because the counts cover faceted modules only. A tag whose items have scrolled out of the feed is absent from the brain, an edge is never drawn, and nothing says when the map was last rebuilt.
+What happens: the brain places every tag it draws from the rows the feed is holding, so it sees only the tags on the two hundred newest rows and the queue, and it knows nothing of how tags relate. The map that does know — `graph_nodes` and `graph_edges`, rebuilt every fifteen minutes — reaches the browser through nothing: `/api/graph/graph` has no caller (`/api/graph/left` is gone), `/api/brain` does not exist, and `numbers` is read by nothing, because Home's context and counts cover faceted modules only. The `graph.rebuild` cursor that would say when the map was built is read only by that route and by Graph's `context`, which reaches no agent either. A tag whose items have scrolled out of the feed is absent from the brain, an edge is never drawn, and nothing says when the map was last rebuilt.
 
 Expected: the brain is the graph, drawn. Every tag the rebuild knows is a node whether or not its items are in the feed, the edges position it, and a stale map is tellable from a fresh one.
 
@@ -36,12 +36,12 @@ Fix: build `GET /api/brain` over `graph_nodes`, `graph_edges` and `all_tags`, re
 ### Graph keeps its own notion of a tag
 
 - Kind: defect
-- Where: `app/modules/graph/build.py` (`sources`), `app/modules/graph/tools.py` (`graph_merge`, `graph_restore`), `app/modules/graph/routes.py` (`_item`, `item/{tag}`, the `owned` tags in `graph`)
-- Found: 09-21-2026, the owner asking for one notion of tag
+- Where: `app/modules/graph/build.py` (`sources`), `app/modules/graph/tools.py` (`graph_merge`, `graph_restore`), `app/modules/graph/routes.py` (`_row`, `_item`, `_when`, `item/{tag}`, the `owned` tags in `graph`)
+- Found: 09-21-2026, the owner asking for one notion of tag; widened 09-22-2026, the stale-code audit
 - Status: open
 
-What happens: `graph_merge` folds one tag into another only inside Graph's own tables. The rows, the catalog, the search bar and the brain still see two tags where Graph sees one. Graph also serves a tag as a row, `item/{tag}` with an empty `fixed` against the contract's one facet, and puts the tags written on a tag onto its nodes, so a tag can carry tags. Nothing calls either route.
+What happens: `graph_merge` folds one tag into another only inside Graph's own tables. The rows, the catalog, the search bar and the brain still see two tags where Graph sees one. Graph also serves a tag as a row, `item/{tag}` with an empty `fixed` against the contract's one facet, and puts the tags written on a tag onto its nodes, so a tag can carry tags. Nothing calls either route, and the tags they read are always none: `/api/tags/add` is the only writer of `app_tags`, and Graph has no rows to tag. `_row`, an older twin of `_item` still building the fields `text` and `stamp`, has no caller at all.
 
 Expected: a tag is one thing in every view, and a tag is a label that carries no tags.
 
-Fix: the merges fold in the one read path, `tags_for` and `all_tags`, instead of in `sources`, which keeps `graph_restore`; rewriting the tag in `app_tags` instead would make a merge final. `item/{tag}` and the `owned` tags go.
+Fix: the merges fold in the one read path, `tags_for` and `all_tags`, instead of in `sources`, which keeps `graph_restore`; rewriting the tag in `app_tags` instead would make a merge final. `item/{tag}`, `_row`, `_item`, `_when` and the `owned` tags go.

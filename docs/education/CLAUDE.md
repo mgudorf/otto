@@ -73,24 +73,24 @@ Fix: the owner decides whether it is a mode of Education or of Newsfeed; then on
 ### An answer given in the drawer is never stored
 
 - Kind: gap
-- Where: `app/modules/education/routes.py` `action/answer`, `_part_facts`, `_row`
-- Found: 09-21-2026, the one-page change
+- Where: `app/modules/education/routes.py` `action/answer`, `_part_facts`, `_row`; `grading.py` (`grade_brief`), `prompts/grade.md`, `tools.py` (`education_question`)
+- Found: 09-21-2026, the one-page change; widened 09-22-2026, the stale-code audit
 - Status: open
 
-What happens: answering is a message to Otto with the question and its next part named as the reference. `action/answer` is the only path that writes `education_question_parts.answer`, and nothing calls it, so the words are in the transcript and nowhere else. `started_at` is never stamped, `pct` counts stored answers and so reads 0 on a question that is fully graded, the tutor's context says every part's answer is awaited, and a resubmission cannot be compared with what was said before.
+What happens: answering is a message to Otto with the question and its next part named as the reference. `action/answer` is the only path that writes `education_question_parts.answer`, and nothing calls it, so the words are in the transcript and nowhere else. `started_at` is never stamped, `pct` counts stored answers and so reads 0 on a question that is fully graded, the tutor's context says every part's answer is awaited, and a resubmission cannot be compared with what was said before. The rubric of an ungraded part reaches no agent either: `grade_brief`, built only by `action/answer`, was its one carrier, and `education_question` and Education's context show a rubric only once a part is graded, so the drawer's tutor grades without it, though `agent.md` says the brief carries it.
 
 Expected: the answer the tutor grades is the answer the question holds.
 
-Fix: either the page grows the answer box back and posts `action/answer` (which already briefs the tutor and clears the part's grade), or `education_grade` takes the answer it graded and stores it with the score. The second makes the tutor the only witness of what was written, which is why the first is the shape to rebuild.
+Fix: either the page grows the answer box back and posts `action/answer` (which already briefs the tutor and clears the part's grade), or `education_grade` takes the answer it graded and stores it with the score. The second makes the tutor the only witness of what was written, which is why the first is the shape to rebuild. Either way the tutor needs the rubric before it grades: through the brief, or through `education_question` on an ungraded part. `action/answer` hands its turn to `pane_turn`, which opens an `education` session the drawer never lists, so the first way also means turning in the drawer's own tab.
 
 ### A topic cannot be added or retired, and recorded feedback is drawn nowhere
 
 - Kind: gap
 - Where: `app/modules/education/routes.py` `blank`, `action/add_topic`, `action/retire_topic`, `detail`'s `feedback`
-- Found: 2026-09-20, porting the page to the new shell; narrowed 09-21-2026, the one-page change
+- Found: 2026-09-20, porting the page to the new shell; narrowed 09-21-2026, the one-page change; corrected 09-22-2026, the stale-code audit
 - Status: open
 
-What happens: `blank` answers the per-topic progress and the two topic verbs still work, and nothing on screen reaches any of them, so the owner adds and retires a topic only by asking the tutor and sees a topic's completed count and average only in what the tutor says. `item/{id}` hands back the feedback the owner recorded about a question and the page draws the definitions, the premise and the parts alone, so those words are lost to view.
+What happens: `blank` answers the per-topic progress and the two topic verbs still work, and nothing on screen reaches any of them. The owner can add a topic only by asking the tutor, whose `education_add_topic` repeats `_add_topic`, and cannot retire one at all: no tool retires a topic, and `retired_at` is written only by the unreachable `retire_topic`. The owner sees a topic's completed count and average only in what the tutor says. `item/{id}` hands back the feedback the owner recorded about a question and the page draws the definitions, the premise and the parts alone, so those words are lost to view.
 
 Expected: the fourteen domains and their progress are the owner's to see and change, and the feedback given about a question reads beside it.
 
@@ -108,3 +108,16 @@ What happens: `_row_tags` puts the topic's name and the question's `topic_tag` a
 Expected: Education has no tag of its own. A question carries ordinary tags, one word each, given by the generator and the tutor like any agent's: `estimation`, `inference`, `probability`, `statistics`. The topic stays what the generator writes for and is never drawn as a tag, so it shows nowhere on the page.
 
 Fix: `topic_tag` goes wherever it is named: the column through the data-migration skill, the generator's output shape and rule 13, the tool's argument, validation and the acronym check. The generator and `education_add_question` take `tags`, kept through `word_tags` and written to the one store of the platform entry "A tag lives in one of six stores"; `_row_tags` reads that store alone. The artboard's sample questions carry one-word tags.
+
+### Code nothing reaches
+
+- Kind: defect
+- Where: `app/modules/education/routes.py` (`action/generate` with `RESOURCE_LLM`, `_reason` and the `JobFailed` and `questions` imports; the `ACTIVE` import; `item_route`'s `opened_at` stamp; the rows' `topic`, `difficulty` and `score`), `questions.py` (`open_question`), `tools.py` (`register`'s `config=None`, `config or load()` and the `load` import), `grading.py` (`complete`'s ungraded-part error), `tests/test_education.py` (the `generate` calls, the assertions on the tutor's context)
+- Found: 09-22-2026, the stale-code audit
+- Status: open
+
+What happens: `action/generate` writes one question on demand through the nightly generator's own steps; its fixed path is one `/api/verb` cannot reach, nothing else calls it, and this doc's Routes row still lists it. Opening a question stamps `opened_at` so that Education's context can show "the question open on the page", but that context now reaches only the nightly generator, which has no use for it: the drawer's Current state is Home's. The feed rows carry `topic`, `difficulty` and `score`, which the page never reads. `register` falls back to `load()` when the daemon passes no config, and the daemon always passes one; its comment says the opposite. `complete` refuses a quiz with ungraded parts, which `_complete` has already refused. `ACTIVE` is imported and unused.
+
+Expected: Education serves what the feed, the verbs, the tools and the nightly run use.
+
+Fix: delete them and their tests. Whether the item open in the drawer should reach the agent's prompt is the platform's question, in "Five modules build a Current state that no agent receives".
